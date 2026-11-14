@@ -7,8 +7,9 @@
  * 三条规则：
  * 1. **相邻两列**：出门 → 在列间车道竖直落到目标行 → 进线。列间是空的，横竖各一段就够。
  * 2. **跨列长边**（中间还夹着一列）：如果目标行的高度上正好有中间列的卡片，直线会从卡片
- *    身上穿过去，改成从上方或下方绕一条横带过去（就近选边）；就近没有便宜的横带
- *    （要绕一大圈才算躲开），就统一走所有卡片上方的顶部留白——宁可画布高一点，也不穿卡片。
+ *    身上穿过去，改成从上方或下方绕一条横带过去——就近选边，卡片之间的空当照样能穿。
+ *    （曾经还有"从所有卡片上方的顶部留白统一横穿"的兜底，实测它永远比横带更绕：
+ *    横带最上面那条候选就是最上那张卡的上沿，本来就比顶部通道近。）
  * 3. **回边 / 自引用**（目标在左边或同一列）：从卡片上方绕过去再折回左侧入场。
  */
 export interface Pt {
@@ -36,8 +37,6 @@ export interface FkRoute {
   laneCount: number;
   /** 本镜片所有卡片：用来判断长边会不会横穿中间列的卡片。 */
   cards?: CardRect[];
-  /** 顶部通道的 y（所有卡片之上）。给了它，长边绕不过去时可以改走这里，而不是硬穿卡片。 */
-  topY?: number;
 }
 
 /** 车道间距：同一源字段的多条线在这个宽度上依次排开。 */
@@ -46,8 +45,6 @@ const LANE_STEP = 10;
 const BAND_GAP = 22;
 /** 卡片之间至少要留这么宽才开车道。 */
 const MIN_LANE = 26;
-/** 横带比"直接跌到目标行"多走超过这么多，就不如干脆从顶部绕一次。 */
-const MAX_BAND_DETOUR = 90;
 
 export function routeFkPath(route: FkRoute): Pt[] {
   const { sx, sy, tx, ty, laneCount } = route;
@@ -122,39 +119,14 @@ export function routeFkPath(route: FkRoute): Pt[] {
             ? bestBand + offset
             : bestBand;
 
-  // 就近横带优先（截图中 orders→order_items 从 payments 与 products 之间穿过去的走法）。
-  // 判定用"比直线多绕多少"，而不是绝对距离：横带本来就夹在两端之间时，它只走 |sy-ty|，
-  // 哪怕两端差着三百像素也是最优解 —— 拿绝对值去卡会把它误判成"绕太远"，
-  // 结果拐出一个一路顶到画布上沿、再折回目标的大回环。
-  const topY = route.topY;
-  const direct = Math.abs(ty - sy);
-  if (band !== undefined && cost(band) <= direct + MAX_BAND_DETOUR) {
-    return [
-      { x: sx, y: sy },
-      { x: laneX, y: sy },
-      { x: laneX, y: band },
-      { x: inX, y: band },
-      { x: inX, y: ty },
-      { x: tx, y: ty },
-    ];
-  }
-  if (topY !== undefined) {
-    // 顶部通道：上到所有卡片之上 → 横穿 → 从目标列左边界下来。任何卡片都碰不到。
-    return [
-      { x: sx, y: sy },
-      { x: laneX, y: sy },
-      { x: laneX, y: topY },
-      { x: inX, y: topY },
-      { x: inX, y: ty },
-      { x: tx, y: ty },
-    ];
-  }
-
+  // 就近横带：候选里取 "sy → 横带 → ty" 总路程最短的一条。
+  // 判定用总路程而不是"离某一个端点近"，否则会挑中夹在两端之间、但要多折一趟的那种。
+  const chosen = band ?? candidates[0];
   return [
     { x: sx, y: sy },
     { x: laneX, y: sy },
-    { x: laneX, y: band ?? candidates[0] },
-    { x: inX, y: band ?? candidates[0] },
+    { x: laneX, y: chosen },
+    { x: inX, y: chosen },
     { x: inX, y: ty },
     { x: tx, y: ty },
   ];

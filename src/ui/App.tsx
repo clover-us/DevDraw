@@ -37,7 +37,7 @@ import {
   type ErField,
   type FkLink,
 } from '../core/er';
-import { columnKey, packAround, reflowColumn } from '../core/er-arrange';
+import { packAround, reflowColumn } from '../core/er-arrange';
 import { newEdgeId, newNodeId } from '../core/id';
 import { layoutProjection, NODE_WIDTH, nodeHeight, type Positions } from '../core/layout';
 import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
@@ -670,27 +670,6 @@ export function App() {
     return out;
   }, [projection, fkLinks, fieldVisible]);
 
-  /** 顶部通道：跨列长边（中间夹着一整列）各占一条道，排在所有卡片之上。 */
-  const topChannel = useMemo(() => {
-    const out: Record<string, number> = {};
-    if (lens !== 'er') return out;
-    const tops = cardRects.map((r) => r.top);
-    if (tops.length === 0) return out;
-    const base = Math.min(...tops) - 22;
-    const longs = Object.entries(projection.edges)
-      .filter(
-        ([, e]) =>
-          e.type === 'fk' &&
-          Math.abs(columnKey(positionFor(e.from).x) - columnKey(positionFor(e.to).x)) > 1,
-      )
-      .map(([id]) => id)
-      .sort();
-    longs.forEach((id, i) => {
-      out[id] = base - i * 10;
-    });
-    return out;
-  }, [lens, cardRects, projection, positionFor]);
-
   /**
    * 同一源字段散出去的多条外键：给每条分一条竖向车道（lane），否则它们的竖段会叠成一根。
    * 按目标卡片的高度排序分配，扇面因此不会自己跟自己交叉。
@@ -776,8 +755,6 @@ export function App() {
             fieldLevel: link?.fieldLevel === true,
             ortho: lens === 'er',
             cards: lens === 'er' ? cardRects : undefined,
-            // 跨列长边绕不开中间列时走顶部留白，而不是硬穿卡片。
-            topY: lens === 'er' ? topChannel[id] : undefined,
             lane: routing?.lane ?? 0,
             laneCount: routing?.laneCount ?? 1,
             showSourceTag: routing?.showSourceTag !== false,
@@ -786,7 +763,7 @@ export function App() {
           },
         };
       }),
-    [projection, model, fkAnchors, edgeRouting, impactedEdges, highlightEdges, selectEdge, selectedEdge, lens, cardRects, topChannel],
+    [projection, model, fkAnchors, edgeRouting, impactedEdges, highlightEdges, selectEdge, selectedEdge, lens, cardRects],
   );
 
   // 受控画布：onNodesChange/onEdgesChange 实时应用拖拽/选择变更（修复"拖动落地才动"）。

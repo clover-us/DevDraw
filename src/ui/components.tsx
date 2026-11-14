@@ -407,8 +407,6 @@ export interface DevDrawEdgeData extends Record<string, unknown> {
   ortho?: boolean;
   /** 本镜片所有卡片的包围盒：正交走线靠它判断会不会横穿别家卡片。 */
   cards?: CardRect[];
-  /** 顶部通道的 y（所有卡片之上）：跨列长边绕不开中间列时改走这里。 */
-  topY?: number;
   onSelect: (edgeId: string) => void;
 }
 
@@ -468,7 +466,7 @@ export function DevDrawEdge(props: EdgeProps) {
   // 否则一条斜的贝塞尔会从别的表卡片和车道上横穿过去，比没连字段还乱。
   const ortho = d.edgeType === 'fk' && d.ortho === true;
   const points = ortho
-    ? routeFkPath({ sx: sourceX, sy: sourceY, tx: targetX, ty: targetY, lane, laneCount, cards: d.cards, topY: d.topY })
+    ? routeFkPath({ sx: sourceX, sy: sourceY, tx: targetX, ty: targetY, lane, laneCount, cards: d.cards })
     : null;
 
   let path: string;
