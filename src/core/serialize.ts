@@ -18,7 +18,7 @@ function sortKeys<T>(value: T): T {
   return value;
 }
 
-/** 顶层固定键序：schemaVersion → name → nodes → edges → groups。 */
+/** 顶层固定键序：schemaVersion → name → nodes → edges → groups → components。 */
 export function serializeModel(model: Model): string {
   const ordered: Record<string, unknown> = {
     schemaVersion: model.schemaVersion,
@@ -27,6 +27,7 @@ export function serializeModel(model: Model): string {
     edges: sortKeys(model.edges),
   };
   if (model.groups) ordered.groups = sortKeys(model.groups);
+  if (model.components) ordered.components = sortKeys(model.components);
   return JSON.stringify(ordered, null, 2) + '\n';
 }
 
@@ -45,6 +46,7 @@ export function deserializeModel(text: string): Model {
     nodes: raw.nodes as Record<string, ModelNode>,
     edges: raw.edges as Record<string, ModelEdge>,
     ...(raw.groups ? { groups: raw.groups } : {}),
+    ...(raw.components ? { components: raw.components } : {}),
   };
 }
 

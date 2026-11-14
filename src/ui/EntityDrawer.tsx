@@ -4,13 +4,15 @@
  * 新建实体走独立创建态。所有变更经 applyPatchChecked / applyPatchesChecked 守门。
  */
 import { useEffect, useState, type ReactNode } from 'react';
+import { componentCatalog, nodeComponent, nodeGlyph } from '../core/components';
 import { newEdgeId, newNodeId } from '../core/id';
 import { applyPatchChecked, applyPatchesChecked } from '../core/patch';
 import { columnImpact } from '../core/reasoners/er';
 import type { Finding, QuestionOption } from '../core/reasoners/types';
 import { EDGE_TYPES, NODE_TYPES, type LensDef, type Projection } from '../core/registry';
 import { edgeDependency, type SimulationResult } from '../core/simulate';
-import type { DependencyMode, EdgeType, Model, NodeType } from '../core/types';
+import type { ComponentDef, DependencyMode, EdgeType, Model, ModelNode, NodeType } from '../core/types';
+import { GLYPH_LIST, Glyph } from './glyphs';
 import { FindingCard, MODE_INFO, MODES, nodeName } from './inspect';
 import { ArrowRightIcon, CloseIcon, LinkIcon, PlusIcon, TrashIcon } from './icons';
 
@@ -35,6 +37,9 @@ interface EntityDrawerProps {
 
 const NODE_TYPE_LIST = Object.values(NODE_TYPES);
 const EDGE_TYPE_LIST = Object.values(EDGE_TYPES);
+
+/** 这些架构实体可在抽屉里换组件身份 / 图标（语义底座不变）。 */
+const APPEARANCE_TYPES = new Set<NodeType>(['Service', 'Database', 'Queue', 'Endpoint', 'ExternalSystem', 'Actor']);
 
 function fieldsOf(model: Model, tableId: string): Array<[string, string]> {
   const out: Array<[string, string]> = [];
@@ -286,6 +291,10 @@ export function EntityDrawer(props: EntityDrawerProps) {
         <Section title="名称">
           <input className="dd-input" value={node.name} onChange={(e) => renameNode(id, e.target.value)} />
         </Section>
+
+        {APPEARANCE_TYPES.has(node.type) && (
+          <ComponentAppearance model={model} node={node} nodeId={id} updateNode={updateNode} />
+        )}
 
         {node.type === 'Table' && (
           <TableFields
@@ -585,5 +594,69 @@ function FieldEditor({
         )}
       </Section>
     </>
+  );
+}
+
+/** 组件外观：换组件身份（语义底座不变）或直接挑图标。改动写进 node.attrs，推演照算。 */
+function ComponentAppearance({
+  model,
+  node,
+  nodeId,
+  updateNode,
+}: {
+  model: Model;
+  node: ModelNode;
+  nodeId: string;
+  updateNode: (id: string, attrs: Record<string, string | number | boolean>) => void;
+}) {
+  const current = nodeComponent(model, node);
+  const glyph = nodeGlyph(model, node);
+  const options = componentCatalog(model).filter((c) => c.baseType === node.type);
+  const componentId = typeof node.attrs?.component === 'string' ? node.attrs.component : '';
+
+  const pickComponent = (comp: ComponentDef | undefined) => {
+    if (!comp) updateNode(nodeId, { component: '', icon: '' });
+    else updateNode(nodeId, { component: comp.id, icon: comp.icon });
+  };
+
+  return (
+    <Section title="组件外观">
+      <div className="dd-comp-preview">
+        <span className="dd-comp-glyph">
+          <Glyph id={glyph} size={26} />
+        </span>
+        <span className="dd-comp-text">
+          <span className="dd-comp-name">{current?.name ?? NODE_TYPES[node.type].label}</span>
+          <span className="dd-comp-desc">{current?.description ?? '按语义类型显示默认图标'}</span>
+        </span>
+      </div>
+      <label className="dd-field-label">组件身份（不改语义底座，推演照算）</label>
+      <select
+        className="dd-input"
+        value={componentId}
+        onChange={(e) => pickComponent(options.find((c) => c.id === e.target.value))}
+      >
+        <option value="">按语义类型（默认图标）</option>
+        {options.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+      <label className="dd-field-label">或直挑图标</label>
+      <div className="dd-glyph-grid dd-glyph-grid-sm">
+        {GLYPH_LIST.map((g) => (
+          <button
+            key={g.id}
+            className={`dd-glyph-cell${glyph === g.id ? ' selected' : ''}`}
+            onClick={() => updateNode(nodeId, { icon: g.id })}
+            title={g.label}
+            aria-pressed={glyph === g.id}
+          >
+            <Glyph id={g.id} size={18} />
+          </button>
+        ))}
+      </div>
+    </Section>
   );
 }

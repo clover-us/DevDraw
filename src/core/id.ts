@@ -83,6 +83,11 @@ export function newEdgeId(type: string, now: number = Date.now()): string {
   return `${prefix}_${ulidBody(now)}`;
 }
 
+/** 生成自定义组件 id，如 comp_01JABC...。 */
+export function newComponentId(now: number = Date.now()): string {
+  return `comp_${ulidBody(now)}`;
+}
+
 /** 把任意显示名转成可读 slug（仅用于文件名/展示，不作唯一 id）。 */
 export function slugify(name: string): string {
   return (

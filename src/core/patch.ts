@@ -4,7 +4,7 @@
  * 手动编辑、决策卡片、AI 草稿、未来的 CRDT 同步都复用这一个咽喉点。
  * 不可变：返回新模型，绝不修改入参。
  */
-import type { EdgeAttrs, Model, ModelEdge, ModelNode } from './types';
+import type { ComponentDef, EdgeAttrs, Model, ModelEdge, ModelNode } from './types';
 import { checkIntegrity } from './validate';
 
 export type Patch =
@@ -13,7 +13,10 @@ export type Patch =
   | { op: 'add-node'; id: string; node: ModelNode }
   | { op: 'remove-node'; id: string }
   | { op: 'add-edge'; id: string; edge: ModelEdge }
-  | { op: 'remove-edge'; id: string };
+  | { op: 'remove-edge'; id: string }
+  | { op: 'add-component'; id: string; component: ComponentDef }
+  | { op: 'update-component'; id: string; component: ComponentDef }
+  | { op: 'remove-component'; id: string };
 
 export function applyPatch(model: Model, patch: Patch): Model {
   switch (patch.op) {
@@ -74,6 +77,21 @@ export function applyPatch(model: Model, patch: Patch): Model {
       const edges = { ...model.edges };
       delete edges[patch.id];
       return { ...model, edges };
+    }
+    case 'add-component': {
+      if (model.components?.[patch.id]) throw new Error(`add-component: already exists: ${patch.id}`);
+      return { ...model, components: { ...model.components, [patch.id]: patch.component } };
+    }
+    case 'update-component': {
+      if (!model.components?.[patch.id]) throw new Error(`update-component: not found: ${patch.id}`);
+      return { ...model, components: { ...model.components, [patch.id]: patch.component } };
+    }
+    case 'remove-component': {
+      if (!model.components?.[patch.id]) throw new Error(`remove-component: not found: ${patch.id}`);
+      const components = { ...model.components };
+      delete components[patch.id];
+      // 不级联删节点：节点已把 icon 快照进 attrs.icon，删组件不破坏已有建模。
+      return { ...model, components };
     }
   }
 }

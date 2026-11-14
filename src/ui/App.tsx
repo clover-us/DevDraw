@@ -6,7 +6,7 @@
  * 左侧导航轨把旧右栏拆成可导航分区（实体 / 发现 / 推演，默认收起）；
  * 右侧 = 语境抽屉（选中实体/边 → 详情 + 相关内容 + 上下文建模）。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -15,19 +15,23 @@ import {
   ReactFlow,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   type Connection,
   type Edge,
   type Node,
   type NodeMouseHandler,
 } from '@xyflow/react';
-import { newEdgeId } from '../core/id';
+import { nodeComponent, nodeFromComponent, nodeGlyph, resolveComponent } from '../core/components';
+import { newEdgeId, newNodeId } from '../core/id';
 import { layoutProjection, type Positions } from '../core/layout';
 import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
 import type { QuestionOption } from '../core/reasoners/types';
 import { getLens, LENSES, projectLens, type LensId } from '../core/registry';
 import { threeLensPositions } from '../core/sample-three-lens';
 import { edgeDependency, simulate, type SimulationResult } from '../core/simulate';
-import type { DependencyMode, EdgeType, Model } from '../core/types';
+import type { ComponentDef, DependencyMode, EdgeType, Model } from '../core/types';
+import { ComponentEditor } from './ComponentEditor';
+import { COMPONENT_MIME, ComponentLibrary } from './ComponentLibrary';
 import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData, type FieldRow } from './components';
 import { EntityDrawer } from './EntityDrawer';
 import { RedoIcon, UndoIcon } from './icons';
@@ -100,6 +104,7 @@ export function App() {
   const project = useProject();
   const { model, setModel, setViews } = project;
   const theme = useTheme();
+  const { screenToFlowPosition } = useReactFlow();
   const [lens, setLens] = useState<LensId>('architecture');
   const [seeds, setSeeds] = useState<string[]>([]);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
@@ -111,9 +116,11 @@ export function App() {
   const [relayoutNonce, setRelayoutNonce] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   // 左导航：默认收起，仅图标轨；点分区展开对应面板。
-  const [section, setSection] = useState<NavSection>('entities');
+  const [section, setSection] = useState<NavSection>('library');
   const [navExpanded, setNavExpanded] = useState(false);
   const [createMode, setCreateMode] = useState(false);
+  // 自定义组件编辑器：null=关闭；{editing:null}=新建；{editing:comp}=编辑。
+  const [componentEditor, setComponentEditor] = useState<{ editing: ComponentDef | null } | null>(null);
 
   const lensDef = getLens(lens);
   const projection = useMemo(() => projectLens(model, lensDef), [model, lensDef]);
@@ -284,6 +291,8 @@ export function App() {
         data: {
           name: n.name,
           kind: n.type,
+          icon: nodeGlyph(model, n),
+          componentLabel: nodeComponent(model, n)?.name,
           state: result?.states[id] ?? 'ok',
           isSeed: seeds.includes(id),
           highlighted: highlightNodes.has(id),
@@ -412,6 +421,62 @@ export function App() {
     setCreateMode(false);
   }, [project]);
 
+  // ── 组件库：点添加 / 拖入画布 / 自定义组件 CRUD（语义底座稳定，图标是表现层）──
+  const addComponent = useCallback(
+    (comp: ComponentDef, position?: { x: number; y: number }) => {
+      const id = newNodeId(comp.baseType);
+      const node = nodeFromComponent(comp);
+      setModel((m) => applyPatchChecked(m, { op: 'add-node', id, node }));
+      if (position) persistPosition(id, position);
+      setSelectedNode(id);
+      setSelectedEdge(null);
+      setCreateMode(false);
+    },
+    [setModel, persistPosition],
+  );
+
+  const onDragOver = useCallback((e: DragEvent) => {
+    if (e.dataTransfer.types.includes(COMPONENT_MIME)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }, []);
+
+  const onDrop = useCallback(
+    (e: DragEvent) => {
+      const compId = e.dataTransfer.getData(COMPONENT_MIME);
+      if (!compId) return;
+      e.preventDefault();
+      const comp = resolveComponent(model, compId);
+      if (!comp) return;
+      addComponent(comp, screenToFlowPosition({ x: e.clientX, y: e.clientY }));
+    },
+    [model, screenToFlowPosition, addComponent],
+  );
+
+  const saveComponent = useCallback(
+    (comp: ComponentDef) => {
+      setModel((m) =>
+        applyPatchChecked(
+          m,
+          m.components?.[comp.id]
+            ? { op: 'update-component', id: comp.id, component: comp }
+            : { op: 'add-component', id: comp.id, component: comp },
+        ),
+      );
+      setComponentEditor(null);
+    },
+    [setModel],
+  );
+
+  const deleteComponent = useCallback(
+    (id: string) => {
+      setModel((m) => applyPatchChecked(m, { op: 'remove-component', id }));
+      setComponentEditor(null);
+    },
+    [setModel],
+  );
+
   const onModelChange = useCallback((next: Model) => setModel(next), [setModel]);
   const drawerOpen = createMode || selectedNode !== null || selectedEdge !== null;
 
@@ -523,7 +588,17 @@ export function App() {
           onToggleTheme={theme.toggle}
         />
         {navExpanded &&
-          (section === 'simulation' ? (
+          (section === 'library' ? (
+            <ComponentLibrary
+              model={model}
+              lens={lensDef}
+              onAdd={addComponent}
+              onCreateCustom={() => setComponentEditor({ editing: null })}
+              onEditCustom={(c) => setComponentEditor({ editing: c })}
+              onDeleteCustom={deleteComponent}
+              onClose={collapseNav}
+            />
+          ) : section === 'simulation' ? (
             <SimulationPanel
               model={model}
               lens={lensDef}
@@ -565,6 +640,8 @@ export function App() {
             onNodeDoubleClick={onNodeDoubleClick}
             onNodeDragStop={(_, node) => persistPosition(node.id, node.position)}
             onConnect={onConnect}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
             onEdgeClick={(_, edge) => selectEdge(edge.id)}
             onPaneClick={() => {
               setSelectedEdge(null);
@@ -593,7 +670,15 @@ export function App() {
           </ReactFlow>
           <div className="dd-hint">{HINTS[lens]}</div>
         </div>
-        {drawerOpen && (
+        {componentEditor ? (
+          <ComponentEditor
+            editing={componentEditor.editing}
+            onSave={saveComponent}
+            onDelete={deleteComponent}
+            onClose={() => setComponentEditor(null)}
+          />
+        ) : (
+          drawerOpen && (
           <EntityDrawer
             model={model}
             lens={lensDef}
@@ -612,6 +697,7 @@ export function App() {
             onChangeMode={changeEdgeMode}
             onClose={closeDrawer}
           />
+          )
         )}
       </div>
     </div>

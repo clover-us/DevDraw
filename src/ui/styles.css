@@ -1297,6 +1297,9 @@ select.dd-input {
   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 .dd-node-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 10px;
   color: var(--muted);
   letter-spacing: 0.08em;
@@ -1908,6 +1911,222 @@ select.dd-input {
 }
 .dd-file-btn:hover {
   border-color: var(--accent);
+}
+
+/* ---------- 图标化节点（架构卡片：glyph + 类型/组件名 + 名称） ---------- */
+.dd-node-arch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dd-node-glyph {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.dd-node-arch-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.dd-node-arch-text .dd-node-name {
+  margin-top: 1px;
+}
+.dd-node.state-degraded .dd-node-glyph {
+  background: var(--node-degraded-bg);
+  color: var(--warning);
+  border-color: var(--warning);
+}
+.dd-node.state-failed .dd-node-glyph {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.dd-table-glyph {
+  flex: none;
+  display: flex;
+  color: var(--accent);
+}
+
+/* ---------- 组件库面板 ---------- */
+.dd-comp-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: none;
+  cursor: grab;
+  text-align: left;
+  color: var(--text);
+  font-family: inherit;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.dd-comp-item:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+}
+.dd-comp-item:active {
+  cursor: grabbing;
+}
+.dd-comp-item.custom {
+  cursor: default;
+}
+.dd-comp-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font-family: inherit;
+}
+.dd-comp-glyph {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+.dd-comp-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.dd-comp-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dd-comp-desc {
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+.dd-comp-add {
+  flex: none;
+  display: flex;
+  color: var(--faint);
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+.dd-comp-item:hover .dd-comp-add {
+  opacity: 1;
+  color: var(--accent);
+}
+.dd-comp-actions {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+.dd-icon-btn.danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+.dd-library-foot {
+  margin: 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 10.5px;
+  color: var(--faint);
+  line-height: 1.5;
+}
+
+/* ---------- 自定义组件编辑器 ---------- */
+.dd-comp-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 11px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+.dd-comp-preview .dd-comp-glyph {
+  width: 46px;
+  height: 46px;
+}
+.dd-comp-preview .dd-comp-name {
+  font-size: 14px;
+}
+.dd-drawer-section.dd-grow {
+  flex: 1;
+  min-height: 0;
+}
+.dd-glyph-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 7px;
+}
+.dd-glyph-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 4px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-2);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.12s, color 0.12s, background 0.12s, box-shadow 0.12s;
+}
+.dd-glyph-cell:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.dd-glyph-cell.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+.dd-glyph-label {
+  font-size: 9.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.dd-glyph-cell.selected .dd-glyph-label {
+  color: var(--accent);
+}
+.dd-glyph-grid-sm {
+  grid-template-columns: repeat(8, 1fr);
+  gap: 5px;
+}
+.dd-glyph-grid-sm .dd-glyph-cell {
+  padding: 7px 0;
+  gap: 0;
 }
 
 /* ---------- 动效偏好 ---------- */

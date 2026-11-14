@@ -12,6 +12,11 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import type { DependencyMode, EdgeType, NodeState, NodeType } from '../core/types';
+import { DEFAULT_NODE_ICON } from '../core/components';
+import { Glyph } from './glyphs';
+
+/** 语义类型 → 兜底图标（节点无组件身份时）。 */
+const KIND_GLYPH = DEFAULT_NODE_ICON;
 
 /** 表卡片内的一行字段（从全模型 contains 边折叠而来）。 */
 export interface FieldRow {
@@ -35,6 +40,10 @@ export interface DevDrawNodeData extends Record<string, unknown> {
   initial?: boolean;
   fieldCount?: number;
   detail?: string;
+  /** 组件图标 glyph id（表现层，来自 node.attrs.icon 快照）。 */
+  icon?: string;
+  /** 组件名（如 Redis / Kafka），显示在类型行。 */
+  componentLabel?: string;
   /** ER 表卡片：内部字段行。 */
   fields?: FieldRow[];
   selectedFieldId?: string | null;
@@ -110,7 +119,9 @@ export function DevDrawNode({ id, data }: NodeProps) {
     body = (
       <>
         <div className="dd-table-head">
-          <span className="dd-node-kind">表</span>
+          <span className="dd-table-glyph">
+            <Glyph id={d.icon ?? 'table'} size={16} />
+          </span>
           <span className="dd-node-name">{d.name}</span>
           <span className="dd-table-count">{fields.length || d.fieldCount || 0} 列</span>
         </div>
@@ -162,18 +173,29 @@ export function DevDrawNode({ id, data }: NodeProps) {
   } else if (d.kind === 'Decision' || d.kind === 'Assumption' || d.kind === 'Note') {
     body = (
       <>
-        <div className="dd-node-kind">{KIND_LABEL[d.kind]}</div>
+        <div className="dd-node-kind">
+          <Glyph id={d.icon ?? KIND_GLYPH[d.kind]} size={13} />
+          {KIND_LABEL[d.kind]}
+        </div>
         <div className="dd-node-name">{d.name}</div>
         {d.detail && <div className="dd-knowledge-detail">{d.detail}</div>}
       </>
     );
   } else {
     body = (
-      <>
-        <div className="dd-node-kind">{KIND_LABEL[d.kind]}</div>
-        <div className="dd-node-name">{d.name}</div>
-        {d.isSeed && <div className="dd-seed-badge">失效源</div>}
-      </>
+      <div className="dd-node-arch-row">
+        <span className="dd-node-glyph">
+          <Glyph id={d.icon ?? KIND_GLYPH[d.kind]} size={22} />
+        </span>
+        <span className="dd-node-arch-text">
+          <span className="dd-node-kind">
+            {KIND_LABEL[d.kind]}
+            {d.componentLabel ? ` · ${d.componentLabel}` : ''}
+          </span>
+          <span className="dd-node-name">{d.name}</span>
+        </span>
+        {d.isSeed && <span className="dd-seed-badge">失效源</span>}
+      </div>
     );
   }
 

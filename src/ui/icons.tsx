@@ -202,3 +202,34 @@ export function RedoIcon(p: IconProps) {
     </svg>
   );
 }
+
+/** 组件库：积木格。 */
+export function LibraryIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />
+      <rect x="13.5" y="3.5" width="7" height="7" rx="1.5" />
+      <rect x="3.5" y="13.5" width="7" height="7" rx="1.5" />
+      <path d="M17 13.5v7M13.5 17h7" />
+    </svg>
+  );
+}
+
+/** 编辑：铅笔。 */
+export function PencilIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17z" />
+      <path d="M13.5 6.5l3 3" />
+    </svg>
+  );
+}
+
+/** 组件 / 拼图块。 */
+export function ComponentIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M10 4.5a1.5 1.5 0 0 1 3 0V6h3a1 1 0 0 1 1 1v3h1.5a1.5 1.5 0 0 1 0 3H17v3a1 1 0 0 1-1 1h-3v-1.5a1.5 1.5 0 0 0-3 0V18H7a1 1 0 0 1-1-1v-3H4.5a1.5 1.5 0 0 1 0-3H6V7a1 1 0 0 1 1-1h3z" />
+    </svg>
+  );
+}

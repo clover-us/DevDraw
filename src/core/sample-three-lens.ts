@@ -10,11 +10,28 @@
 import { sampleModel, samplePositions } from './sample';
 import type { Model } from './types';
 
+/** 架构节点 → 内置组件身份（图标由组件目录解析，语义底座不变，推演照算）。 */
+const ARCH_IDENTITY: Record<string, string> = {
+  n_user: 'actor',
+  n_gateway: 'gateway',
+  n_order: 'service',
+  n_payment: 'service',
+  n_risk: 'sentinel',
+  n_order_db: 'mysql',
+  n_events: 'kafka',
+  n_notify: 'service',
+};
+
 export const sampleThreeLensModel: Model = {
   schemaVersion: 1,
   name: '订单系统 · 三镜片',
   nodes: {
-    ...sampleModel.nodes,
+    ...Object.fromEntries(
+      Object.entries(sampleModel.nodes).map(([id, n]) => [
+        id,
+        ARCH_IDENTITY[id] ? { ...n, attrs: { ...n.attrs, component: ARCH_IDENTITY[id] } } : n,
+      ]),
+    ),
     // ── ER：表 ──
     t_orders: { type: 'Table', name: 'orders' },
     t_order_items: { type: 'Table', name: 'order_items' },

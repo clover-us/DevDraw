@@ -3,10 +3,10 @@
  * 把旧右栏那堆内容拆成三个可导航分区：实体 / 发现 / 推演。
  * 镜片切换留在顶部 header（用户要求顶部不变）。底部：主题切换 + 展开/收起。
  */
-import { ChevronLeftIcon, ChevronRightIcon, EntitiesIcon, FindingsIcon, LogoIcon, MoonIcon, SimulationIcon, SunIcon } from './icons';
+import { ChevronLeftIcon, ChevronRightIcon, EntitiesIcon, FindingsIcon, LibraryIcon, LogoIcon, MoonIcon, SimulationIcon, SunIcon } from './icons';
 import type { Theme } from './theme';
 
-export type NavSection = 'entities' | 'findings' | 'simulation';
+export type NavSection = 'library' | 'entities' | 'findings' | 'simulation';
 
 interface NavRailProps {
   section: NavSection;
@@ -20,6 +20,7 @@ interface NavRailProps {
 }
 
 const SECTIONS: Array<{ id: NavSection; label: string; Icon: typeof EntitiesIcon; hint: string }> = [
+  { id: 'library', label: '组件库', Icon: LibraryIcon, hint: '挑选高辨识度组件，点/拖入画布建模' },
   { id: 'entities', label: '实体', Icon: EntitiesIcon, hint: '浏览与建模当前镜片的实体' },
   { id: 'findings', label: '发现', Icon: FindingsIcon, hint: '模型顶嘴：推演器发现的问题与反问' },
   { id: 'simulation', label: '推演', Icon: SimulationIcon, hint: '失效推演：设失效源，看爆炸半径' },
