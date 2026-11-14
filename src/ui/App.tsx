@@ -150,6 +150,8 @@ export function App() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
   // 拖线松手时 onConnect 拿不到鼠标坐标，所以自己盯着指针（连线落点 = 当前指针处）。
   const pointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  // 切镜片 / 重新布局后要 fit 一次，但必须等 ELK 把坐标算完再 fit（否则框住的是旧坐标）。
+  const pendingFitRef = useRef(false);
   const [lastEdge, setLastEdge] = useState<Partial<Record<LensId, EdgeType>>>(readLastEdge);
   // 画布全屏：把画布元素本身扔进全屏，顶栏/导航暂时让位，Esc 退出。
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -190,26 +192,35 @@ export function App() {
   // 结构变化 / 切镜片 / 手动重新布局 → ELK 重算坐标（给没有人工摆位过的节点兜个底）。
   useEffect(() => {
     let cancelled = false;
-    void layoutProjection(projectionRef.current, lens, model).then((pos) => {
-      if (cancelled) return;
-      // 只采纳"还没有位置"的节点的坐标：新增一个节点不该把整张画布重新洗牌，
-      // 否则你刚双击落下的位置、刚看清的关系，全都会被下一帧挪走。
-      setAutoPos((prev) => {
-        const next = { ...prev };
-        for (const [id, p] of Object.entries(pos)) if (!next[id]) next[id] = p;
-        return next;
+    void layoutProjection(projectionRef.current, lens, model)
+      .then((pos) => {
+        if (cancelled) return;
+        // 只采纳"还没有位置"的节点的坐标：新增一个节点不该把整张画布重新洗牌，
+        // 否则你刚双击落下的位置、刚看清的关系，全都会被下一帧挪走。
+        setAutoPos((prev) => {
+          const next = { ...prev };
+          for (const [id, p] of Object.entries(pos)) if (!next[id]) next[id] = p;
+          return next;
+        });
+      })
+      .finally(() => {
+        if (cancelled) return;
+        // 坐标就位之后再 fit 一次：先 fit 再落位会把"旧坐标"框进视野，看着就是一堆散沙。
+        if (pendingFitRef.current) {
+          pendingFitRef.current = false;
+          setFitTick((t) => t + 1);
+        }
       });
-    });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structKey, lens, relayoutNonce]);
 
-  // 只有"整幅视角变了"（切镜片 / 手动重新布局）才 remount + fitView。
+  // 只有"整幅视角变了"（切镜片 / 手动重新布局）才 remount + fitView，而且必须等布局算完。
   // 新增一个节点不该把整张画布重新缩放挪走——否则「落在鼠标处」就白说了。
   useEffect(() => {
-    setFitTick((t) => t + 1);
+    pendingFitRef.current = true;
   }, [lens, relayoutNonce]);
   const findings = useMemo(() => lensDef.reasoner.run(model), [model, lensDef]);
   const result = useMemo(() => {
