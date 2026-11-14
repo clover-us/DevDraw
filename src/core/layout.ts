@@ -18,7 +18,7 @@ function getElk(): Promise<ELK> {
 }
 
 /** 节点固定宽度（与 CSS width 一致，box-sizing:border-box）。长文本在固定宽内换行，不再横向撑开。 */
-const NODE_WIDTH: Record<NodeType, number> = {
+export const NODE_WIDTH: Record<NodeType, number> = {
   Service: 190,
   Database: 190,
   Queue: 190,
@@ -49,7 +49,7 @@ function lineCount(text: string, contentWidth: number, fontSize: number): number
 }
 
 /** 节点估算高度：固定宽 + 文本换行行数 → ELK 预留正确竖向空间，长文本卡片不重叠。 */
-function nodeHeight(model: Model | undefined, id: string, type: NodeType, name: string): number {
+export function nodeHeight(model: Model | undefined, id: string, type: NodeType, name: string): number {
   if (type === 'Table') return tableHeight(model, id);
   const attrs = model?.nodes[id]?.attrs;
   const detail = typeof attrs?.detail === 'string' ? attrs.detail : '';

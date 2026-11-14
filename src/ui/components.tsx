@@ -87,13 +87,35 @@ function InlineName({
     if (renaming) {
       cancelRef.current = false;
       el.textContent = name;
-      el.focus();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-    } else if (el.textContent !== name) {
+      // 刚建出来的节点还挂在 React Flow 的测量/布局流水线上，这一刻的 focus 会落在
+      // 一个尚未接进文档的 span 上（于是静默失败）。所以重试到真正聚焦为止。
+      let tries = 0;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const grab = () => {
+        const node = ref.current;
+        if (!node) return;
+        node.focus();
+        if (document.activeElement !== node) return;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        if (timer) clearTimeout(timer);
+        timer = undefined;
+      };
+      grab();
+      const retry = () => {
+        if (document.activeElement === ref.current) return;
+        grab();
+        if (document.activeElement !== ref.current && tries++ < 20) timer = setTimeout(retry, 30);
+      };
+      if (document.activeElement !== el) timer = setTimeout(retry, 30);
+      return () => {
+        if (timer) clearTimeout(timer);
+      };
+    }
+    if (el.textContent !== name) {
       // 退出编辑：把 DOM 拉回模型值（取消时可能残留输入）。
       el.textContent = name;
     }

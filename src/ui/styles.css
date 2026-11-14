@@ -1621,6 +1621,13 @@ select.dd-input {
   opacity: 0.4;
   transition: opacity 0.15s, background 0.15s, border-color 0.15s;
 }
+/* 看得见的是 9px，能抓的是 23px：连线起点不该是"用放大镜找"的手艺活。 */
+.react-flow__handle::before {
+  content: '';
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+}
 .react-flow__node:hover .react-flow__handle,
 .react-flow__node.selected .react-flow__handle {
   opacity: 1;
@@ -2625,4 +2632,238 @@ select.dd-input {
 }
 .dd-session-actions .dd-primary {
   flex: 1;
+}
+
+/* =========================================================================
+   画布上的三个就地操作：双击新建 / 拖线选语义 / 右键菜单
+   共同点：都是"临时的浮层"——不点就走，不留在屏幕上。
+   ========================================================================= */
+
+.dd-popover-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: transparent;
+}
+
+.dd-popover {
+  position: fixed;
+  z-index: 91;
+  background: var(--overlay);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 18px 44px var(--shadow);
+  padding: 10px;
+  animation: dd-pop-in 0.12s ease-out;
+}
+
+@keyframes dd-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.dd-popover-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 2px 6px 8px;
+}
+
+.dd-popover-foot {
+  font-size: 10.5px;
+  color: var(--faint);
+  padding: 8px 6px 2px;
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+}
+
+/* ── 就地新建 ── */
+.dd-quick-create {
+  padding: 8px;
+}
+.dd-quick-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  padding: 8px 10px;
+  outline: none;
+}
+.dd-quick-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.dd-quick-list {
+  margin-top: 6px;
+  max-height: 232px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.dd-quick-empty {
+  padding: 14px 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+  text-align: center;
+}
+.dd-quick-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 8px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+.dd-quick-item.on {
+  background: var(--accent-soft);
+}
+.dd-quick-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--accent);
+}
+.dd-quick-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.dd-quick-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dd-quick-hint {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.dd-quick-foot {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--faint);
+  padding: 7px 4px 1px;
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+}
+
+/* ── 连线语义选择 ── */
+.dd-edge-opt {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 8px;
+  cursor: pointer;
+  color: var(--text);
+}
+.dd-edge-opt.on {
+  background: var(--accent-soft);
+}
+.dd-edge-opt-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.dd-edge-opt.on .dd-edge-opt-key {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.dd-edge-opt-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dd-edge-opt-id {
+  font-size: 10.5px;
+  color: var(--faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  flex: 0 0 auto;
+}
+
+/* ── 右键菜单 ── */
+.dd-ctx-menu {
+  padding: 6px;
+}
+.dd-ctx-title {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 4px 8px 6px;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.dd-ctx-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 8px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+}
+.dd-ctx-item:hover {
+  background: var(--accent-soft);
+}
+.dd-ctx-item.danger {
+  color: var(--danger);
+}
+.dd-ctx-item.danger:hover {
+  background: var(--danger-soft);
+}
+.dd-ctx-hint {
+  font-size: 10.5px;
+  color: var(--faint);
+}
+.dd-ctx-item.danger .dd-ctx-hint {
+  color: var(--danger);
+  opacity: 0.7;
 }

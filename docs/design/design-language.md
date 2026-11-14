@@ -65,9 +65,12 @@
 按钮（`dd-primary`/默认/`dd-icon-btn`/danger/disabled）、严重度 chip、镜片 tabs（`dd-lens-tab`+`dd-lens-badge`）、
 失效源 chip（`dd-seed-chip.on`+`dd-seed-dot`）、发现卡片（`FindingCard`，`src/ui/inspect.tsx`）、
 爆炸半径指标（`Metric`，绿 Δ=收缩/红 Δ=扩张）、ER 表卡片（字段入表，PK/FK 徽标）、表单控件、toggle、
-对话框（`dd-modal-overlay`/`dd-modal`：遮罩 + Esc 与点遮罩关闭 + 焦点圈在弹窗内 + 打开时锁背景滚动）。
-**抽屉=看，弹窗=填**：轻量语境详情（实体/边）走右侧抽屉 `dd-drawer`；需要专心填完的一件事（如自定义组件）走居中弹窗。
+对话框（`dd-modal-overlay`/`dd-modal`：遮罩 + Esc 与点遮罩关闭 + 焦点圈在弹窗内 + 打开时锁背景滚动）、
+就地浮层（`dd-popover-overlay`/`dd-popover`：双击空白新建 `QuickCreate`、拖线选语义 `EdgePicker`、右键菜单 `ContextMenu`）。
+**抽屉=看，弹窗=填，就地浮层=做下一个动作**：浮层贴着鼠标出现、不遮全屏、选完立刻消失，Esc 一律可退；
+它承载的是"我正要做的那一下"，所以只放动作与检索，不放说明长文与设置表单。
 **复用而非仿制**：参考页直接 import 真实组件。
+**不变量**：浮层里出现的数字键/箭头，就是键盘能直接按的东西（`EdgePicker` 的 1..n、`QuickCreate` 的 ↑↓）。
 
 ## 6. 暂不冻结（由真实复杂度驱动）
 

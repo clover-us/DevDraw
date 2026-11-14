@@ -5,7 +5,7 @@ import type { LensDef, LensId } from './types';
 
 export * from './types';
 export { NODE_TYPES } from './nodeTypes';
-export { EDGE_TYPES } from './edgeTypes';
+export { EDGE_TYPES, STRUCTURAL_EDGE_TYPES, connectableEdgeTypes } from './edgeTypes';
 export { LENSES } from './lenses';
 
 export function getLens(id: LensId): LensDef {

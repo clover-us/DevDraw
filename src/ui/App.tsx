@@ -6,7 +6,7 @@
  * 左侧导航轨把旧右栏拆成可导航分区（实体 / 发现 / 推演，默认收起）；
  * 右侧 = 语境抽屉（选中实体/边 → 详情 + 相关内容 + 上下文建模）。
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -23,21 +23,24 @@ import {
 } from '@xyflow/react';
 import { nodeComponent, nodeFromComponent, nodeGlyph, resolveComponent } from '../core/components';
 import { newEdgeId, newNodeId } from '../core/id';
-import { layoutProjection, type Positions } from '../core/layout';
+import { layoutProjection, NODE_WIDTH, nodeHeight, type Positions } from '../core/layout';
 import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
 import type { QuestionOption } from '../core/reasoners/types';
-import { getLens, LENSES, projectLens, type LensId } from '../core/registry';
+import { connectableEdgeTypes, getLens, LENSES, NODE_TYPES, projectLens, type LensId } from '../core/registry';
 import { threeLensPositions } from '../core/sample-three-lens';
 import { createSession, type ReasoningSession } from '../core/session';
 import { edgeDependency, simulate, type SimulationResult } from '../core/simulate';
-import type { ComponentDef, DependencyMode, EdgeType, Model } from '../core/types';
+import type { ComponentDef, DependencyMode, EdgeType, Model, NodeType } from '../core/types';
 import { ComponentEditor } from './ComponentEditor';
 import { COMPONENT_MIME, ComponentLibrary } from './ComponentLibrary';
+import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData, type FieldRow } from './components';
+import { EdgePicker } from './EdgePicker';
 import { EntityDrawer } from './EntityDrawer';
 import { RedoIcon, UndoIcon } from './icons';
 import { NavPanel } from './NavPanel';
 import { NavRail, type NavSection } from './NavRail';
+import { QuickCreate } from './QuickCreate';
 import { SessionsPanel } from './SessionsPanel';
 import { SimulationPanel } from './SimulationPanel';
 import { StorageBar } from './StorageBar';
@@ -48,17 +51,32 @@ const nodeTypes = { devdraw: DevDrawNode };
 const edgeTypes = { devdraw: DevDrawEdge };
 
 const HINTS: Record<LensId, string> = {
-  architecture: '拖拽摆位 · 从圆点拖出连线 · 双击改名 · 右键设失效源 · 点实体/边在右侧抽屉编辑',
-  er: '拖拽摆位 · 拖出外键 · 双击改名 · 点表内字段看改列牵连 · 红色外键=N:M 缺中间表',
-  'state-machine': '拖拽摆位 · 拖出迁移 · 双击改名 · 红色迁移=缺服务 · 在「发现」回答模型的反问',
+  architecture: '双击空白新建 · 从圆点拖出连线再选语义 · 双击改名 · 右键更多 · 点实体/边在右侧编辑',
+  er: '双击空白新建表 · 拖出外键 · 双击改名 · 点表内字段看改列牵连 · 红色外键=N:M 缺中间表',
+  'state-machine': '双击空白新建状态 · 从一个状态拖到另一个画迁移 · 双击改名 · 红色迁移=缺服务',
 };
 
-/** 拖拽连线时按镜片落的默认边类型（之后可在右侧抽屉改具体属性）。 */
+/** 拖拽连线时按镜片落的默认边类型（用户没选过的兜底；选过就记住上次）。 */
 const CONNECT_TYPE: Record<LensId, EdgeType> = {
   architecture: 'calls',
   er: 'fk',
   'state-machine': 'transition',
 };
+
+const LAST_EDGE_KEY = 'devdraw-last-edge';
+
+/** 记住"上次画的边类型"——重复画同一种线是最常见的情形。 */
+function readLastEdge(): Partial<Record<LensId, EdgeType>> {
+  try {
+    const raw = localStorage.getItem(LAST_EDGE_KEY);
+    return raw ? (JSON.parse(raw) as Partial<Record<LensId, EdgeType>>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** 可以当失效源的物理实体（知识卡片/状态之类挂上去没有意义）。 */
+const SEEDABLE = new Set<NodeType>(['Service', 'Database', 'Queue', 'Endpoint', 'ExternalSystem', 'Actor']);
 
 /** ER 表卡片内的字段行：从全模型 contains 边折叠而来（字段不再游离）。 */
 function fieldsOf(model: Model, tableId: string): FieldRow[] {
@@ -126,6 +144,13 @@ export function App() {
   const [componentEditor, setComponentEditor] = useState<{ editing: ComponentDef | null } | null>(null);
   // 会话分区里选中的存档（存档本身住在 reasoning/ 里，这里只是"正在看哪一份"）。
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // ── 三个直接落在画布上的交互：就地新建 / 连线选语义 / 右键菜单 ──
+  const [quickCreate, setQuickCreate] = useState<{ x: number; y: number; flow: { x: number; y: number } } | null>(null);
+  const [pendingConnect, setPendingConnect] = useState<{ from: string; to: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
+  // 拖线松手时 onConnect 拿不到鼠标坐标，所以自己盯着指针（连线落点 = 当前指针处）。
+  const pointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [lastEdge, setLastEdge] = useState<Partial<Record<LensId, EdgeType>>>(readLastEdge);
 
   // 项目加载完：把架构镜片存的场景恢复回来 —— what-if 假设不该因为刷新就消失。
   useEffect(() => {
@@ -150,19 +175,30 @@ export function App() {
     return `${lens}|${nodes}|${edges}`;
   }, [projection, lens]);
 
-  // 结构变化 / 切镜片 / 手动重新布局 → ELK 重算坐标，随后 remount + fitView。
+  // 结构变化 / 切镜片 / 手动重新布局 → ELK 重算坐标（给没有人工摆位过的节点兜个底）。
   useEffect(() => {
     let cancelled = false;
     void layoutProjection(projectionRef.current, lens, model).then((pos) => {
       if (cancelled) return;
-      setAutoPos(pos);
-      setFitTick((t) => t + 1);
+      // 只采纳"还没有位置"的节点的坐标：新增一个节点不该把整张画布重新洗牌，
+      // 否则你刚双击落下的位置、刚看清的关系，全都会被下一帧挪走。
+      setAutoPos((prev) => {
+        const next = { ...prev };
+        for (const [id, p] of Object.entries(pos)) if (!next[id]) next[id] = p;
+        return next;
+      });
     });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structKey, lens, relayoutNonce]);
+
+  // 只有"整幅视角变了"（切镜片 / 手动重新布局）才 remount + fitView。
+  // 新增一个节点不该把整张画布重新缩放挪走——否则「落在鼠标处」就白说了。
+  useEffect(() => {
+    setFitTick((t) => t + 1);
+  }, [lens, relayoutNonce]);
   const findings = useMemo(() => lensDef.reasoner.run(model), [model, lensDef]);
   const result = useMemo(() => {
     if (lens !== 'architecture' || seeds.length === 0) return null;
@@ -284,18 +320,48 @@ export function App() {
     [setViews, lens],
   );
 
-  // 拖拽连线：按镜片落默认边类型，经守门员校验后入模型。
-  const onConnect = useCallback(
-    (params: Connection) => {
-      if (!params.source || !params.target || params.source === params.target) return;
-      const type = CONNECT_TYPE[lens];
+  // 拖拽连线：先问"这条线是什么语义"，再入模型（只有一种选项的镜片就不问了，省一次点击）。
+  const edgeOptions = useMemo(() => connectableEdgeTypes(lens), [lens]);
+  const rememberEdge = useCallback((type: EdgeType) => {
+    setLastEdge((prev) => {
+      const next = { ...prev, [lens]: type };
+      try {
+        localStorage.setItem(LAST_EDGE_KEY, JSON.stringify(next));
+      } catch {
+        /* 隐私模式下写不了就只记在内存里 */
+      }
+      return next;
+    });
+  }, [lens]);
+
+  const addEdge = useCallback(
+    (from: string, to: string, type: EdgeType) => {
       const id = newEdgeId(type);
-      setModel((m) => applyPatchChecked(m, { op: 'add-edge', id, edge: { type, from: params.source!, to: params.target! } }));
-      setSelectedEdge(id);
+      // 外键默认 1:N（与抽屉里的新建连线保持一致），用户可在右侧改基数。
+      const edge = type === 'fk' ? { type, from, to, attrs: { cardinality: '1:N' as const } } : { type, from, to };
+      setModel((m) => applyPatchChecked(m, { op: 'add-edge', id, edge }));
+      rememberEdge(type);
+      setPendingConnect(null);
+      // 不顺手选中新边：选中会拉开右侧抽屉、盖住画布右半边——刚连完线就被面板撞一下很烦。
+      // 想改基数/属性，点一下那根线即可。
+      setSelectedEdge(null);
       setSelectedNode(null);
       setCreateMode(false);
     },
-    [lens, setModel],
+    [setModel, rememberEdge],
+  );
+
+  const onConnect = useCallback(
+    (params: Connection) => {
+      if (!params.source || !params.target || params.source === params.target) return;
+      const preferred = lastEdge[lens] ?? CONNECT_TYPE[lens];
+      if (edgeOptions.length <= 1) {
+        addEdge(params.source, params.target, edgeOptions[0]?.id ?? preferred);
+        return;
+      }
+      setPendingConnect({ from: params.source, to: params.target, x: pointerRef.current.x, y: pointerRef.current.y });
+    },
+    [lens, lastEdge, edgeOptions, addEdge],
   );
 
   const onNodeDoubleClick = useCallback<NodeMouseHandler>((_, node) => {
@@ -307,6 +373,8 @@ export function App() {
   // 重新布局：清掉本镜片的手动坐标，让 ELK 重新接管。
   const relayout = useCallback(() => {
     setViews((v) => ({ ...v, [lens]: { ...v[lens], positions: {} } }));
+    // 连"自动布局兜底坐标"一起清掉，否则 ELK 的新结果会被旧 autoPos 挡住。
+    setAutoPos({});
     setRelayoutNonce((n) => n + 1);
   }, [setViews, lens]);
 
@@ -411,16 +479,111 @@ export function App() {
     [seeds, lens, applySeeds],
   );
 
-  const onNodeContextMenu: NodeMouseHandler = useCallback(
-    (event, node) => {
-      event.preventDefault();
-      if (lens !== 'architecture') return;
-      toggleSeed(node.id);
-      // 设失效源 → 自动展开"推演"分区，给即时反馈。
-      setSection('simulation');
-      setNavExpanded(true);
+  // 右键：恢复它该有的样子——列出能对**这个节点**做的事（设为失效源只是其中一项）。
+  const onNodeContextMenu: NodeMouseHandler = useCallback((event, node) => {
+    event.preventDefault();
+    setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id });
+  }, []);
+
+  const deleteNode = useCallback(
+    (id: string) => {
+      setModel((m) => applyPatch(m, { op: 'remove-node', id }));
+      setSelectedNode((cur) => (cur === id ? null : cur));
+      setRenamingId((cur) => (cur === id ? null : cur));
     },
-    [lens, toggleSeed],
+    [setModel],
+  );
+
+  const menuItems = useMemo<MenuItem[]>(() => {
+    const id = contextMenu?.nodeId;
+    const node = id ? model.nodes[id] : undefined;
+    if (!id || !node) return [];
+    const items: MenuItem[] = [];
+    if (lens === 'architecture' && SEEDABLE.has(node.type)) {
+      const on = seeds.includes(id);
+      items.push({
+        key: 'seed',
+        label: on ? '取消失效源' : '设为失效源',
+        hint: on ? '回到正常' : '看它拖垮谁',
+        onSelect: () => {
+          toggleSeed(id);
+          setSection('simulation');
+          setNavExpanded(true);
+        },
+      });
+    }
+    items.push({ key: 'edit', label: '编辑详情', hint: '右侧', onSelect: () => selectNode(id) });
+    items.push({
+      key: 'rename',
+      label: '重命名',
+      hint: '原地改',
+      onSelect: () => {
+        // 只进原地改名，不选中节点——选中会顺手拉开右侧抽屉，把刚要看的那块画布盖掉。
+        setRenamingId(id);
+      },
+    });
+    items.push({ key: 'delete', label: '删除', tone: 'danger', onSelect: () => deleteNode(id) });
+    return items;
+  }, [contextMenu, model, lens, seeds, toggleSeed, selectNode, deleteNode]);
+
+  // 双击空白：就地新建（组件或空白类型），落在鼠标处。
+  const openQuickCreate = useCallback(
+    (e: ReactMouseEvent) => {
+      // Background 的 svg 盖在 pane 上，所以不能只认 .react-flow__pane——
+      // 只要不在任何节点/控件里，就算"空白处"。
+      const el = e.target as HTMLElement;
+      if (el.closest('.react-flow__node') || el.closest('.react-flow__controls') || el.closest('.react-flow__minimap')) return;
+      if (!el.closest('.react-flow')) return;
+      const flow = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      setSelectedNode(null);
+      setSelectedEdge(null);
+      setCreateMode(false);
+      setRenamingId(null);
+      setQuickCreate({ x: e.clientX, y: e.clientY, flow });
+    },
+    [screenToFlowPosition],
+  );
+
+  // 让"落点"等于鼠标处：节点坐标记的是左上角，所以要退半个身位（否则总是偏在右下）。
+  const centerAt = useCallback(
+    (type: NodeType, name: string, at: { x: number; y: number }) => ({
+      x: Math.round(at.x - NODE_WIDTH[type] / 2),
+      y: Math.round(at.y - nodeHeight(model, '', type, name) / 2),
+    }),
+    [model],
+  );
+
+  const quickPlaceComponent = useCallback(
+    (comp: ComponentDef) => {
+      const spot = quickCreate;
+      setQuickCreate(null);
+      if (!spot) return;
+      const id = newNodeId(comp.baseType);
+      setModel((m) => applyPatchChecked(m, { op: 'add-node', id, node: nodeFromComponent(comp) }));
+      persistPosition(id, centerAt(comp.baseType, comp.name, spot.flow));
+      setSelectedNode(id);
+      setSelectedEdge(null);
+      setCreateMode(false);
+    },
+    [quickCreate, setModel, persistPosition, centerAt],
+  );
+
+  const quickPlaceType = useCallback(
+    (type: NodeType) => {
+      const spot = quickCreate;
+      setQuickCreate(null);
+      if (!spot) return;
+      const id = newNodeId(type);
+      const name = NODE_TYPES[type].label;
+      setModel((m) => applyPatchChecked(m, { op: 'add-node', id, node: { type, name, provenance: { by: 'human' } } }));
+      persistPosition(id, centerAt(type, name, spot.flow));
+      setSelectedNode(id);
+      setSelectedEdge(null);
+      setCreateMode(false);
+      // 空白节点的名字本来就得当场起，建完直接进入原地改名。
+      setRenamingId(id);
+    },
+    [quickCreate, setModel, persistPosition, centerAt],
   );
 
   const changeEdgeMode = useCallback(
@@ -735,7 +898,13 @@ export function App() {
               onClose={collapseNav}
             />
           ))}
-        <div className="dd-canvas">
+        <div
+          className="dd-canvas"
+          onPointerMove={(e) => {
+            pointerRef.current = { x: e.clientX, y: e.clientY };
+          }}
+          onDoubleClick={openQuickCreate}
+        >
           <ReactFlow
             key={`${lens}-${fitTick}`}
             nodes={rfNodes}
@@ -758,8 +927,13 @@ export function App() {
               setActiveFinding(null);
               setRenamingId(null);
               setCreateMode(false);
+              // 点空白处顺手收起所有画布浮层（它们都是"临时的"）。
+              setQuickCreate(null);
+              setPendingConnect(null);
+              setContextMenu(null);
             }}
             connectionLineStyle={{ stroke: 'var(--accent)', strokeWidth: 2 }}
+            zoomOnDoubleClick={false}
             fitView
             fitViewOptions={{ padding: 0.2 }}
             minZoom={0.3}
@@ -778,6 +952,36 @@ export function App() {
             />
           </ReactFlow>
           <div className="dd-hint">{HINTS[lens]}</div>
+          {quickCreate && (
+            <QuickCreate
+              model={model}
+              lens={lensDef}
+              x={quickCreate.x}
+              y={quickCreate.y}
+              onPickComponent={quickPlaceComponent}
+              onPickType={quickPlaceType}
+              onCancel={() => setQuickCreate(null)}
+            />
+          )}
+          {pendingConnect && (
+            <EdgePicker
+              options={edgeOptions}
+              value={lastEdge[lens] ?? CONNECT_TYPE[lens]}
+              x={pendingConnect.x}
+              y={pendingConnect.y}
+              onPick={(type) => addEdge(pendingConnect.from, pendingConnect.to, type)}
+              onCancel={() => setPendingConnect(null)}
+            />
+          )}
+          {contextMenu && (
+            <ContextMenu
+              x={contextMenu.x}
+              y={contextMenu.y}
+              title={model.nodes[contextMenu.nodeId]?.name}
+              items={menuItems}
+              onClose={() => setContextMenu(null)}
+            />
+          )}
         </div>
         {drawerOpen && (
           <EntityDrawer
