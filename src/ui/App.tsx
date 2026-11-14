@@ -37,7 +37,7 @@ import {
   type ErField,
   type FkLink,
 } from '../core/er';
-import { columnKey, reflowColumn } from '../core/er-arrange';
+import { arrangeColumns, columnKey, reflowColumn } from '../core/er-arrange';
 import { newEdgeId, newNodeId } from '../core/id';
 import { layoutProjection, NODE_WIDTH, nodeHeight, type Positions } from '../core/layout';
 import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
@@ -153,7 +153,6 @@ export function App() {
   const [activeFinding, setActiveFinding] = useState<string | null>(null);
   const [baseline, setBaseline] = useState<SimulationResult | null>(null);
   const [autoPos, setAutoPos] = useState<Positions>({});
-  const [fitTick, setFitTick] = useState(0);
   const [relayoutNonce, setRelayoutNonce] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamingFieldId, setRenamingFieldId] = useState<string | null>(null);
@@ -241,9 +240,17 @@ export function App() {
       .finally(() => {
         if (cancelled) return;
         // 坐标就位之后再 fit 一次：先 fit 再落位会把"旧坐标"框进视野，看着就是一堆散沙。
+        // 用命令式 fitView 而不是换 key 重挂 ReactFlow —— 重挂会让整块画布白一帧，也就是那下"闪"。
         if (pendingFitRef.current) {
           pendingFitRef.current = false;
-          setFitTick((t) => t + 1);
+          setTimeout(() => {
+            if (cancelled) return;
+            void fitView({
+              padding: Object.keys(projectionRef.current.nodes).length > 10 ? 0.08 : 0.16,
+              maxZoom: 1.15,
+              duration: 0,
+            });
+          }, 0);
         }
       });
     return () => {
@@ -335,19 +342,31 @@ export function App() {
   const toggleFold = useCallback(
     (id: string) => {
       const all = erFieldRows(model, id);
+      const next = !(foldedTables[id] ?? shouldAutoFold(all));
       // 折叠状态跟着 views.json 走：刷新、导出 zip、在别人机器上打开，折过的表都还是折着的。
       setViews((v) => {
         const view = v[lens] ?? { positions: {} };
         const prev = view.folded ?? {};
-        const folded = prev[id] ?? shouldAutoFold(all);
-        return { ...v, [lens]: { ...view, folded: { ...prev, [id]: !folded } } };
+        return { ...v, [lens]: { ...view, folded: { ...prev, [id]: next } } };
       });
-      // 卡片高度变了 → 整列都要重新码：要求 ELK 用新高度重排，并整体覆盖旧坐标。
-      forceLayoutRef.current = true;
-      setAutoPos({});
-      setRelayoutNonce((n) => n + 1);
+      // 折叠只改卡片高度：列还是那几列、顺序也没变，所以本地按新高度重码一遍就够了，
+      // 不必等 ELK 再来一次异步重排（那中间的几十毫秒正是"闪一下"的来源）。
+      setAutoPos((cur) => {
+        const positions: Positions = {};
+        const heights: Record<string, number> = {};
+        for (const nid of Object.keys(projection.nodes)) {
+          if (model.nodes[nid]?.type !== 'Table') continue;
+          const rows = erFieldRows(model, nid);
+          const folded = nid === id ? next : (foldedTables[nid] ?? shouldAutoFold(rows));
+          const visible = foldRows(rows, folded);
+          heights[nid] = Math.max(74, foldedCardHeight(visible.rows.length, visible.hidden));
+          positions[nid] = cur[nid] ?? positionFor(nid);
+        }
+        const edges = Object.values(projection.edges).map((e) => ({ from: e.from, to: e.to }));
+        return { ...cur, ...arrangeColumns(positions, heights, edges, 44) };
+      });
     },
-    [model, setViews, lens],
+    [model, setViews, lens, foldedTables, projection, positionFor],
   );
 
   const selectNode = useCallback((id: string | null) => {
@@ -555,8 +574,9 @@ export function App() {
   // 重新布局：清掉本镜片的手动坐标，让 ELK 重新接管。
   const relayout = useCallback(() => {
     setViews((v) => ({ ...v, [lens]: { ...v[lens], positions: {} } }));
-    // 连"自动布局兜底坐标"一起清掉，否则 ELK 的新结果会被旧 autoPos 挡住。
-    setAutoPos({});
+    // 但 autoPos 不清：清空的那一瞬间所有卡片会先掉回默认位、等 ELK 算完再弹回来，
+    // 观感上就是"闪一下"。留着旧坐标当垫子，新结果一到整体替换掉即可。
+    forceLayoutRef.current = true;
     setRelayoutNonce((n) => n + 1);
   }, [setViews, lens]);
 
@@ -1195,7 +1215,7 @@ export function App() {
           onDoubleClick={openQuickCreate}
         >
           <ReactFlow
-            key={`${lens}-${fitTick}`}
+            key={lens}
             nodes={rfNodes}
             edges={rfEdges}
             nodeTypes={nodeTypes}
