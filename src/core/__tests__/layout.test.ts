@@ -16,7 +16,7 @@ describe('layoutProjection（ELK 自动布局）', () => {
     }
   });
 
-  it('ER 镜片：表卡片分层布局，外键父表在子表上方（字段已折进卡片）', async () => {
+  it('ER 镜片：表卡片按外键分层，父表在子表左侧（字段已折进卡片）', async () => {
     const projection = projectLens(sampleThreeLensModel, getLens('er'));
     const pos = await layoutProjection(projection, 'er', sampleThreeLensModel);
     expect(Object.keys(pos).length).toBe(5);
@@ -24,8 +24,11 @@ describe('layoutProjection（ELK 自动布局）', () => {
       expect(Number.isFinite(pos[id].x)).toBe(true);
       expect(Number.isFinite(pos[id].y)).toBe(true);
     }
-    // orders 1—N order_items：父表 orders 在子表 order_items 上方。
-    expect(pos['t_orders'].y).toBeLessThan(pos['t_order_items'].y);
+    // orders 1—N order_items / payments：父表 orders 在子表左侧（外键流向 = 左→右）。
+    expect(pos['t_orders'].x).toBeLessThan(pos['t_order_items'].x);
+    expect(pos['t_orders'].x).toBeLessThan(pos['t_payments'].x);
+    // payments 1—N refunds：两级依赖仍然保持同向。
+    expect(pos['t_payments'].x).toBeLessThan(pos['t_refunds'].x);
   });
 
   it('状态机镜片：初始态在终态左侧（左→右流）', async () => {

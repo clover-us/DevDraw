@@ -23,6 +23,7 @@ import {
   type NodeMouseHandler,
 } from '@xyflow/react';
 import { nodeComponent, nodeFromComponent, nodeGlyph, resolveComponent } from '../core/components';
+import { ER_ANCHOR_HANDLE, erFieldPort, fieldIdFromHandle, planFkConnection, resolveFkLinks, tableFieldIds } from '../core/er';
 import { newEdgeId, newNodeId } from '../core/id';
 import { layoutProjection, NODE_WIDTH, nodeHeight, type Positions } from '../core/layout';
 import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
@@ -66,6 +67,17 @@ const CONNECT_TYPE: Record<LensId, EdgeType> = {
 
 const LAST_EDGE_KEY = 'devdraw-last-edge';
 
+/** 拖线松手后还没定语义的那根线：记住两端表 + 两端字段（字段级连线时才有）。 */
+interface ConnectDraft {
+  from: string;
+  to: string;
+  /** 桌面坐标：语义选择器就弹在松手处。 */
+  x: number;
+  y: number;
+  sourceField?: string;
+  targetField?: string;
+}
+
 /** 记住"上次画的边类型"——重复画同一种线是最常见的情形。 */
 function readLastEdge(): Partial<Record<LensId, EdgeType>> {
   try {
@@ -81,22 +93,16 @@ const SEEDABLE = new Set<NodeType>(['Service', 'Database', 'Queue', 'Endpoint', 
 
 /** ER 表卡片内的字段行：从全模型 contains 边折叠而来（字段不再游离）。 */
 function fieldsOf(model: Model, tableId: string): FieldRow[] {
-  const rows: FieldRow[] = [];
-  for (const e of Object.values(model.edges)) {
-    if (e.type === 'contains' && e.from === tableId) {
-      const f = model.nodes[e.to];
-      if (f?.type === 'Field') {
-        rows.push({
-          id: e.to,
-          name: f.name,
-          dataType: typeof f.attrs?.dataType === 'string' ? f.attrs.dataType : undefined,
-          nullable: f.attrs?.nullable === true,
-          keyRole: typeof f.attrs?.key === 'string' ? f.attrs.key : undefined,
-        });
-      }
-    }
-  }
-  return rows;
+  return tableFieldIds(model, tableId).map((fieldId) => {
+    const f = model.nodes[fieldId];
+    return {
+      id: fieldId,
+      name: f?.name ?? fieldId,
+      dataType: typeof f?.attrs?.dataType === 'string' ? f.attrs.dataType : undefined,
+      nullable: f?.attrs?.nullable === true,
+      keyRole: typeof f?.attrs?.key === 'string' ? f.attrs.key : undefined,
+    };
+  });
 }
 
 /**
@@ -147,7 +153,7 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   // ── 三个直接落在画布上的交互：就地新建 / 连线选语义 / 右键菜单 ──
   const [quickCreate, setQuickCreate] = useState<{ x: number; y: number; flow: { x: number; y: number } } | null>(null);
-  const [pendingConnect, setPendingConnect] = useState<{ from: string; to: string; x: number; y: number } | null>(null);
+  const [pendingConnect, setPendingConnect] = useState<ConnectDraft | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
   // 拖线松手时 onConnect 拿不到鼠标坐标，所以自己盯着指针（连线落点 = 当前指针处）。
   const pointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -359,10 +365,19 @@ export function App() {
   }, [lens]);
 
   const addEdge = useCallback(
-    (from: string, to: string, type: EdgeType) => {
+    (from: string, to: string, type: EdgeType, link?: { key?: string; cardinality?: '1:1' | '1:N' }) => {
       const id = newEdgeId(type);
       // 外键默认 1:N（与抽屉里的新建连线保持一致），用户可在右侧改基数。
-      const edge = type === 'fk' ? { type, from, to, attrs: { cardinality: '1:N' as const } } : { type, from, to };
+      // 从字段拖出来的外键顺手记住"引用的是哪一列"（attrs.key），ER 推演器靠它判父子关系。
+      const edge =
+        type === 'fk'
+          ? {
+              type,
+              from,
+              to,
+              attrs: { cardinality: link?.cardinality ?? ('1:N' as const), ...(link?.key ? { key: link.key } : {}) },
+            }
+          : { type, from, to };
       setModel((m) => applyPatchChecked(m, { op: 'add-edge', id, edge }));
       rememberEdge(type);
       setPendingConnect(null);
@@ -375,17 +390,48 @@ export function App() {
     [setModel, rememberEdge],
   );
 
-  const onConnect = useCallback(
-    (params: Connection) => {
-      if (!params.source || !params.target || params.source === params.target) return;
-      const preferred = lastEdge[lens] ?? CONNECT_TYPE[lens];
-      if (edgeOptions.length <= 1) {
-        addEdge(params.source, params.target, edgeOptions[0]?.id ?? preferred);
+  /** 一根待定语义的线落地：外键先按字段角色定方向/基数，其余类型照原样入模型。 */
+  const commitConnect = useCallback(
+    (draft: ConnectDraft, type: EdgeType) => {
+      if (type === 'fk') {
+        const plan = planFkConnection(model, draft.from, draft.to, draft.sourceField, draft.targetField);
+        addEdge(plan.from, plan.to, type, { key: plan.key, cardinality: plan.cardinality });
         return;
       }
-      setPendingConnect({ from: params.source, to: params.target, x: pointerRef.current.x, y: pointerRef.current.y });
+      addEdge(draft.from, draft.to, type);
     },
-    [lens, lastEdge, edgeOptions, addEdge],
+    [model, addEdge],
+  );
+
+  const onConnect = useCallback(
+    (params: Connection) => {
+      if (!params.source || !params.target) return;
+      const sourceField = fieldIdFromHandle(params.sourceHandle);
+      const targetField = fieldIdFromHandle(params.targetHandle);
+      // 自引用外键（categories.parent_id → categories.id）是合法建模：只有两端都落在字段上才放行。
+      if (params.source === params.target && !(sourceField && targetField)) return;
+      const draft: ConnectDraft = {
+        from: params.source,
+        to: params.target,
+        x: pointerRef.current.x,
+        y: pointerRef.current.y,
+        sourceField,
+        targetField,
+      };
+      // 两端都落在具体字段上：ER 里"某一列指向另一列"只可能是外键，语义已经写在手上，
+      // 不必再弹一次类型选择——拖完就是结果，改基数点线即可。
+      if (lens === 'er' && sourceField && targetField) {
+        commitConnect(draft, 'fk');
+        return;
+      }
+      const preferred = lastEdge[lens] ?? CONNECT_TYPE[lens];
+      if (edgeOptions.length <= 1) {
+        commitConnect(draft, edgeOptions[0]?.id ?? preferred);
+        return;
+      }
+      setPendingConnect(draft);
+    },
+    [lens, lastEdge, edgeOptions, commitConnect],
   );
 
   const onNodeDoubleClick = useCallback<NodeMouseHandler>((_, node) => {
@@ -442,16 +488,80 @@ export function App() {
     [projection, positionFor, result, seeds, highlightNodes, selectedNode, fieldCount, selectNode, renamingId, renamingFieldId, commitRename, cancelRename, startFieldRename, commitFieldRename, cancelFieldRename, model],
   );
 
+  // 外键边 → 具体字段：父表键列在哪一行、子表外键列在哪一行。渲染（handle）与拖线都读这份。
+  const fkLinks = useMemo(() => resolveFkLinks(model), [model]);
+
+  /**
+   * 同一源字段散出去的多条外键：给每条分一条竖向车道（lane），否则它们的竖段会叠成一根。
+   * 按目标卡片的高度排序分配，扇面因此不会自己跟自己交叉。
+   * 顺带把两端的基数标记按锚点去重：多条线落到同一个字段行时，只留一个 1、一个 N。
+   */
+  const edgeRouting = useMemo(() => {
+    const groups = new Map<string, string[]>();
+    for (const [id, e] of Object.entries(projection.edges)) {
+      if (e.type !== 'fk') continue;
+      const anchor = fkLinks[id]?.fromFieldId ? `f:${fkLinks[id].fromFieldId}` : `n:${e.from}`;
+      const list = groups.get(anchor);
+      if (list) list.push(id);
+      else groups.set(anchor, [id]);
+    }
+    const out: Record<string, { lane: number; laneCount: number; showSourceTag: boolean; showTargetTag: boolean }> = {};
+    for (const ids of groups.values()) {
+      const sorted = [...ids].sort((a, b) => {
+        const pa = positionFor(projection.edges[a].to);
+        const pb = positionFor(projection.edges[b].to);
+        return pa.y - pb.y || a.localeCompare(b);
+      });
+      sorted.forEach((id, index) => {
+        out[id] = { lane: index, laneCount: sorted.length, showSourceTag: true, showTargetTag: true };
+      });
+    }
+    const seenSource = new Set<string>();
+    const seenTarget = new Set<string>();
+    for (const [id, e] of Object.entries(projection.edges)) {
+      const link = e.type === 'fk' ? fkLinks[id] : undefined;
+      if (!link?.fieldLevel) continue;
+      const sourceKey = `s:${link.fromFieldId}`;
+      const targetKey = `t:${link.toFieldId}`;
+      const entry = out[id] ?? { lane: 0, laneCount: 1, showSourceTag: true, showTargetTag: true };
+      entry.showSourceTag = !seenSource.has(sourceKey);
+      entry.showTargetTag = !seenTarget.has(targetKey);
+      seenSource.add(sourceKey);
+      seenTarget.add(targetKey);
+      out[id] = entry;
+    }
+    return out;
+  }, [projection, fkLinks, positionFor]);
+
   const derivedEdges = useMemo<Edge<DevDrawEdgeData>[]>(
     () =>
       Object.entries(projection.edges).map(([id, e]) => {
         const effectedBy = e.attrs?.effectedBy;
         const missingService =
           e.type === 'transition' && typeof effectedBy === 'string' && e.attrs?.manual !== true && !model.nodes[effectedBy];
+        const link = e.type === 'fk' ? fkLinks[id] : undefined;
+        const routing = edgeRouting[id];
+        // 表卡片有十几个 handle（每行左右各一），不点名的话 React Flow 会把无边名的边
+        // 接到 DOM 里第一个同类型 handle —— 也就是第一行字段，于是"读这张表"会被画成"读 id 这一列"。
+        // 所以表与表之间非外键的线也要显式锚到卡片级锚点。
+        const anchored = (nodeId: string, side: 'left' | 'right') =>
+          model.nodes[nodeId]?.type === 'Table' ? ER_ANCHOR_HANDLE[side] : undefined;
         return {
           id,
           source: e.from,
           target: e.to,
+          // 外键连到具体字段行：父表键列右侧出线，子表外键列左侧进线。
+          // 字段对不上（N:M 缺中间表）才退回卡片级锚点。
+          sourceHandle: !link
+            ? anchored(e.from, 'right')
+            : link.fromFieldId
+              ? erFieldPort('right', link.fromFieldId)
+              : ER_ANCHOR_HANDLE.right,
+          targetHandle: !link
+            ? anchored(e.to, 'left')
+            : link.toFieldId
+              ? erFieldPort('left', link.toFieldId)
+              : ER_ANCHOR_HANDLE.left,
           type: 'devdraw',
           selected: selectedEdge === id,
           data: {
@@ -464,11 +574,16 @@ export function App() {
             keyCol: e.attrs?.key,
             event: e.attrs?.event,
             missingService,
+            fieldLevel: link?.fieldLevel === true,
+            lane: routing?.lane ?? 0,
+            laneCount: routing?.laneCount ?? 1,
+            showSourceTag: routing?.showSourceTag !== false,
+            showTargetTag: routing?.showTargetTag !== false,
             onSelect: selectEdge,
           },
         };
       }),
-    [projection, model, impactedEdges, highlightEdges, selectEdge, selectedEdge],
+    [projection, model, fkLinks, edgeRouting, impactedEdges, highlightEdges, selectEdge, selectedEdge],
   );
 
   // 受控画布：onNodesChange/onEdgesChange 实时应用拖拽/选择变更（修复"拖动落地才动"）。
@@ -1029,7 +1144,7 @@ export function App() {
               value={lastEdge[lens] ?? CONNECT_TYPE[lens]}
               x={pendingConnect.x}
               y={pendingConnect.y}
-              onPick={(type) => addEdge(pendingConnect.from, pendingConnect.to, type)}
+              onPick={(type) => commitConnect(pendingConnect, type)}
               onCancel={() => setPendingConnect(null)}
             />
           )}

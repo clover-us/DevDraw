@@ -13,6 +13,7 @@ import {
 } from '@xyflow/react';
 import type { DependencyMode, EdgeType, NodeState, NodeType } from '../core/types';
 import { DEFAULT_NODE_ICON } from '../core/components';
+import { ER_ANCHOR_HANDLE, erFieldPort } from '../core/er';
 import { Glyph } from './glyphs';
 
 /** 语义类型 → 兜底图标（节点无组件身份时）。 */
@@ -223,17 +224,21 @@ export function DevDrawNode({ id, data }: NodeProps) {
           {fields.map((f) => (
             <div
               key={f.id}
-              className={`dd-field-row${d.selectedFieldId === f.id ? ' selected' : ''}`}
+              className={`dd-field-row${d.selectedFieldId === f.id ? ' selected' : ''}${f.keyRole ? ' is-key' : ''}`}
               onClick={(e) => {
                 e.stopPropagation();
+                // 从字段行上的圆点拖线出去会以 click 收尾，别顺手把这一行选中。
+                if ((e.target as HTMLElement).closest('.react-flow__handle')) return;
                 d.onFieldSelect?.(f.id);
               }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
                 d.onFieldRenameStart?.(f.id);
               }}
-              title="单击查看详情 · 双击改名"
+              title="单击查看详情 · 双击改名 · 拖右侧圆点连外键"
             >
+              {/* 字段级连线：每个字段行左右各一个锚点，外键线因此能落在"某一列"上。 */}
+              <Handle id={erFieldPort('left', f.id)} type="target" position={Position.Left} className="dd-row-handle" />
               {f.keyRole ? (
                 <span className={`dd-key dd-key-${f.keyRole.toLowerCase()}`}>{f.keyRole}</span>
               ) : (
@@ -253,6 +258,7 @@ export function DevDrawNode({ id, data }: NodeProps) {
                   ?
                 </span>
               )}
+              <Handle id={erFieldPort('right', f.id)} type="source" position={Position.Right} className="dd-row-handle" />
             </div>
           ))}
         </div>
@@ -333,9 +339,24 @@ export function DevDrawNode({ id, data }: NodeProps) {
 
   return (
     <div className={cls} onClick={() => d.onSelect(id)}>
-      <Handle type="target" position={Position.Left} />
+      {/*
+        表卡片用字段级锚点（上面每行左右各一个），这里的卡片级锚点留着兜底：
+        外键列在模型里对不上字段时（例如 N:M 缺中间表），线仍然要有地方落。
+        显式给 id，别让 React Flow 按 DOM 顺序把边接到第一行字段上。
+      */}
+      <Handle
+        id={d.kind === 'Table' ? ER_ANCHOR_HANDLE.left : undefined}
+        type="target"
+        position={Position.Left}
+        className={d.kind === 'Table' ? 'dd-anchor-handle' : undefined}
+      />
       {body}
-      <Handle type="source" position={Position.Right} />
+      <Handle
+        id={d.kind === 'Table' ? ER_ANCHOR_HANDLE.right : undefined}
+        type="source"
+        position={Position.Right}
+        className={d.kind === 'Table' ? 'dd-anchor-handle' : undefined}
+      />
     </div>
   );
 }
@@ -350,38 +371,119 @@ export interface DevDrawEdgeData extends Record<string, unknown> {
   keyCol?: string;
   event?: string;
   missingService?: boolean;
+  /** 两端都锚在字段行上：正交走线 + 两端基数标记（1 / N），中段不再压字。 */
+  fieldLevel?: boolean;
+  /** 同一源字段散出的第几条线：错开竖段，同源的几条外键不会叠成一根。 */
+  lane?: number;
+  laneCount?: number;
+  /** 两端基数标记要不要画：多条线挤同一个字段行时只留一个 1、一个 N。 */
+  showSourceTag?: boolean;
+  showTargetTag?: boolean;
   onSelect: (edgeId: string) => void;
 }
 
 const HIDDEN_EDGES = new Set<EdgeType>(['contains', 'has-lifecycle', 'encodes']);
+
+interface Pt {
+  x: number;
+  y: number;
+}
+
+/**
+ * 正交折线 + 圆角。ER 图更像电路图：横平竖直才追得住线；
+ * 贝塞尔在表卡片之间会甩出大弧，弧线从谁身上穿过全看运气。
+ */
+function orthoPath(points: Pt[], radius = 9): string {
+  const first = points[0];
+  if (!first) return '';
+  let d = `M ${first.x} ${first.y}`;
+  for (let i = 1; i < points.length - 1; i++) {
+    const prev = points[i - 1];
+    const cur = points[i];
+    const next = points[i + 1];
+    const inLen = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+    const outLen = Math.hypot(next.x - cur.x, next.y - cur.y);
+    if (inLen < 0.5 || outLen < 0.5) continue;
+    const r = Math.min(radius, inLen / 2, outLen / 2);
+    const ax = cur.x - ((cur.x - prev.x) / inLen) * r;
+    const ay = cur.y - ((cur.y - prev.y) / inLen) * r;
+    const bx = cur.x + ((next.x - cur.x) / outLen) * r;
+    const by = cur.y + ((next.y - cur.y) / outLen) * r;
+    d += ` L ${ax} ${ay} Q ${cur.x} ${cur.y} ${bx} ${by}`;
+  }
+  const last = points[points.length - 1];
+  return `${d} L ${last.x} ${last.y}`;
+}
+
+/**
+ * 外键走线：出门 → 挑一条竖向车道 → 竖直落到目标字段行 → 进线。
+ * lane 把"同一列散出去的好几条外键"错开，否则它们会在同一个 x 上叠成一根。
+ */
+function fkPoints(sx: number, sy: number, tx: number, ty: number, lane: number, laneCount: number): Pt[] {
+  const span = tx - sx;
+  if (span < 56) {
+    // 回边 / 自引用外键：直线走法会横穿卡片，改成从上方绕过去再拐回左侧。
+    const outX = sx + 24 + lane * 12;
+    const overY = Math.min(sy, ty) - (30 + lane * 12);
+    const backX = tx - 24 - lane * 12;
+    return [
+      { x: sx, y: sy },
+      { x: outX, y: sy },
+      { x: outX, y: overY },
+      { x: backX, y: overY },
+      { x: backX, y: ty },
+      { x: tx, y: ty },
+    ];
+  }
+  const laneX = laneCount > 1 ? sx + (span * (lane + 1)) / (laneCount + 1) : sx + span / 2;
+  return [
+    { x: sx, y: sy },
+    { x: laneX, y: sy },
+    { x: laneX, y: ty },
+    { x: tx, y: ty },
+  ];
+}
 
 export function DevDrawEdge(props: EdgeProps) {
   const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected } = props;
   const d = data as DevDrawEdgeData;
   if (HIDDEN_EDGES.has(d.edgeType)) return null;
 
-  const [path] = getBezierPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-  });
+  const fieldLevel = d.edgeType === 'fk' && d.fieldLevel === true;
+  const lane = d.lane ?? 0;
+  const laneCount = d.laneCount ?? 1;
 
-  // 标签放在哪：默认在中点，外键边往前挪到三成处——ER 里两张表之间常常还站着第三张表，
-// 正中间的标签一定会落到别人身上，贴着"头一张表刚出门"的位置反而永远是空地。
-  const t = d.edgeType === 'fk' ? 0.3 : 0.5;
-  const bx = sourceX + (targetX - sourceX) * t;
-  const by = sourceY + (targetY - sourceY) * t;
-  // 再沿法线抬离连线一小段：文字压在线上读不清。方向固定取左法线，
-  // 水平边于是标签在上、竖直边在右，相邻边不会互相叠。
-  const dx = targetX - sourceX;
-  const dy = targetY - sourceY;
-  const len = Math.hypot(dx, dy) || 1;
-  const gap = 13;
-  const tagX = bx + (dy / len) * gap;
-  const tagY = by - (dx / len) * gap;
+  let path: string;
+  let tagX: number;
+  let tagY: number;
+  if (fieldLevel) {
+    path = orthoPath(fkPoints(sourceX, sourceY, targetX, targetY, lane, laneCount));
+    tagX = sourceX;
+    tagY = sourceY;
+  } else {
+    [path] = getBezierPath({
+      sourceX,
+      sourceY,
+      targetX,
+      targetY,
+      sourcePosition,
+      targetPosition,
+    });
+    // 标签放在哪：这里只剩"字段锚不上"的外键（如 N:M 缺中间表）和别的边类型。
+    // 外键退回卡片级时线是两卡之间的空地，落在正中间最不容易撞上卡片边缘的基数标记。
+    const t = 0.5;
+    const bx = sourceX + (targetX - sourceX) * t;
+    const by = sourceY + (targetY - sourceY) * t;
+    // 再沿法线抬离连线一小段：文字压在线上读不清。方向固定取左法线，
+    // 水平边于是标签在上、竖直边在右，相邻边不会互相叠。
+    const dx = targetX - sourceX;
+    const dy = targetY - sourceY;
+    const len = Math.hypot(dx, dy) || 1;
+    const gap = 13;
+    tagX = bx + (dy / len) * gap;
+    tagY = by - (dx / len) * gap;
+  }
+
   let cls: string;
   // 标签只留一句话：依赖模式靠线型与颜色表达，不再挤进标签文字里。
   let text: string;
@@ -397,21 +499,50 @@ export function DevDrawEdge(props: EdgeProps) {
   }
   cls += `${d.impacted ? ' impacted' : ''}${d.highlighted ? ' highlighted' : ''}${selected ? ' selected' : ''}`;
 
+  // 字段级外键：基数拆成两端的小标记，紧贴各自那根线出门/进门的拐角。
+  // 同源多条线按 lane 往右错开，标记不会叠在一起。
+  const [leftCard, rightCard] = (d.cardinality ?? '1:N').split(':');
+
   return (
     <>
       <path id={id} d={path} fill="none" className={`dd-edge ${cls}`} />
       <path d={path} fill="none" stroke="transparent" strokeWidth={20} style={{ cursor: 'pointer' }} />
       <EdgeLabelRenderer>
-        <div
-          className={`dd-edge-label ${cls}`}
-          style={{ transform: `translate(-50%, -50%) translate(${tagX}px, ${tagY}px)` }}
-          onClick={(event) => {
-            event.stopPropagation();
-            d.onSelect(id);
-          }}
-        >
-          {text}
-        </div>
+        {fieldLevel ? (
+          <>
+            {d.showSourceTag === false ? null : (
+              <div
+                className={`dd-edge-card ${cls}`}
+                style={{
+                  transform: `translate(-50%, -50%) translate(${sourceX + 10 + lane * 15}px, ${sourceY - 10}px)`,
+                }}
+              >
+                {leftCard}
+              </div>
+            )}
+            {d.showTargetTag === false ? null : (
+              <div
+                className={`dd-edge-card ${cls}`}
+                style={{
+                  transform: `translate(-50%, -50%) translate(${targetX - 10 - lane * 15}px, ${targetY - 10}px)`,
+                }}
+              >
+                {rightCard}
+              </div>
+            )}
+          </>
+        ) : (
+          <div
+            className={`dd-edge-label ${cls}`}
+            style={{ transform: `translate(-50%, -50%) translate(${tagX}px, ${tagY}px)` }}
+            onClick={(event) => {
+              event.stopPropagation();
+              d.onSelect(id);
+            }}
+          >
+            {text}
+          </div>
+        )}
       </EdgeLabelRenderer>
     </>
   );

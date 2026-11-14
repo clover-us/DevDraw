@@ -2,9 +2,13 @@
  * ELK 自动布局 —— 把"几百个节点怎么排"从手写坐标变成算法。
  * 设计依据：docs/design/lens-model.md §10（镜片降维）、用户"真实表结构错综复杂怎么办"关切。
  * 纯异步函数：输入投影（节点+边），输出每节点坐标。布局只读语义，绝不改模型。
- * ER 镜片字段已折进表卡片：传入全模型时按字段数估算表卡片高度，让间距贴合真实渲染。
+ *
+ * ER 镜片走的是"字段级端口"：每张表把每个字段行报成 ELK 的 port，外键边连具体的
+ * 父键行→子外键行。分层算法因此能看见"哪一行接哪一行"，据此决定表卡片的上下顺序，
+ * 而不是只知道"这两张表有关系"——交叉少一半，走线也落得准。
  */
-import type { ELK, ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk.bundled.js';
+import type { ELK, ElkExtendedEdge, ElkNode, ElkPort } from 'elkjs/lib/elk.bundled.js';
+import { erFieldPort, erFieldRows, fieldRowOffset, resolveFkLink, tableCardHeight, type ErField } from './er';
 import type { LensId, Projection } from './registry';
 import type { Model, NodeType } from './types';
 
@@ -73,49 +77,131 @@ export function nodeHeight(model: Model | undefined, id: string, type: NodeType,
   return 56; // Lifecycle 等
 }
 
-/** 每副镜片的主方向：架构/状态机左→右流，ER 父表在上子表在下（沿外键方向分层）。 */
+/**
+ * 每副镜片的主方向。
+ * ER 沿外键父→子从左往右流水：表卡片是"高瘦"的（一列字段往下长），横排更省画布，
+ * 也符合大家读 SQL 的习惯（被引用的表在左，引用它的表在右）。
+ */
 const DIRECTION: Record<LensId, string> = {
   architecture: 'RIGHT',
-  er: 'DOWN',
+  er: 'RIGHT',
   'state-machine': 'RIGHT',
 };
 
 export type Positions = Record<string, { x: number; y: number }>;
 
-/** 表卡片高度 ≈ 表头 + 字段行（与 CSS 渲染近似），让 ELK 间距贴合真实卡片。 */
+/** 表卡片高度 = 表头 + 字段行（与 .dd-table-* 的 CSS 尺寸同源），让间距贴合真实卡片。 */
 function tableHeight(model: Model | undefined, tableId: string): number {
   const base = 74;
   if (!model) return base;
   const count = Object.values(model.edges).filter(
     (e) => e.type === 'contains' && e.from === tableId && model.nodes[e.to]?.type === 'Field',
   ).length;
-  return Math.max(base, 48 + count * 27);
+  return Math.max(base, tableCardHeight(count));
+}
+
+/** 各镜片的 ELK 选项：ER 需要"按端口连边 + 正交走线"，其余保持原有的紧凑分层。 */
+function layoutOptions(lens: LensId): Record<string, string> {
+  const shared = {
+    'elk.algorithm': 'layered',
+    'elk.direction': DIRECTION[lens],
+    'elk.padding': '[top=28,left=28,bottom=28,right=28]',
+  };
+  if (lens !== 'er') {
+    return {
+      ...shared,
+      'elk.spacing.nodeNode': '36',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '96',
+      'elk.layered.spacing.edgeNodeBetweenLayers': '28',
+      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+    };
+  }
+  return {
+    ...shared,
+    // 外键线走正交折线：ER 图是"电路图"不是"关系网"，横平竖直才看得清谁接了谁。
+    'elk.edgeRouting': 'ORTHOGONAL',
+    'elk.spacing.nodeNode': '44',
+    'elk.spacing.edgeNode': '24',
+    'elk.spacing.edgeEdge': '18',
+    'elk.layered.spacing.nodeNodeBetweenLayers': '112',
+    'elk.layered.spacing.edgeNodeBetweenLayers': '30',
+    'elk.layered.spacing.edgeEdgeBetweenLayers': '18',
+    // 交叉最少的排序 + 让函数式层级尽量"直"（长边少弯）。
+    'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+    'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+    'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
+    // 同一层内保持模型里的出现顺序：用户新建的表不会莫名其妙跳到最上面。
+    'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+    'elk.layered.mergeEdges': 'false',
+  };
+}
+
+/** 表卡片的字段端口：每个字段行左右各一个，边缘恰好落在卡片边框上（与 handle 的 CSS 对齐）。 */
+function tablePorts(rows: ErField[]): ElkPort[] {
+  const ports: ElkPort[] = [];
+  rows.forEach((row, index) => {
+    const y = fieldRowOffset(index);
+    ports.push({
+      id: erFieldPort('left', row.id),
+      x: 0,
+      y,
+      width: 0,
+      height: 0,
+      layoutOptions: { 'elk.port.side': 'WEST', 'elk.port.index': String(index * 2) },
+    });
+    ports.push({
+      id: erFieldPort('right', row.id),
+      x: NODE_WIDTH.Table,
+      y,
+      width: 0,
+      height: 0,
+      layoutOptions: { 'elk.port.side': 'EAST', 'elk.port.index': String(index * 2 + 1) },
+    });
+  });
+  return ports;
 }
 
 /** 对一副镜片的投影做分层自动布局，返回节点 id → 坐标。传入 model 时按文本/字段数估算节点高度。 */
 export async function layoutProjection(projection: Projection, lens: LensId, model?: Model): Promise<Positions> {
-  const children: ElkNode[] = Object.entries(projection.nodes).map(([id, n]) => ({
-    id,
-    width: NODE_WIDTH[n.type],
-    height: nodeHeight(model, id, n.type, n.name),
-  }));
-  const edges: ElkExtendedEdge[] = Object.entries(projection.edges).map(([id, e]) => ({
-    id,
-    sources: [e.from],
-    targets: [e.to],
-  }));
+  const erModel = lens === 'er' ? model : undefined;
+  const rowCache = new Map<string, ErField[]>();
+  const rowsOf = (tableId: string): ErField[] => {
+    if (!erModel) return [];
+    let rows = rowCache.get(tableId);
+    if (!rows) {
+      rows = erFieldRows(erModel, tableId);
+      rowCache.set(tableId, rows);
+    }
+    return rows;
+  };
+
+  const children: ElkNode[] = Object.entries(projection.nodes).map(([id, n]) => {
+    const node: ElkNode = { id, width: NODE_WIDTH[n.type], height: nodeHeight(model, id, n.type, n.name) };
+    if (erModel && n.type === 'Table') {
+      const rows = rowsOf(id);
+      if (rows.length > 0) {
+        // 行序固定：ELK 只在这些行的上/下沿之间调层级顺序，不重排字段（字段顺序是模型语义）。
+        node.layoutOptions = { 'elk.portConstraints': 'FIXED_ORDER' };
+        node.ports = tablePorts(rows);
+      }
+    }
+    return node;
+  });
+
+  const edges: ElkExtendedEdge[] = Object.entries(projection.edges).map(([id, e]) => {
+    const link = erModel ? resolveFkLink(e, rowsOf) : undefined;
+    const fromField = link?.fromFieldId;
+    const toField = link?.toFieldId;
+    return {
+      id,
+      sources: [fromField ? erFieldPort('right', fromField) : e.from],
+      targets: [toField ? erFieldPort('left', toField) : e.to],
+    };
+  });
 
   const graph: ElkNode = {
     id: 'root',
-    layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.direction': DIRECTION[lens],
-      'elk.spacing.nodeNode': '36',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '96',
-      'elk.layered.spacing.edgeNodeBetweenLayers': '28',
-      'elk.padding': '[top=24,left=24,bottom=24,right=24]',
-      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-    },
+    layoutOptions: layoutOptions(lens),
     children,
     edges,
   };

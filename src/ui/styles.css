@@ -1451,7 +1451,7 @@ select.dd-input {
 .dd-node.kind-table {
   width: 232px;
   padding: 0;
-  overflow: hidden;
+  /* 不能 overflow:hidden——字段行的连线圆点要探出卡片边缘一点点才点得到。 */
   border-color: var(--border-strong);
 }
 .dd-table-head {
@@ -1461,6 +1461,7 @@ select.dd-input {
   padding: 9px 12px;
   background: var(--panel-2);
   border-bottom: 1px solid var(--border);
+  border-radius: 9px 9px 0 0;
 }
 .dd-table-head .dd-node-name {
   margin-top: 0;
@@ -1484,6 +1485,8 @@ select.dd-input {
   padding: 8px 12px;
 }
 .dd-field-row {
+  /* 每行两端都有连线圆点，圆点要按"这一行"定位（top:50%），不能落到整张卡片的中点。 */
+  position: relative;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1551,6 +1554,56 @@ select.dd-input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+/* 字段行两端的连线圆点：平时隐着，鼠标进到这一行才亮，
+   否则十几根线头挤在卡片边缘像一道毛边。 */
+.dd-field-row .dd-row-handle {
+  width: 7px;
+  height: 7px;
+  opacity: 0;
+  background: var(--accent);
+  border: 1px solid var(--bg);
+  transition: opacity 0.12s;
+}
+.dd-field-row:hover .dd-row-handle,
+.dd-field-row.selected .dd-row-handle,
+.react-flow__node.selected .dd-row-handle {
+  opacity: 1;
+}
+.dd-field-row .dd-row-handle:hover {
+  opacity: 1;
+}
+/* 兜底锚点：卡片级连线还在用，但不该出现在界面上，也不该抢指针。
+   !important 是必需的：React Flow 给可连线 handle 加的 .connectionindicator 会把
+   pointer-events 改回 all，而卡片中线正好压在第一行字段圆点上——不压住它，
+   从"id 那一列"拖出来的线会被记成卡片级连线（实测 sourceHandle 变成了 ea:right）。 */
+.dd-anchor-handle {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  /* 挪到表头中线：卡片垂直中线的位置正好压着第一行字段的圆点，
+     合成事件下会抢先成为连线起点（会被记成卡片级外键）。 */
+  top: 18px !important;
+}
+.dd-field-row:last-child {
+  border-radius: 0 0 9px 9px;
+}
+
+/* 字段级外键两端的基数标记（1 / N）：比中段一行字更贴线，也不用抢线中段的位置。 */
+.dd-edge-card {
+  position: absolute;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent);
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 1px 3px;
+  pointer-events: none;
+  user-select: none;
+}
+.dd-edge-card.edge-fk.nm-error {
+  color: var(--danger);
 }
 
 /* 独立字段节点（架构/状态机镜片若出现） */
@@ -1657,13 +1710,15 @@ select.dd-input {
   cursor: pointer;
   font-size: 11px;
   line-height: 1.2;
-  background: none;
-  border: none;
-  padding: 0 2px;
+  /* 用画布底色做成小标签牌：线多的地方文字会被别的线横穿，
+     只靠同色微光救不回来，得把标签底下的线挡住。 */
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 1px 4px;
   color: var(--muted);
   white-space: nowrap;
   user-select: none;
-  /* 没有底色了，靠一圈跟画布同色的微光把文字从线上"抠"出来 */
+  /* 底色之外再留一圈微光，标签压在卡片边缘时不至于像贴纸 */
   text-shadow:
     0 0 3px var(--bg),
     0 0 6px var(--bg);
