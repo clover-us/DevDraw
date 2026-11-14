@@ -115,6 +115,7 @@ export function App() {
   const [fitTick, setFitTick] = useState(0);
   const [relayoutNonce, setRelayoutNonce] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renamingFieldId, setRenamingFieldId] = useState<string | null>(null);
   // 左导航：默认收起，仅图标轨；点分区展开对应面板。
   const [section, setSection] = useState<NavSection>('library');
   const [navExpanded, setNavExpanded] = useState(false);
@@ -247,6 +248,22 @@ export function App() {
   );
   const cancelRename = useCallback(() => setRenamingId(null), []);
 
+  // ER 字段原地改名（字段也是节点，走同一守门员）。
+  const startFieldRename = useCallback((id: string) => {
+    setRenamingId(null);
+    setRenamingFieldId(id);
+  }, []);
+  const commitFieldRename = useCallback(
+    (id: string, name: string) => {
+      const trimmed = name.trim();
+      setRenamingFieldId(null);
+      if (!trimmed) return;
+      setModel((m) => applyPatchChecked(m, { op: 'update-node', id, name: trimmed }));
+    },
+    [setModel],
+  );
+  const cancelFieldRename = useCallback(() => setRenamingFieldId(null), []);
+
   // 拖拽落点 → 写进 views.json（语义与布局分离，挪位置不污染 model diff）。
   const persistPosition = useCallback(
     (id: string, pos: { x: number; y: number }) => {
@@ -270,6 +287,7 @@ export function App() {
   );
 
   const onNodeDoubleClick = useCallback<NodeMouseHandler>((_, node) => {
+    setRenamingFieldId(null);
     setRenamingId(node.id);
     setSelectedNode(node.id);
   }, []);
@@ -305,6 +323,10 @@ export function App() {
           fields: n.type === 'Table' ? fieldsOf(model, id) : undefined,
           selectedFieldId: n.type === 'Table' ? selectedNode : undefined,
           onFieldSelect: selectNode,
+          renamingFieldId: n.type === 'Table' ? renamingFieldId : undefined,
+          onFieldRenameStart: startFieldRename,
+          onFieldRename: commitFieldRename,
+          onFieldRenameCancel: cancelFieldRename,
           detail: typeof n.attrs?.detail === 'string' ? n.attrs.detail : undefined,
           onSelect: selectNode,
           renaming: renamingId === id,
@@ -313,7 +335,7 @@ export function App() {
         },
         draggable: true,
       })),
-    [projection, positionFor, result, seeds, highlightNodes, selectedNode, fieldCount, selectNode, renamingId, commitRename, cancelRename, model],
+    [projection, positionFor, result, seeds, highlightNodes, selectedNode, fieldCount, selectNode, renamingId, renamingFieldId, commitRename, cancelRename, startFieldRename, commitFieldRename, cancelFieldRename, model],
   );
 
   const derivedEdges = useMemo<Edge<DevDrawEdgeData>[]>(
@@ -395,6 +417,8 @@ export function App() {
     setSelectedNode(null);
     setActiveFinding(null);
     setCreateMode(false);
+    setRenamingId(null);
+    setRenamingFieldId(null);
   }, []);
 
   // 推演面板里点失效源：若不在架构镜片，先跳过去，让控制永远有可见反馈。

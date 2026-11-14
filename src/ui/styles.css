@@ -1305,6 +1305,7 @@ select.dd-input {
   letter-spacing: 0.08em;
 }
 .dd-node-name {
+  display: block;
   font-size: 13px;
   font-weight: 600;
   margin-top: 2px;
@@ -1651,20 +1652,20 @@ select.dd-input {
 }
 
 /* 内联改名输入框 */
-.dd-rename-input {
-  width: 100%;
-  min-width: 120px;
-  background: var(--bg-elevated);
-  border: 1.5px solid var(--accent);
-  border-radius: 6px;
-  color: var(--text);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 4px 8px;
+/* 原地改名：同一个 span 直接编辑，字体/字号/颜色不变，只加一层极淡的编辑提示。 */
+.dd-editing {
   outline: none;
   cursor: text;
-  box-shadow: 0 0 0 3px var(--ring);
+  user-select: text;
+  -webkit-user-select: text;
+  background: var(--bg-elevated);
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px var(--ring);
+  min-width: 2ch;
+}
+.dd-table-head .dd-node-name.dd-editing {
+  overflow: visible;
+  white-space: normal;
 }
 
 /* ---------- 存储状态条（结构不变，颜色随主题） ---------- */
