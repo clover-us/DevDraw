@@ -426,6 +426,35 @@ select.dd-input {
   position: relative;
   background: var(--bg);
 }
+.dd-dock-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+.dd-hint-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px var(--shadow-soft);
+  cursor: pointer;
+}
+.dd-hint-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--overlay);
+}
+.dd-hint-btn svg {
+  flex: none;
+}
 .dd-hint {
   font-size: 12px;
   color: var(--muted);
@@ -490,9 +519,9 @@ select.dd-input {
   left: auto;
   right: 0;
 }
-/* 画布全屏按钮：作为缩放控件的第 4 项渲染在同一列里，样式由 .react-flow__controls button 决定，
-   这里只补居中与最后一格去掉分隔线。 */
-.react-flow__controls .dd-canvas-fs {
+/* 画布自定义控件（全屏 / 重新布局）：作为缩放控件的后两项渲染在同一列里，
+   样式由 .react-flow__controls button 决定，这里只补居中与最后一格去掉分隔线。 */
+.react-flow__controls .dd-canvas-ctl {
   padding: 0;
   display: flex;
   align-items: center;
@@ -501,13 +530,13 @@ select.dd-input {
   box-shadow: none;
   cursor: pointer;
 }
-.react-flow__controls .dd-canvas-fs:last-child {
+.react-flow__controls .dd-canvas-ctl:last-child {
   border-bottom: none;
 }
-.dd-canvas-fs svg {
+.dd-canvas-ctl svg {
   flex: none;
 }
-.react-flow__controls .dd-canvas-fs:hover {
+.react-flow__controls .dd-canvas-ctl:hover {
   background: var(--overlay);
 }
 
@@ -1708,6 +1737,7 @@ select.dd-input {
 .react-flow__controls button {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
+  border-radius: 0;
   fill: var(--text);
   color: var(--text);
   width: 26px;

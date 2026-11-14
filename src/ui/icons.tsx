@@ -215,6 +215,18 @@ export function RedoIcon(p: IconProps) {
 }
 
 /** 画布全屏：四角外扩。 */
+/** 重新布局：左二右一的节点图（三圆两线），小尺寸下也不会糊成一团。 */
+export function LayoutIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <circle cx="6" cy="6" r="2.6" />
+      <circle cx="6" cy="18" r="2.6" />
+      <circle cx="18" cy="12" r="2.6" />
+      <path d="M8.6 7.2l6.8 3.4M8.6 16.8l6.8-3.4" />
+    </svg>
+  );
+}
+
 export function MaximizeIcon(p: IconProps) {
   return (
     <svg {...base(p)}>

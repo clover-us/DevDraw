@@ -37,7 +37,7 @@ import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData, type FieldRow } from './components';
 import { EdgePicker } from './EdgePicker';
 import { EntityDrawer } from './EntityDrawer';
-import { MaximizeIcon, MinimizeIcon, RedoIcon, UndoIcon } from './icons';
+import { LayoutIcon, MaximizeIcon, MinimizeIcon, RedoIcon, UndoIcon } from './icons';
 import { NavPanel } from './NavPanel';
 import { NavRail, type NavSection } from './NavRail';
 import { QuickCreate } from './QuickCreate';
@@ -811,20 +811,14 @@ export function App() {
           >
             <RedoIcon size={16} />
           </button>
-          <button onClick={project.exportZip} title="把当前状态打包下载一份 zip 快照（备份 / 分享 / 换浏览器）">
-            导出 zip
-          </button>
-          <button
-            onClick={relayout}
-            title="清掉当前镜片的手动摆位，让 ELK 重新自动布局"
-          >
-            重新布局
-          </button>
           {lens === 'architecture' && (
             <button onClick={clearScenario} disabled={seeds.length === 0}>
               清除推演
             </button>
           )}
+          <button onClick={project.exportZip} title="把当前状态打包下载一份 zip 快照（备份 / 分享 / 换浏览器）">
+            导出 zip
+          </button>
           <button onClick={resetAll}>重置示例</button>
         </div>
       </header>
@@ -936,7 +930,7 @@ export function App() {
             <Controls showInteractive={false} position="bottom-right" style={{ right: 190, bottom: 0 }}>
               {/* 自定义控制项会被渲染在缩放按钮之后，因此和它们同一列、同一样式 */}
               <button
-                className="dd-canvas-fs"
+                className="dd-canvas-ctl dd-canvas-fs"
                 onClick={toggleFullscreen}
                 title={fullscreen ? '退出全屏 (Esc)' : '画布全屏'}
                 aria-label={fullscreen ? '退出全屏' : '画布全屏'}
@@ -980,7 +974,17 @@ export function App() {
                 打开文件夹
               </button>
             )}
-            <div className="dd-hint">{HINTS[lens]}</div>
+            <div className="dd-dock-foot">
+              <div className="dd-hint">{HINTS[lens]}</div>
+              <button
+                className="dd-hint-btn"
+                onClick={relayout}
+                title="重新布局：清掉当前镜片的摆位，让 ELK 重新排（只影响这一页）"
+              >
+                <LayoutIcon size={13} />
+                重新布局
+              </button>
+            </div>
           </div>
           {quickCreate && (
             <QuickCreate
