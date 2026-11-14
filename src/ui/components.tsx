@@ -225,7 +225,9 @@ export function DevDrawNode({ id, data }: NodeProps) {
             onRename={renameNode}
             onCancel={d.onRenameCancel}
           />
-          <span className="dd-table-count">{d.fieldCount ?? fields.length} 列</span>
+          <span className={`dd-table-count${d.folded ? ' is-folded' : ''}`}>
+            {d.folded ? `${fields.length}/${d.fieldCount ?? fields.length}` : d.fieldCount ?? fields.length} 列
+          </span>
           {d.foldable && (
             <button
               type="button"
@@ -283,11 +285,6 @@ export function DevDrawNode({ id, data }: NodeProps) {
               <Handle id={erFieldPort('right', f.id)} type="source" position={Position.Right} className="dd-row-handle" />
             </div>
           ))}
-          {d.hiddenFields ? (
-            <div className="dd-table-more" title={`还有 ${d.hiddenFields} 列，点表头的 ＋ 展开`}>
-              还有 {d.hiddenFields} 列
-            </div>
-          ) : null}
         </div>
       </>
     );

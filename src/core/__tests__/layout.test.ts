@@ -41,7 +41,7 @@ describe('layoutProjection（ELK 自动布局）', () => {
     expect(shown.rows.length).toBe(3);
     expect(shown.hidden).toBeLessThanOrEqual(rows.length - 3);
     // 折叠后的卡片高度 < 全展开高度：布局取的是前者，所以 y 不会被 12 行撑开。
-    expect(foldedCardHeight(shown.rows.length, shown.hidden)).toBeLessThan(tableCardHeight(rows.length));
+    expect(foldedCardHeight(shown.rows.length)).toBeLessThan(tableCardHeight(rows.length));
   });
 
   it('状态机镜片：初始态在终态左侧（左→右流）', async () => {

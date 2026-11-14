@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arrangeColumns, columnKey, groupColumns, reflowColumn, type Positions } from '../er-arrange';
+import { arrangeColumns, columnKey, groupColumns, packAround, reflowColumn, type Positions } from '../er-arrange';
 
 const H = 50;
 const heights = { a: H, b: H, c: H, d: H };
@@ -102,5 +102,40 @@ describe('reflowColumn', () => {
 
   it('空输入返回空表', () => {
     expect(reflowColumn([], 20)).toEqual({});
+  });
+});
+
+describe('packAround', () => {
+  const entries = [
+    { id: 'a', y: 0, height: H },
+    { id: 'b', y: 70, height: H },
+    { id: 'c', y: 140, height: H },
+  ];
+
+  it('锚点顶边不动，下方按新高度补位', () => {
+    // b 被折起来，只剩 20 高：c 应该贴到 b 的新底边 + gap。
+    const shrunk = entries.map((e) => (e.id === 'b' ? { ...e, height: 20 } : e));
+    const out = packAround(shrunk, 20, 'b', 70);
+    expect(out.b).toBe(70);
+    expect(out.c).toBe(70 + 20 + 20);
+  });
+
+  it('锚点上方的卡一个像素都不动', () => {
+    const out = packAround(entries, 20, 'b', 70);
+    expect(out.a).toBe(0);
+  });
+
+  it('锚点下方不再留空洞', () => {
+    const sparse = [
+      { id: 'a', y: 0, height: H },
+      { id: 'b', y: 70, height: H },
+      { id: 'c', y: 400, height: H },
+    ];
+    const out = packAround(sparse, 20, 'b', 70);
+    expect(out.c).toBe(70 + H + 20);
+  });
+
+  it('锚点不存在时返回空表', () => {
+    expect(packAround(entries, 20, 'zzz', 0)).toEqual({});
   });
 });

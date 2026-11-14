@@ -37,7 +37,7 @@ import {
   type ErField,
   type FkLink,
 } from '../core/er';
-import { arrangeColumns, columnKey, reflowColumn } from '../core/er-arrange';
+import { columnKey, packAround, reflowColumn } from '../core/er-arrange';
 import { newEdgeId, newNodeId } from '../core/id';
 import { layoutProjection, NODE_WIDTH, nodeHeight, type Positions } from '../core/layout';
 import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
@@ -351,6 +351,7 @@ export function App() {
       });
       // 折叠只改卡片高度：列还是那几列、顺序也没变，所以本地按新高度重码一遍就够了，
       // 不必等 ELK 再来一次异步重排（那中间的几十毫秒正是"闪一下"的来源）。
+      // 重码只发生在被点的那一列：锚点顶边不动、同列下方补位，其他列一个像素都不碰。
       setAutoPos((cur) => {
         const positions: Positions = {};
         const heights: Record<string, number> = {};
@@ -359,11 +360,18 @@ export function App() {
           const rows = erFieldRows(model, nid);
           const folded = nid === id ? next : (foldedTables[nid] ?? shouldAutoFold(rows));
           const visible = foldRows(rows, folded);
-          heights[nid] = Math.max(74, foldedCardHeight(visible.rows.length, visible.hidden));
+          heights[nid] = Math.max(74, foldedCardHeight(visible.rows.length));
           positions[nid] = cur[nid] ?? positionFor(nid);
         }
-        const edges = Object.values(projection.edges).map((e) => ({ from: e.from, to: e.to }));
-        return { ...cur, ...arrangeColumns(positions, heights, edges, 44) };
+        const anchor = positions[id] ?? positionFor(id);
+        const key = Math.round(anchor.x);
+        const entries = Object.keys(positions)
+          .filter((nid) => Math.round(positions[nid].x) === key)
+          .map((nid) => ({ id: nid, y: positions[nid].y, height: heights[nid] }));
+        const ys = packAround(entries, 44, id, anchor.y);
+        const out: Positions = { ...cur };
+        for (const [nid, y] of Object.entries(ys)) out[nid] = { x: positions[nid].x, y };
+        return out;
       });
     },
     [model, setViews, lens, foldedTables, projection, positionFor],
@@ -458,12 +466,12 @@ export function App() {
         )
         .map(([id]) => {
           const fold = tableFolds[id];
-          const height = fold ? Math.max(74, foldedCardHeight(fold.rows.length, fold.hidden)) : 74;
+          const height = fold ? Math.max(74, foldedCardHeight(fold.rows.length)) : 74;
           return { id, y: positionFor(id).y, height };
         });
       if (siblings.length === 0) return;
       const fold = tableFolds[node.id];
-      const own = fold ? Math.max(74, foldedCardHeight(fold.rows.length, fold.hidden)) : 74;
+      const own = fold ? Math.max(74, foldedCardHeight(fold.rows.length)) : 74;
       const moved = reflowColumn(
         [...siblings, { id: node.id, y: node.position.y, height: own }],
         44,
@@ -637,12 +645,11 @@ export function App() {
         const p = positionFor(id);
         const fold = tableFolds[id];
         const rows = fold ? fold.rows.length : erFieldRows(model, id).length;
-        const hidden = fold ? fold.hidden : 0;
         return {
           left: p.x,
           top: p.y,
           right: p.x + NODE_WIDTH.Table,
-          bottom: p.y + Math.max(74, foldedCardHeight(rows, hidden)),
+          bottom: p.y + Math.max(74, foldedCardHeight(rows)),
         };
       });
   }, [lens, projection, positionFor, model, tableFolds]);
@@ -1286,6 +1293,17 @@ export function App() {
             />
           </ReactFlow>
           <div className="dd-canvas-status">
+            {/* 还没落到磁盘上时，"打开文件夹"和"未持久化"是同一件事的两面，放一起看更顺：
+                左边给你解决办法，右边是当前状态。 */}
+            {project.fsaSupported && project.storeKind !== 'folder' && (
+              <button
+                className="dd-status-open"
+                onClick={() => void project.openFolder()}
+                title="授权一个本地文件夹，之后每次改动自动保存到磁盘"
+              >
+                打开文件夹
+              </button>
+            )}
             <StorageBar
               modelName={model.name}
               kind={project.storeKind}
@@ -1302,15 +1320,6 @@ export function App() {
             />
           </div>
           <div className="dd-canvas-dock">
-            {project.fsaSupported && project.storeKind !== 'folder' && (
-              <button
-                className="dd-primary"
-                onClick={() => void project.openFolder()}
-                title="授权一个本地文件夹，之后每次改动自动保存到磁盘"
-              >
-                打开文件夹
-              </button>
-            )}
             <div className="dd-dock-foot">
               <div className="dd-hint">{HINTS[lens]}</div>
               <button

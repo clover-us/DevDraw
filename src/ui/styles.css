@@ -500,6 +500,26 @@ select.dd-input {
   background: var(--panel);
   box-shadow: 0 4px 16px var(--shadow-soft);
 }
+/* 未持久化时贴在状态胶囊左边的"打开文件夹"：同一行、同高，左侧给出路、右侧说现状。 */
+.dd-status-open {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 13px;
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 9px;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px var(--shadow-soft);
+}
+.dd-status-open:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
 .dd-canvas-status .dd-storage-info {
   display: none;
 }
@@ -1504,10 +1524,9 @@ select.dd-input {
   color: var(--accent);
   border-color: var(--accent);
 }
-.dd-table-more {
-  padding: 4px 12px 6px;
-  font-size: 10px;
-  color: var(--faint);
+/* 折叠态下的「3/12 列」：省下来的行必须真的省在高度上，所以计数放表头，不再多占一行。 */
+.dd-table-count.is-folded {
+  color: var(--accent);
 }
 .dd-table-fields {
   padding: 4px 0;

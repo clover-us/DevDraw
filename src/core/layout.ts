@@ -212,7 +212,7 @@ export async function layoutProjection(
     const isTable = Boolean(erModel) && n.type === 'Table';
     const fold = isTable ? visibleOf(id) : undefined;
     const height = fold
-      ? Math.max(74, foldedCardHeight(fold.rows.length, fold.hidden))
+      ? Math.max(74, foldedCardHeight(fold.rows.length))
       : nodeHeight(model, id, n.type, n.name);
     heights[id] = height;
     const node: ElkNode = { id, width: NODE_WIDTH[n.type], height };

@@ -159,3 +159,30 @@ export function reflowColumn(entries: ReflowEntry[], gap: number, pinned?: { id:
   }
   return out;
 }
+
+/**
+ * 折叠/展开之后：只在"这一列"里重码，锚点是刚被点的那张卡。
+ *
+ * 为什么不整图重排：折叠是"我点的那张卡变小了"，不是"整个图重画一遍"。
+ * 整图重排（连垂直居中一起算）会让其他列的卡都跟着挪几十像素，看起来像是
+ * "我点的没动、别人全动了"。这里只让锚点下方那几张往上补位，其余原封不动。
+ *
+ * 锚点自己的顶边保持不动——鼠标还停在那个 ＋/－ 上，卡在手指底下跳会很怪；
+ * 变的是它的底边，以及下面那几张的顶边。
+ */
+export function packAround(entries: ReflowEntry[], gap: number, anchorId: string, anchorY: number): Record<string, number> {
+  const anchor = entries.find((e) => e.id === anchorId);
+  if (!anchor) return {};
+  const out: Record<string, number> = {};
+  const above = entries.filter((e) => e.id !== anchorId && e.y < anchorY).sort((a, b) => a.y - b.y);
+  const below = entries.filter((e) => e.id !== anchorId && e.y >= anchorY).sort((a, b) => a.y - b.y);
+  for (const e of above) out[e.id] = e.y;
+  let cursor = Math.round(anchorY);
+  out[anchorId] = cursor;
+  cursor += anchor.height + gap;
+  for (const e of below) {
+    out[e.id] = cursor;
+    cursor += e.height + gap;
+  }
+  return out;
+}

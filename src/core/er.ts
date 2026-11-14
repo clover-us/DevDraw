@@ -62,10 +62,14 @@ export function shouldAutoFold(rows: ErField[]): boolean {
   return rows.length > AUTO_FOLD_AT;
 }
 
-/** 折叠态下的卡片高度：可见行 + 一行「还有 N 列」。 */
-export function foldedCardHeight(visible: number, hidden: number): number {
-  if (visible <= 0) return tableCardHeight(0);
-  return tableCardHeight(visible) + (hidden > 0 ? TABLE_ROW_H : 0);
+/**
+ * 折叠态下的卡片高度：只算可见行。
+ *
+ * 折叠必须真的矮下去——早先在底部留一行「还有 N 列」，结果 4 列的表折起来跟不折一样高，
+ * 看起来像"点了没反应"。省下来的列数改放在表头（`3/12 列`），高度就完全等于行数。
+ */
+export function foldedCardHeight(visible: number): number {
+  return tableCardHeight(Math.max(0, visible));
 }
 
 /** 字段行的行顺序：按 contains 边的出现顺序（与界面渲染顺序一致）。 */
