@@ -17,22 +17,61 @@ function getElk(): Promise<ELK> {
   return elkPromise;
 }
 
-/** 节点估算尺寸（与 CSS 渲染尺寸近似，供 ELK 计算间距）。 */
-const NODE_SIZE: Record<NodeType, { width: number; height: number }> = {
-  Service: { width: 160, height: 56 },
-  Database: { width: 160, height: 56 },
-  Queue: { width: 160, height: 56 },
-  Endpoint: { width: 160, height: 56 },
-  ExternalSystem: { width: 170, height: 56 },
-  Actor: { width: 150, height: 56 },
-  Table: { width: 232, height: 74 },
-  Field: { width: 200, height: 32 },
-  Lifecycle: { width: 180, height: 56 },
-  State: { width: 150, height: 50 },
-  Decision: { width: 180, height: 72 },
-  Assumption: { width: 180, height: 72 },
-  Note: { width: 180, height: 72 },
+/** 节点固定宽度（与 CSS width 一致，box-sizing:border-box）。长文本在固定宽内换行，不再横向撑开。 */
+const NODE_WIDTH: Record<NodeType, number> = {
+  Service: 190,
+  Database: 190,
+  Queue: 190,
+  Endpoint: 190,
+  ExternalSystem: 190,
+  Actor: 190,
+  Table: 232,
+  Field: 200,
+  Lifecycle: 180,
+  State: 160,
+  Decision: 220,
+  Assumption: 220,
+  Note: 220,
 };
+
+const ARCH_TYPES = new Set<NodeType>(['Service', 'Database', 'Queue', 'Endpoint', 'ExternalSystem', 'Actor']);
+const KNOWLEDGE_TYPES = new Set<NodeType>(['Decision', 'Assumption', 'Note']);
+
+/** 近似文本像素宽：CJK≈1em，ASCII≈0.6em。仅供布局估算换行行数，非精确测量。 */
+function textWidth(text: string, fontSize: number): number {
+  let w = 0;
+  for (const ch of text) w += (ch.codePointAt(0) ?? 0) > 0x2e7f ? fontSize : fontSize * 0.6;
+  return w;
+}
+function lineCount(text: string, contentWidth: number, fontSize: number): number {
+  if (!text) return 0;
+  return Math.max(1, Math.ceil(textWidth(text, fontSize) / contentWidth));
+}
+
+/** 节点估算高度：固定宽 + 文本换行行数 → ELK 预留正确竖向空间，长文本卡片不重叠。 */
+function nodeHeight(model: Model | undefined, id: string, type: NodeType, name: string): number {
+  if (type === 'Table') return tableHeight(model, id);
+  const attrs = model?.nodes[id]?.attrs;
+  const detail = typeof attrs?.detail === 'string' ? attrs.detail : '';
+  if (KNOWLEDGE_TYPES.has(type)) {
+    const content = NODE_WIDTH[type] - 28; // padding 14×2
+    const nameH = lineCount(name, content, 13) * 17 + 2;
+    const detailH = detail ? lineCount(detail, content, 10) * 14.5 + 3 : 0;
+    return Math.ceil(16 + 15 + nameH + detailH); // padding + kind 行 + 名 + 详情
+  }
+  if (ARCH_TYPES.has(type)) {
+    const textW = NODE_WIDTH[type] - 28 - 38 - 10; // padding + glyph + gap
+    const nameH = lineCount(name, textW, 13) * 17 + 1;
+    return Math.ceil(Math.max(38, 13 + nameH) + 16);
+  }
+  if (type === 'State') {
+    const content = NODE_WIDTH[type] - 36; // padding 18×2
+    const initial = attrs?.initial === true;
+    return Math.max(50, Math.ceil(lineCount(name, content, 13) * 17 + 20 + (initial ? 12 : 0)));
+  }
+  if (type === 'Field') return 32;
+  return 56; // Lifecycle 等
+}
 
 /** 每副镜片的主方向：架构/状态机左→右流，ER 父表在上子表在下（沿外键方向分层）。 */
 const DIRECTION: Record<LensId, string> = {
@@ -45,7 +84,7 @@ export type Positions = Record<string, { x: number; y: number }>;
 
 /** 表卡片高度 ≈ 表头 + 字段行（与 CSS 渲染近似），让 ELK 间距贴合真实卡片。 */
 function tableHeight(model: Model | undefined, tableId: string): number {
-  const base = NODE_SIZE.Table.height;
+  const base = 74;
   if (!model) return base;
   const count = Object.values(model.edges).filter(
     (e) => e.type === 'contains' && e.from === tableId && model.nodes[e.to]?.type === 'Field',
@@ -53,12 +92,12 @@ function tableHeight(model: Model | undefined, tableId: string): number {
   return Math.max(base, 48 + count * 27);
 }
 
-/** 对一副镜片的投影做分层自动布局，返回节点 id → 坐标。传入 model 时按字段数估算表高。 */
+/** 对一副镜片的投影做分层自动布局，返回节点 id → 坐标。传入 model 时按文本/字段数估算节点高度。 */
 export async function layoutProjection(projection: Projection, lens: LensId, model?: Model): Promise<Positions> {
   const children: ElkNode[] = Object.entries(projection.nodes).map(([id, n]) => ({
     id,
-    width: NODE_SIZE[n.type].width,
-    height: n.type === 'Table' ? tableHeight(model, id) : NODE_SIZE[n.type].height,
+    width: NODE_WIDTH[n.type],
+    height: nodeHeight(model, id, n.type, n.name),
   }));
   const edges: ElkExtendedEdge[] = Object.entries(projection.edges).map(([id, e]) => ({
     id,
