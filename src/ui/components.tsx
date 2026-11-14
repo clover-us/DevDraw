@@ -14,6 +14,7 @@ import {
 import type { DependencyMode, EdgeType, NodeState, NodeType } from '../core/types';
 import { DEFAULT_NODE_ICON } from '../core/components';
 import { ER_ANCHOR_HANDLE, erFieldPort } from '../core/er';
+import { longestVerticalMidpoint, routeFkPath, type CardRect } from '../core/er-route';
 import { Glyph } from './glyphs';
 
 /** 语义类型 → 兜底图标（节点无组件身份时）。 */
@@ -379,6 +380,10 @@ export interface DevDrawEdgeData extends Record<string, unknown> {
   /** 两端基数标记要不要画：多条线挤同一个字段行时只留一个 1、一个 N。 */
   showSourceTag?: boolean;
   showTargetTag?: boolean;
+  /** ER 镜片的外键统一走正交折线（相邻列一段竖段，跨列长边绕开中间列）。 */
+  ortho?: boolean;
+  /** 本镜片所有卡片的包围盒：正交走线靠它判断会不会横穿别家卡片。 */
+  cards?: CardRect[];
   onSelect: (edgeId: string) => void;
 }
 
@@ -416,34 +421,9 @@ function orthoPath(points: Pt[], radius = 9): string {
 }
 
 /**
- * 外键走线：出门 → 挑一条竖向车道 → 竖直落到目标字段行 → 进线。
- * lane 把"同一列散出去的好几条外键"错开，否则它们会在同一个 x 上叠成一根。
+ * 外键走线规则在 core/er-route.ts（纯函数，可单测）：出门 → 列间车道 → 落到目标行 → 进线，
+ * 跨列长边遇上中间列的卡片就绕开。这里只负责把它画成圆角折线。
  */
-function fkPoints(sx: number, sy: number, tx: number, ty: number, lane: number, laneCount: number): Pt[] {
-  const span = tx - sx;
-  if (span < 56) {
-    // 回边 / 自引用外键：直线走法会横穿卡片，改成从上方绕过去再拐回左侧。
-    const outX = sx + 24 + lane * 12;
-    const overY = Math.min(sy, ty) - (30 + lane * 12);
-    const backX = tx - 24 - lane * 12;
-    return [
-      { x: sx, y: sy },
-      { x: outX, y: sy },
-      { x: outX, y: overY },
-      { x: backX, y: overY },
-      { x: backX, y: ty },
-      { x: tx, y: ty },
-    ];
-  }
-  const laneX = laneCount > 1 ? sx + (span * (lane + 1)) / (laneCount + 1) : sx + span / 2;
-  return [
-    { x: sx, y: sy },
-    { x: laneX, y: sy },
-    { x: laneX, y: ty },
-    { x: tx, y: ty },
-  ];
-}
-
 export function DevDrawEdge(props: EdgeProps) {
   const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected } = props;
   const d = data as DevDrawEdgeData;
@@ -452,14 +432,27 @@ export function DevDrawEdge(props: EdgeProps) {
   const fieldLevel = d.edgeType === 'fk' && d.fieldLevel === true;
   const lane = d.lane ?? 0;
   const laneCount = d.laneCount ?? 1;
+  // ER 的外键一律正交：字段级的两端直接贴行，锚不上字段的（如 N:M 缺中间表）也得横平竖直，
+  // 否则一条斜的贝塞尔会从别的表卡片和车道上横穿过去，比没连字段还乱。
+  const ortho = d.edgeType === 'fk' && d.ortho === true;
+  const points = ortho ? routeFkPath({ sx: sourceX, sy: sourceY, tx: targetX, ty: targetY, lane, laneCount, cards: d.cards }) : null;
 
   let path: string;
   let tagX: number;
   let tagY: number;
-  if (fieldLevel) {
-    path = orthoPath(fkPoints(sourceX, sourceY, targetX, targetY, lane, laneCount));
-    tagX = sourceX;
-    tagY = sourceY;
+  let tagOrigin: 'center' | 'left' = 'center';
+  if (points) {
+    path = orthoPath(points);
+    if (fieldLevel) {
+      tagX = sourceX;
+      tagY = sourceY;
+    } else {
+      // 卡片级外键：标签挂最长竖段旁边（列间空地），不压线也不压卡片。
+      const mid = longestVerticalMidpoint(points);
+      tagX = mid.x + 8;
+      tagY = mid.y;
+      tagOrigin = 'left';
+    }
   } else {
     [path] = getBezierPath({
       sourceX,
@@ -469,13 +462,11 @@ export function DevDrawEdge(props: EdgeProps) {
       sourcePosition,
       targetPosition,
     });
-    // 标签放在哪：这里只剩"字段锚不上"的外键（如 N:M 缺中间表）和别的边类型。
-    // 外键退回卡片级时线是两卡之间的空地，落在正中间最不容易撞上卡片边缘的基数标记。
+    // 标签放在哪：规则同正交线的思路 —— 落在两卡之间的空地上，再沿法线抬离连线一小段。
+    // 方向固定取左法线，水平边于是标签在上、竖直边在右，相邻边不会互相叠。
     const t = 0.5;
     const bx = sourceX + (targetX - sourceX) * t;
     const by = sourceY + (targetY - sourceY) * t;
-    // 再沿法线抬离连线一小段：文字压在线上读不清。方向固定取左法线，
-    // 水平边于是标签在上、竖直边在右，相邻边不会互相叠。
     const dx = targetX - sourceX;
     const dy = targetY - sourceY;
     const len = Math.hypot(dx, dy) || 1;
@@ -534,7 +525,12 @@ export function DevDrawEdge(props: EdgeProps) {
         ) : (
           <div
             className={`dd-edge-label ${cls}`}
-            style={{ transform: `translate(-50%, -50%) translate(${tagX}px, ${tagY}px)` }}
+            style={{
+              transform:
+                tagOrigin === 'left'
+                  ? `translate(0, -50%) translate(${tagX}px, ${tagY}px)`
+                  : `translate(-50%, -50%) translate(${tagX}px, ${tagY}px)`,
+            }}
             onClick={(event) => {
               event.stopPropagation();
               d.onSelect(id);

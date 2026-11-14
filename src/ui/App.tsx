@@ -23,7 +23,7 @@ import {
   type NodeMouseHandler,
 } from '@xyflow/react';
 import { nodeComponent, nodeFromComponent, nodeGlyph, resolveComponent } from '../core/components';
-import { ER_ANCHOR_HANDLE, erFieldPort, fieldIdFromHandle, planFkConnection, resolveFkLinks, tableFieldIds } from '../core/er';
+import { ER_ANCHOR_HANDLE, erFieldPort, erFieldRows, fieldIdFromHandle, planFkConnection, resolveFkLinks, tableCardHeight, tableFieldIds } from '../core/er';
 import { newEdgeId, newNodeId } from '../core/id';
 import { layoutProjection, NODE_WIDTH, nodeHeight, type Positions } from '../core/layout';
 import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
@@ -491,6 +491,22 @@ export function App() {
   // 外键边 → 具体字段：父表键列在哪一行、子表外键列在哪一行。渲染（handle）与拖线都读这份。
   const fkLinks = useMemo(() => resolveFkLinks(model), [model]);
 
+  /** 本镜片里所有表卡片的包围盒：正交走线靠它判断一条线会不会横穿别家卡片。 */
+  const cardRects = useMemo(() => {
+    if (lens !== 'er') return [];
+    return Object.entries(projection.nodes)
+      .filter(([, n]) => n.type === 'Table')
+      .map(([id]) => {
+        const p = positionFor(id);
+        return {
+          left: p.x,
+          top: p.y,
+          right: p.x + NODE_WIDTH.Table,
+          bottom: p.y + tableCardHeight(erFieldRows(model, id).length),
+        };
+      });
+  }, [lens, projection, positionFor, model]);
+
   /**
    * 同一源字段散出去的多条外键：给每条分一条竖向车道（lane），否则它们的竖段会叠成一根。
    * 按目标卡片的高度排序分配，扇面因此不会自己跟自己交叉。
@@ -551,17 +567,16 @@ export function App() {
           source: e.from,
           target: e.to,
           // 外键连到具体字段行：父表键列右侧出线，子表外键列左侧进线。
-          // 字段对不上（N:M 缺中间表）才退回卡片级锚点。
-          sourceHandle: !link
-            ? anchored(e.from, 'right')
-            : link.fromFieldId
-              ? erFieldPort('right', link.fromFieldId)
-              : ER_ANCHOR_HANDLE.right,
-          targetHandle: !link
-            ? anchored(e.to, 'left')
-            : link.toFieldId
-              ? erFieldPort('left', link.toFieldId)
-              : ER_ANCHOR_HANDLE.left,
+          // 只有"两端都锚上了字段"才算字段级；锚不全（如 N:M 缺中间表）就整体退回卡片级，
+          // 否则会画出"从 id 行出发、飞到另一张表表头"的半吊子线，读者更糊涂。
+          sourceHandle:
+            !link || !link.fieldLevel
+              ? anchored(e.from, 'right')
+              : erFieldPort('right', link.fromFieldId ?? ''),
+          targetHandle:
+            !link || !link.fieldLevel
+              ? anchored(e.to, 'left')
+              : erFieldPort('left', link.toFieldId ?? ''),
           type: 'devdraw',
           selected: selectedEdge === id,
           data: {
@@ -575,6 +590,8 @@ export function App() {
             event: e.attrs?.event,
             missingService,
             fieldLevel: link?.fieldLevel === true,
+            ortho: lens === 'er',
+            cards: lens === 'er' ? cardRects : undefined,
             lane: routing?.lane ?? 0,
             laneCount: routing?.laneCount ?? 1,
             showSourceTag: routing?.showSourceTag !== false,
@@ -583,7 +600,7 @@ export function App() {
           },
         };
       }),
-    [projection, model, fkLinks, edgeRouting, impactedEdges, highlightEdges, selectEdge, selectedEdge],
+    [projection, model, fkLinks, edgeRouting, impactedEdges, highlightEdges, selectEdge, selectedEdge, lens, cardRects],
   );
 
   // 受控画布：onNodesChange/onEdgesChange 实时应用拖拽/选择变更（修复"拖动落地才动"）。

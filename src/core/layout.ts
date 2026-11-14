@@ -161,6 +161,43 @@ function tablePorts(rows: ErField[]): ElkPort[] {
   return ports;
 }
 
+/**
+ * ER 专享后处理：同层（同列）的卡片按原顺序重新贴紧，整列以全图中轴垂直居中。
+ *
+ * 为什么需要：ELK 的端口对齐（BRANDES_KOEPF）会为了让 `orders.id` 与 `payments.order_id`
+ * 尽量水平共线而把整张卡片上下平移。单看一条线确实直，但三层累加后整图变成"斜着往下滑的
+ * 阶梯"，列与列之间还留下大块空洞（截图里最明显的问题）。读 ER 图是"一列一列看"的：
+ * 列对齐 + 每条边多一个折点，比参差的对角阶梯好读得多，也是 dbdiagram/DataGrip 这类工具的做法。
+ */
+function packColumns(positions: Positions, heights: Record<string, number>, gap: number): Positions {
+  const columns = new Map<number, string[]>();
+  for (const [id, p] of Object.entries(positions)) {
+    const key = Math.round(p.x);
+    const list = columns.get(key);
+    if (list) list.push(id);
+    else columns.set(key, [id]);
+  }
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const [id, p] of Object.entries(positions)) {
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y + (heights[id] ?? 0));
+  }
+  const center = (minY + maxY) / 2;
+  const out: Positions = { ...positions };
+  for (const ids of columns.values()) {
+    // 列内顺序沿用 ELK 的（它已经按交叉最少排过），只改 y，不动 x。
+    ids.sort((a, b) => positions[a].y - positions[b].y);
+    const total = ids.reduce((sum, id) => sum + (heights[id] ?? 0), 0) + gap * (ids.length - 1);
+    let y = center - total / 2;
+    for (const id of ids) {
+      out[id] = { x: positions[id].x, y: Math.round(y) };
+      y += (heights[id] ?? 0) + gap;
+    }
+  }
+  return out;
+}
+
 /** 对一副镜片的投影做分层自动布局，返回节点 id → 坐标。传入 model 时按文本/字段数估算节点高度。 */
 export async function layoutProjection(projection: Projection, lens: LensId, model?: Model): Promise<Positions> {
   const erModel = lens === 'er' ? model : undefined;
@@ -175,8 +212,11 @@ export async function layoutProjection(projection: Projection, lens: LensId, mod
     return rows;
   };
 
+  const heights: Record<string, number> = {};
   const children: ElkNode[] = Object.entries(projection.nodes).map(([id, n]) => {
-    const node: ElkNode = { id, width: NODE_WIDTH[n.type], height: nodeHeight(model, id, n.type, n.name) };
+    const height = nodeHeight(model, id, n.type, n.name);
+    heights[id] = height;
+    const node: ElkNode = { id, width: NODE_WIDTH[n.type], height };
     if (erModel && n.type === 'Table') {
       const rows = rowsOf(id);
       if (rows.length > 0) {
@@ -212,5 +252,6 @@ export async function layoutProjection(projection: Projection, lens: LensId, mod
   for (const child of result.children ?? []) {
     out[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
   }
-  return out;
+  // ER：列对齐后处理（见 packColumns 注释）。其余镜片保持 ELK 原样。
+  return lens === 'er' ? packColumns(out, heights, 44) : out;
 }
