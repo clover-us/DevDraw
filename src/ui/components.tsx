@@ -48,6 +48,13 @@ export interface DevDrawNodeData extends Record<string, unknown> {
   componentLabel?: string;
   /** ER 表卡片：内部字段行。 */
   fields?: FieldRow[];
+  /** ER 表卡片：被折叠起来的字段数（> 0 时底部显示「还有 N 列」）。 */
+  hiddenFields?: number;
+  /** 当前是否折叠（只显示键列）。 */
+  folded?: boolean;
+  /** 字段多到值得折叠时才给按钮。 */
+  foldable?: boolean;
+  onToggleFold?: (id: string) => void;
   selectedFieldId?: string | null;
   onFieldSelect?: (id: string) => void;
   onSelect: (id: string) => void;
@@ -218,7 +225,21 @@ export function DevDrawNode({ id, data }: NodeProps) {
             onRename={renameNode}
             onCancel={d.onRenameCancel}
           />
-          <span className="dd-table-count">{fields.length || d.fieldCount || 0} 列</span>
+          <span className="dd-table-count">{d.fieldCount ?? fields.length} 列</span>
+          {d.foldable && (
+            <button
+              type="button"
+              className={`dd-table-fold nodrag${d.folded ? ' is-folded' : ''}`}
+              title={d.folded ? `展开全部 ${d.fieldCount ?? ''} 列` : '折叠：只显示键列'}
+              aria-label={d.folded ? '展开字段' : '折叠字段'}
+              onClick={(e) => {
+                e.stopPropagation();
+                d.onToggleFold?.(id);
+              }}
+            >
+              {d.folded ? '＋' : '－'}
+            </button>
+          )}
         </div>
         <div className="dd-table-fields">
           {fields.length === 0 && <div className="dd-table-empty">无字段 · 在右侧抽屉添加</div>}
@@ -262,6 +283,11 @@ export function DevDrawNode({ id, data }: NodeProps) {
               <Handle id={erFieldPort('right', f.id)} type="source" position={Position.Right} className="dd-row-handle" />
             </div>
           ))}
+          {d.hiddenFields ? (
+            <div className="dd-table-more" title={`还有 ${d.hiddenFields} 列，点表头的 ＋ 展开`}>
+              还有 {d.hiddenFields} 列
+            </div>
+          ) : null}
         </div>
       </>
     );
@@ -384,6 +410,8 @@ export interface DevDrawEdgeData extends Record<string, unknown> {
   ortho?: boolean;
   /** 本镜片所有卡片的包围盒：正交走线靠它判断会不会横穿别家卡片。 */
   cards?: CardRect[];
+  /** 顶部通道的 y（所有卡片之上）：跨列长边绕不开中间列时改走这里。 */
+  topY?: number;
   onSelect: (edgeId: string) => void;
 }
 
@@ -435,7 +463,9 @@ export function DevDrawEdge(props: EdgeProps) {
   // ER 的外键一律正交：字段级的两端直接贴行，锚不上字段的（如 N:M 缺中间表）也得横平竖直，
   // 否则一条斜的贝塞尔会从别的表卡片和车道上横穿过去，比没连字段还乱。
   const ortho = d.edgeType === 'fk' && d.ortho === true;
-  const points = ortho ? routeFkPath({ sx: sourceX, sy: sourceY, tx: targetX, ty: targetY, lane, laneCount, cards: d.cards }) : null;
+  const points = ortho
+    ? routeFkPath({ sx: sourceX, sy: sourceY, tx: targetX, ty: targetY, lane, laneCount, cards: d.cards, topY: d.topY })
+    : null;
 
   let path: string;
   let tagX: number;

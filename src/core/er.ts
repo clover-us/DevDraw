@@ -35,6 +35,39 @@ export function tableCardHeight(rows: number): number {
   return TABLE_HEAD_H + TABLE_BODY_PAD + rows * TABLE_ROW_H;
 }
 
+/** 超过这么多列就默认折叠成「只显示键列」。字段一多，卡片会高得把画布撑散。 */
+export const AUTO_FOLD_AT = 6;
+
+export interface FoldedRows {
+  /** 实际显示出来的行（折叠时只有键列）。 */
+  rows: ErField[];
+  /** 被折起来的行数；> 0 时卡片底部多一行「还有 N 列」。 */
+  hidden: number;
+}
+
+/**
+ * 折叠：只留键列（PK/FK/UK）。这不是纯显示技巧——外键线只关心键列，
+ * 把非键列折起来之后，一张表在画布上占的高度和它"参与的关系"成正比，
+ * 而不是和"它有多少列"成正比。
+ */
+export function foldRows(rows: ErField[], folded: boolean): FoldedRows {
+  if (!folded) return { rows, hidden: 0 };
+  const keys = rows.filter((r) => Boolean(r.keyRole));
+  // 一个键都没有的表（比如纯日志表）折成空卡片就没信息了，至少留前两列。
+  const keep = keys.length > 0 ? keys : rows.slice(0, 2);
+  return { rows: keep, hidden: rows.length - keep.length };
+}
+
+export function shouldAutoFold(rows: ErField[]): boolean {
+  return rows.length > AUTO_FOLD_AT;
+}
+
+/** 折叠态下的卡片高度：可见行 + 一行「还有 N 列」。 */
+export function foldedCardHeight(visible: number, hidden: number): number {
+  if (visible <= 0) return tableCardHeight(0);
+  return tableCardHeight(visible) + (hidden > 0 ? TABLE_ROW_H : 0);
+}
+
 /** 字段行的行顺序：按 contains 边的出现顺序（与界面渲染顺序一致）。 */
 export function tableFieldIds(model: Model, tableId: string): string[] {
   const ids: string[] = [];

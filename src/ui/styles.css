@@ -1476,6 +1476,39 @@ select.dd-input {
   font-size: 10px;
   color: var(--muted);
 }
+/* 折叠按钮：表头右侧的小方块，只显示键列 / 全部展开。平时淡出，别跟字段抢注意力。 */
+.dd-table-fold {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  /* 平时就露一点：完全藏起来的话没人会知道这里有折叠。 */
+  opacity: 0.4;
+  transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+}
+.dd-node.kind-table:hover .dd-table-fold,
+.dd-node.selected .dd-table-fold,
+.dd-table-fold.is-folded {
+  opacity: 1;
+}
+.dd-table-fold:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.dd-table-more {
+  padding: 4px 12px 6px;
+  font-size: 10px;
+  color: var(--faint);
+}
 .dd-table-fields {
   padding: 4px 0;
 }

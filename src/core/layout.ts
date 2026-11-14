@@ -8,9 +8,23 @@
  * 而不是只知道"这两张表有关系"——交叉少一半，走线也落得准。
  */
 import type { ELK, ElkExtendedEdge, ElkNode, ElkPort } from 'elkjs/lib/elk.bundled.js';
-import { erFieldPort, erFieldRows, fieldRowOffset, resolveFkLink, tableCardHeight, type ErField } from './er';
+import {
+  erFieldPort,
+  erFieldRows,
+  fieldRowOffset,
+  foldRows,
+  foldedCardHeight,
+  resolveFkLink,
+  shouldAutoFold,
+  tableCardHeight,
+  type ErField,
+  type FoldedRows,
+} from './er';
+import { arrangeColumns, type Positions } from './er-arrange';
 import type { LensId, Projection } from './registry';
 import type { Model, NodeType } from './types';
+
+export type { Positions };
 
 // ELK 引擎约 1.4MB：懒加载成独立异步 chunk，主包保持精简，首次布局时才拉取。
 let elkPromise: Promise<ELK> | null = null;
@@ -88,8 +102,6 @@ const DIRECTION: Record<LensId, string> = {
   'state-machine': 'RIGHT',
 };
 
-export type Positions = Record<string, { x: number; y: number }>;
-
 /** 表卡片高度 = 表头 + 字段行（与 .dd-table-* 的 CSS 尺寸同源），让间距贴合真实卡片。 */
 function tableHeight(model: Model | undefined, tableId: string): number {
   const base = 74;
@@ -162,44 +174,17 @@ function tablePorts(rows: ErField[]): ElkPort[] {
 }
 
 /**
- * ER 专享后处理：同层（同列）的卡片按原顺序重新贴紧，整列以全图中轴垂直居中。
+ * 对一副镜片的投影做分层自动布局，返回节点 id → 坐标。
  *
- * 为什么需要：ELK 的端口对齐（BRANDES_KOEPF）会为了让 `orders.id` 与 `payments.order_id`
- * 尽量水平共线而把整张卡片上下平移。单看一条线确实直，但三层累加后整图变成"斜着往下滑的
- * 阶梯"，列与列之间还留下大块空洞（截图里最明显的问题）。读 ER 图是"一列一列看"的：
- * 列对齐 + 每条边多一个折点，比参差的对角阶梯好读得多，也是 dbdiagram/DataGrip 这类工具的做法。
+ * `folded` 是每张表「是否折叠」的人工选择；没给的按字段数自动决定（见 er.ts 的 AUTO_FOLD_AT）。
+ * 折叠会改卡片高度，所以布局必须知道它——否则收起来的字段仍然按展开高度占位，画布拉出一堆空档。
  */
-function packColumns(positions: Positions, heights: Record<string, number>, gap: number): Positions {
-  const columns = new Map<number, string[]>();
-  for (const [id, p] of Object.entries(positions)) {
-    const key = Math.round(p.x);
-    const list = columns.get(key);
-    if (list) list.push(id);
-    else columns.set(key, [id]);
-  }
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const [id, p] of Object.entries(positions)) {
-    minY = Math.min(minY, p.y);
-    maxY = Math.max(maxY, p.y + (heights[id] ?? 0));
-  }
-  const center = (minY + maxY) / 2;
-  const out: Positions = { ...positions };
-  for (const ids of columns.values()) {
-    // 列内顺序沿用 ELK 的（它已经按交叉最少排过），只改 y，不动 x。
-    ids.sort((a, b) => positions[a].y - positions[b].y);
-    const total = ids.reduce((sum, id) => sum + (heights[id] ?? 0), 0) + gap * (ids.length - 1);
-    let y = center - total / 2;
-    for (const id of ids) {
-      out[id] = { x: positions[id].x, y: Math.round(y) };
-      y += (heights[id] ?? 0) + gap;
-    }
-  }
-  return out;
-}
-
-/** 对一副镜片的投影做分层自动布局，返回节点 id → 坐标。传入 model 时按文本/字段数估算节点高度。 */
-export async function layoutProjection(projection: Projection, lens: LensId, model?: Model): Promise<Positions> {
+export async function layoutProjection(
+  projection: Projection,
+  lens: LensId,
+  model?: Model,
+  folded?: Record<string, boolean>,
+): Promise<Positions> {
   const erModel = lens === 'er' ? model : undefined;
   const rowCache = new Map<string, ErField[]>();
   const rowsOf = (tableId: string): ErField[] => {
@@ -211,27 +196,41 @@ export async function layoutProjection(projection: Projection, lens: LensId, mod
     }
     return rows;
   };
+  const foldCache = new Map<string, FoldedRows>();
+  const visibleOf = (tableId: string): FoldedRows => {
+    let out = foldCache.get(tableId);
+    if (!out) {
+      const rows = rowsOf(tableId);
+      out = foldRows(rows, folded?.[tableId] ?? shouldAutoFold(rows));
+      foldCache.set(tableId, out);
+    }
+    return out;
+  };
 
   const heights: Record<string, number> = {};
   const children: ElkNode[] = Object.entries(projection.nodes).map(([id, n]) => {
-    const height = nodeHeight(model, id, n.type, n.name);
+    const isTable = Boolean(erModel) && n.type === 'Table';
+    const fold = isTable ? visibleOf(id) : undefined;
+    const height = fold
+      ? Math.max(74, foldedCardHeight(fold.rows.length, fold.hidden))
+      : nodeHeight(model, id, n.type, n.name);
     heights[id] = height;
     const node: ElkNode = { id, width: NODE_WIDTH[n.type], height };
-    if (erModel && n.type === 'Table') {
-      const rows = rowsOf(id);
-      if (rows.length > 0) {
-        // 行序固定：ELK 只在这些行的上/下沿之间调层级顺序，不重排字段（字段顺序是模型语义）。
-        node.layoutOptions = { 'elk.portConstraints': 'FIXED_ORDER' };
-        node.ports = tablePorts(rows);
-      }
+    if (isTable && fold && fold.rows.length > 0) {
+      // 行序固定：ELK 只在这些行的上/下沿之间调层级顺序，不重排字段（字段顺序是模型语义）。
+      node.layoutOptions = { 'elk.portConstraints': 'FIXED_ORDER' };
+      node.ports = tablePorts(fold.rows);
     }
     return node;
   });
 
   const edges: ElkExtendedEdge[] = Object.entries(projection.edges).map(([id, e]) => {
     const link = erModel ? resolveFkLink(e, rowsOf) : undefined;
-    const fromField = link?.fromFieldId;
-    const toField = link?.toFieldId;
+    // 落在折起来的行上的端点退到卡片级：那一行没有 handle，点名一个不存在的端口 ELK 会报错。
+    const visible = (tableId: string, fieldId?: string) =>
+      Boolean(fieldId) && visibleOf(tableId).rows.some((r) => r.id === fieldId);
+    const fromField = visible(e.from, link?.fromFieldId) ? link!.fromFieldId : undefined;
+    const toField = visible(e.to, link?.toFieldId) ? link!.toFieldId : undefined;
     return {
       id,
       sources: [fromField ? erFieldPort('right', fromField) : e.from],
@@ -252,6 +251,12 @@ export async function layoutProjection(projection: Projection, lens: LensId, mod
   for (const child of result.children ?? []) {
     out[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
   }
-  // ER：列对齐后处理（见 packColumns 注释）。其余镜片保持 ELK 原样。
-  return lens === 'er' ? packColumns(out, heights, 44) : out;
+  // ER：列内排序 + 列对齐（见 er-arrange.ts）。其余镜片保持 ELK 原样。
+  if (lens !== 'er') return out;
+  return arrangeColumns(
+    out,
+    heights,
+    Object.values(projection.edges).map((e) => ({ from: e.from, to: e.to })),
+    44,
+  );
 }

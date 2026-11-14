@@ -23,7 +23,21 @@ import {
   type NodeMouseHandler,
 } from '@xyflow/react';
 import { nodeComponent, nodeFromComponent, nodeGlyph, resolveComponent } from '../core/components';
-import { ER_ANCHOR_HANDLE, erFieldPort, erFieldRows, fieldIdFromHandle, planFkConnection, resolveFkLinks, tableCardHeight, tableFieldIds } from '../core/er';
+import {
+  ER_ANCHOR_HANDLE,
+  erFieldPort,
+  erFieldRows,
+  fieldIdFromHandle,
+  foldRows,
+  foldedCardHeight,
+  planFkConnection,
+  resolveFkLinks,
+  shouldAutoFold,
+  tableFieldIds,
+  type ErField,
+  type FkLink,
+} from '../core/er';
+import { columnKey, reflowColumn } from '../core/er-arrange';
 import { newEdgeId, newNodeId } from '../core/id';
 import { layoutProjection, NODE_WIDTH, nodeHeight, type Positions } from '../core/layout';
 import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
@@ -159,6 +173,12 @@ export function App() {
   const pointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   // 切镜片 / 重新布局后要 fit 一次，但必须等 ELK 把坐标算完再 fit（否则框住的是旧坐标）。
   const pendingFitRef = useRef(false);
+  // 折叠会改卡片高度 → 需要 ELK 按新高度重排一次，并且用结果覆盖旧坐标（而不是只补空缺）。
+  const forceLayoutRef = useRef(false);
+  // 每张表的折叠选择（没选过的按字段数自动决定）。只在 ER 镜片有意义。
+  const [foldedTables, setFoldedTables] = useState<Record<string, boolean>>({});
+  const foldedRef = useRef(foldedTables);
+  foldedRef.current = foldedTables;
   const [lastEdge, setLastEdge] = useState<Partial<Record<LensId, EdgeType>>>(readLastEdge);
   // 画布全屏：把画布元素本身扔进全屏，顶栏/导航暂时让位，Esc 退出。
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -196,13 +216,20 @@ export function App() {
     return `${lens}|${nodes}|${edges}`;
   }, [projection, lens]);
 
-  // 结构变化 / 切镜片 / 手动重新布局 → ELK 重算坐标（给没有人工摆位过的节点兜个底）。
+  // 结构变化 / 切镜片 / 折叠切换 / 手动重新布局 → ELK 重算坐标（给没有人工摆位过的节点兜个底）。
   useEffect(() => {
     let cancelled = false;
-    void layoutProjection(projectionRef.current, lens, model)
+    void layoutProjection(projectionRef.current, lens, model, foldedRef.current)
       .then((pos) => {
         if (cancelled) return;
-        // 只采纳"还没有位置"的节点的坐标：新增一个节点不该把整张画布重新洗牌，
+        // 折叠改变的是卡片高度，等于整列都要重新码一遍 —— 这时候必须整体覆盖，
+        // 只补空缺会让折起来的卡片下面继续留着旧空洞。
+        if (forceLayoutRef.current) {
+          forceLayoutRef.current = false;
+          setAutoPos(pos);
+          return;
+        }
+        // 其余情况只采纳"还没有位置"的节点的坐标：新增一个节点不该把整张画布重新洗牌，
         // 否则你刚双击落下的位置、刚看清的关系，全都会被下一帧挪走。
         setAutoPos((prev) => {
           const next = { ...prev };
@@ -279,6 +306,46 @@ export function App() {
     [model],
   );
 
+  /** 每张表的折叠状态与实际显示的行：折叠只看键列，卡片高度跟着变，布局也跟着重排。 */
+  const tableFolds = useMemo(() => {
+    const out: Record<string, { all: ErField[]; folded: boolean; rows: ErField[]; hidden: number }> = {};
+    if (lens !== 'er') return out;
+    for (const [id, n] of Object.entries(projection.nodes)) {
+      if (n.type !== 'Table') continue;
+      const all = erFieldRows(model, id);
+      // 没手动选过就按字段数自动折叠：4 列的表全展开，12 列的表默认只露键列。
+      const folded = foldedTables[id] ?? shouldAutoFold(all);
+      const visible = foldRows(all, folded);
+      out[id] = { all, folded, rows: visible.rows, hidden: visible.hidden };
+    }
+    return out;
+  }, [lens, projection, model, foldedTables]);
+
+  /** 这一列现在看得见吗：折叠会把外键锚点从"某一行"退回"整张卡"。 */
+  const fieldVisible = useCallback(
+    (tableId: string, fieldId?: string): boolean => {
+      if (!fieldId) return false;
+      const fold = tableFolds[tableId];
+      return fold ? fold.rows.some((r) => r.id === fieldId) : false;
+    },
+    [tableFolds],
+  );
+
+  const toggleFold = useCallback(
+    (id: string) => {
+      const all = erFieldRows(model, id);
+      setFoldedTables((prev) => {
+        const folded = prev[id] ?? shouldAutoFold(all);
+        return { ...prev, [id]: !folded };
+      });
+      // 卡片高度变了 → 整列都要重新码：要求 ELK 用新高度重排，并整体覆盖旧坐标。
+      forceLayoutRef.current = true;
+      setAutoPos({});
+      setRelayoutNonce((n) => n + 1);
+    },
+    [model],
+  );
+
   const selectNode = useCallback((id: string | null) => {
     setSelectedNode(id);
     setSelectedEdge(null);
@@ -348,6 +415,47 @@ export function App() {
       setViews((v) => ({ ...v, [lens]: { ...v[lens], positions: { ...v[lens]?.positions, [id]: pos } } }));
     },
     [setViews, lens],
+  );
+
+  /**
+   * 拖完一张表：ER 里只把同一列的卡片重新码一遍（局部重排），别的列一根手指都不碰。
+   * 用户把卡片放到哪，就钉在哪；上下邻居让位，车道和连线跟着这一列重算。
+   */
+  const onNodeDragStop = useCallback(
+    (_: unknown, node: Node) => {
+      persistPosition(node.id, node.position);
+      if (lens !== 'er' || model.nodes[node.id]?.type !== 'Table') return;
+      const col = Math.round(node.position.x);
+      const siblings = Object.entries(projection.nodes)
+        .filter(
+          ([id]) =>
+            id !== node.id &&
+            model.nodes[id]?.type === 'Table' &&
+            Math.round(positionFor(id).x) === col,
+        )
+        .map(([id]) => {
+          const fold = tableFolds[id];
+          const height = fold ? Math.max(74, foldedCardHeight(fold.rows.length, fold.hidden)) : 74;
+          return { id, y: positionFor(id).y, height };
+        });
+      if (siblings.length === 0) return;
+      const fold = tableFolds[node.id];
+      const own = fold ? Math.max(74, foldedCardHeight(fold.rows.length, fold.hidden)) : 74;
+      const moved = reflowColumn(
+        [...siblings, { id: node.id, y: node.position.y, height: own }],
+        44,
+        { id: node.id, y: node.position.y },
+      );
+      setAutoPos((prev) => {
+        const next = { ...prev };
+        for (const [id, y] of Object.entries(moved)) {
+          if (id === node.id) continue;
+          next[id] = { x: positionFor(id).x, y };
+        }
+        return next;
+      });
+    },
+    [persistPosition, lens, model, projection, positionFor, tableFolds],
   );
 
   // 拖拽连线：先问"这条线是什么语义"，再入模型（只有一种选项的镜片就不问了，省一次点击）。
@@ -469,8 +577,13 @@ export function App() {
           nullable: n.attrs?.nullable === true,
           keyRole: typeof n.attrs?.key === 'string' ? n.attrs.key : undefined,
           initial: n.attrs?.initial === true,
-          fieldCount: n.type === 'Table' ? fieldCount(id) : undefined,
-          fields: n.type === 'Table' ? fieldsOf(model, id) : undefined,
+          fieldCount: n.type === 'Table' ? (tableFolds[id]?.all.length ?? fieldCount(id)) : undefined,
+          fields: n.type === 'Table' ? (tableFolds[id]?.rows ?? fieldsOf(model, id)) : undefined,
+          hiddenFields: n.type === 'Table' ? tableFolds[id]?.hidden || undefined : undefined,
+          folded: n.type === 'Table' ? tableFolds[id]?.folded : undefined,
+          // 3 列及以下折起来没意义（键列差不多就是全部），不给按钮。
+          foldable: n.type === 'Table' ? (tableFolds[id]?.all.length ?? 0) > 3 : undefined,
+          onToggleFold: toggleFold,
           selectedFieldId: n.type === 'Table' ? selectedNode : undefined,
           onFieldSelect: selectNode,
           renamingFieldId: n.type === 'Table' ? renamingFieldId : undefined,
@@ -485,7 +598,7 @@ export function App() {
         },
         draggable: true,
       })),
-    [projection, positionFor, result, seeds, highlightNodes, selectedNode, fieldCount, selectNode, renamingId, renamingFieldId, commitRename, cancelRename, startFieldRename, commitFieldRename, cancelFieldRename, model],
+    [projection, positionFor, result, seeds, highlightNodes, selectedNode, fieldCount, selectNode, renamingId, renamingFieldId, commitRename, cancelRename, startFieldRename, commitFieldRename, cancelFieldRename, model, tableFolds, toggleFold],
   );
 
   // 外键边 → 具体字段：父表键列在哪一行、子表外键列在哪一行。渲染（handle）与拖线都读这份。
@@ -498,14 +611,54 @@ export function App() {
       .filter(([, n]) => n.type === 'Table')
       .map(([id]) => {
         const p = positionFor(id);
+        const fold = tableFolds[id];
+        const rows = fold ? fold.rows.length : erFieldRows(model, id).length;
+        const hidden = fold ? fold.hidden : 0;
         return {
           left: p.x,
           top: p.y,
           right: p.x + NODE_WIDTH.Table,
-          bottom: p.y + tableCardHeight(erFieldRows(model, id).length),
+          bottom: p.y + Math.max(74, foldedCardHeight(rows, hidden)),
         };
       });
-  }, [lens, projection, positionFor, model]);
+  }, [lens, projection, positionFor, model, tableFolds]);
+
+  /**
+   * 外键落到哪个字段行：折叠把这一行藏起来时，这条线退回卡片级锚点。
+   * 线本身还在（关系没消失），只是不再假装指向看不见的那一行。
+   */
+  const fkAnchors = useMemo(() => {
+    const out: Record<string, FkLink> = {};
+    for (const [id, e] of Object.entries(projection.edges)) {
+      const link = fkLinks[id];
+      if (!link) continue;
+      const ok =
+        link.fieldLevel && fieldVisible(e.from, link.fromFieldId) && fieldVisible(e.to, link.toFieldId);
+      out[id] = ok ? link : { ...link, fieldLevel: false };
+    }
+    return out;
+  }, [projection, fkLinks, fieldVisible]);
+
+  /** 顶部通道：跨列长边（中间夹着一整列）各占一条道，排在所有卡片之上。 */
+  const topChannel = useMemo(() => {
+    const out: Record<string, number> = {};
+    if (lens !== 'er') return out;
+    const tops = cardRects.map((r) => r.top);
+    if (tops.length === 0) return out;
+    const base = Math.min(...tops) - 22;
+    const longs = Object.entries(projection.edges)
+      .filter(
+        ([, e]) =>
+          e.type === 'fk' &&
+          Math.abs(columnKey(positionFor(e.from).x) - columnKey(positionFor(e.to).x)) > 1,
+      )
+      .map(([id]) => id)
+      .sort();
+    longs.forEach((id, i) => {
+      out[id] = base - i * 10;
+    });
+    return out;
+  }, [lens, cardRects, projection, positionFor]);
 
   /**
    * 同一源字段散出去的多条外键：给每条分一条竖向车道（lane），否则它们的竖段会叠成一根。
@@ -516,7 +669,7 @@ export function App() {
     const groups = new Map<string, string[]>();
     for (const [id, e] of Object.entries(projection.edges)) {
       if (e.type !== 'fk') continue;
-      const anchor = fkLinks[id]?.fromFieldId ? `f:${fkLinks[id].fromFieldId}` : `n:${e.from}`;
+      const anchor = fkAnchors[id]?.fieldLevel ? `f:${fkAnchors[id].fromFieldId}` : `n:${e.from}`;
       const list = groups.get(anchor);
       if (list) list.push(id);
       else groups.set(anchor, [id]);
@@ -535,7 +688,7 @@ export function App() {
     const seenSource = new Set<string>();
     const seenTarget = new Set<string>();
     for (const [id, e] of Object.entries(projection.edges)) {
-      const link = e.type === 'fk' ? fkLinks[id] : undefined;
+      const link = e.type === 'fk' ? fkAnchors[id] : undefined;
       if (!link?.fieldLevel) continue;
       const sourceKey = `s:${link.fromFieldId}`;
       const targetKey = `t:${link.toFieldId}`;
@@ -547,7 +700,7 @@ export function App() {
       out[id] = entry;
     }
     return out;
-  }, [projection, fkLinks, positionFor]);
+  }, [projection, fkAnchors, positionFor]);
 
   const derivedEdges = useMemo<Edge<DevDrawEdgeData>[]>(
     () =>
@@ -555,7 +708,7 @@ export function App() {
         const effectedBy = e.attrs?.effectedBy;
         const missingService =
           e.type === 'transition' && typeof effectedBy === 'string' && e.attrs?.manual !== true && !model.nodes[effectedBy];
-        const link = e.type === 'fk' ? fkLinks[id] : undefined;
+        const link = e.type === 'fk' ? fkAnchors[id] : undefined;
         const routing = edgeRouting[id];
         // 表卡片有十几个 handle（每行左右各一），不点名的话 React Flow 会把无边名的边
         // 接到 DOM 里第一个同类型 handle —— 也就是第一行字段，于是"读这张表"会被画成"读 id 这一列"。
@@ -592,6 +745,8 @@ export function App() {
             fieldLevel: link?.fieldLevel === true,
             ortho: lens === 'er',
             cards: lens === 'er' ? cardRects : undefined,
+            // 跨列长边绕不开中间列时走顶部留白，而不是硬穿卡片。
+            topY: lens === 'er' ? topChannel[id] : undefined,
             lane: routing?.lane ?? 0,
             laneCount: routing?.laneCount ?? 1,
             showSourceTag: routing?.showSourceTag !== false,
@@ -600,7 +755,7 @@ export function App() {
           },
         };
       }),
-    [projection, model, fkLinks, edgeRouting, impactedEdges, highlightEdges, selectEdge, selectedEdge, lens, cardRects],
+    [projection, model, fkAnchors, edgeRouting, impactedEdges, highlightEdges, selectEdge, selectedEdge, lens, cardRects, topChannel],
   );
 
   // 受控画布：onNodesChange/onEdgesChange 实时应用拖拽/选择变更（修复"拖动落地才动"）。
@@ -1046,7 +1201,7 @@ export function App() {
             deleteKeyCode={null}
             onNodeContextMenu={onNodeContextMenu}
             onNodeDoubleClick={onNodeDoubleClick}
-            onNodeDragStop={(_, node) => persistPosition(node.id, node.position)}
+            onNodeDragStop={onNodeDragStop}
             onConnect={onConnect}
             onDrop={onDrop}
             onDragOver={onDragOver}
@@ -1065,7 +1220,7 @@ export function App() {
             connectionLineStyle={{ stroke: 'var(--accent)', strokeWidth: 2 }}
             zoomOnDoubleClick={false}
             fitView
-            fitViewOptions={{ padding: 0.2 }}
+            fitViewOptions={{ padding: derivedNodes.length > 10 ? 0.08 : 0.16, maxZoom: 1.15 }}
             minZoom={0.3}
             maxZoom={2}
             proOptions={{ hideAttribution: true }}
