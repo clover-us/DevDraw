@@ -214,6 +214,24 @@ export function RedoIcon(p: IconProps) {
   );
 }
 
+/** 画布全屏：四角外扩。 */
+export function MaximizeIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M9 3H4a1 1 0 0 0-1 1v5M15 3h5a1 1 0 0 1 1 1v5M21 15v5a1 1 0 0 1-1 1h-5M3 15v5a1 1 0 0 0 1 1h5" />
+    </svg>
+  );
+}
+
+/** 退出全屏：四角内收。 */
+export function MinimizeIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M4 9h5V4M20 9h-5V4M20 15h-5v5M4 15h5v5" />
+    </svg>
+  );
+}
+
 /** 组件库：积木格。 */
 export function LibraryIcon(p: IconProps) {
   return (

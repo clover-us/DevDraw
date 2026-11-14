@@ -19,8 +19,19 @@ export default defineConfig({
     strictPort: true,
     watch: {
       // Windows：原子写入会产生瞬时 .tmpdir/*.tmp 临时文件，chokidar 去 watch 它会触发
-      // EBUSY 并抛出未处理的 FSWatcher error 直接 crash 掉 dev server。忽略 docs 与临时文件。
-      ignored: ['**/docs/**', '**/*.tmpdir/**', '**/*.tmp', '**/.git/**', '**/dist/**', '**/coverage/**'],
+      // EBUSY 并抛出未处理的 FSWatcher error 直接 crash 掉 dev server。忽略 docs 与临时文件；
+      // 根目录的 QA 脚本/截图同样是"写完就被别的进程读"，同样会 EBUSY，一并忽略。
+      ignored: [
+        '**/docs/**',
+        '**/*.tmpdir/**',
+        '**/*.tmp',
+        '**/.git/**',
+        '**/dist/**',
+        '**/coverage/**',
+        '**/qa-*.mjs',
+        '**/qa-*/**',
+        '**/*.png',
+      ],
     },
   },
   test: {

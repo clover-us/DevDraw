@@ -15,6 +15,8 @@ interface StorageBarProps {
   dirty: boolean;
   saving: boolean;
   fsaSupported: boolean;
+  /** 收起形态：不显示文件夹名，只留状态（工具坞里的窄胶囊）。 */
+  hideName?: boolean;
   onOpenFolder: () => void;
   onImportZip: (file: File) => void;
   onExportZip: () => void;
@@ -80,19 +82,19 @@ interface Status {
   tone: 'ok' | 'warn' | 'idle' | 'saving';
 }
 
-function statusOf(kind: StoreKind, autoSave: boolean, dirty: boolean, saving: boolean): Status {
+function statusOf(kind: StoreKind, autoSave: boolean, dirty: boolean, saving: boolean, compact = false): Status {
   if (saving) return { text: '保存中…', tone: 'saving' };
-  if (dirty) return { text: autoSave ? '待自动保存' : '有改动未导出', tone: 'warn' };
-  if (kind === 'folder') return { text: '已保存到磁盘', tone: 'ok' };
-  if (kind === 'zip') return { text: '快照已加载', tone: 'ok' };
-  return { text: '未持久化 · 刷新即失', tone: 'idle' };
+  if (dirty) return { text: autoSave ? (compact ? '待保存' : '待自动保存') : compact ? '有改动' : '有改动未导出', tone: 'warn' };
+  if (kind === 'folder') return { text: compact ? '已保存' : '已保存到磁盘', tone: 'ok' };
+  if (kind === 'zip') return { text: compact ? '快照' : '快照已加载', tone: 'ok' };
+  return { text: compact ? '未持久化' : '未持久化 · 刷新即失', tone: 'idle' };
 }
 
 export function StorageBar(props: StorageBarProps) {
-  const { modelName, kind, label, autoSave, dirty, saving, fsaSupported } = props;
+  const { modelName, kind, label, autoSave, dirty, saving, fsaSupported, hideName } = props;
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const status = statusOf(kind, autoSave, dirty, saving);
+  const status = statusOf(kind, autoSave, dirty, saving, hideName);
   const Icon = MODE_ICON[kind];
 
   // 点击外部 / Esc 关闭弹层
@@ -130,7 +132,7 @@ export function StorageBar(props: StorageBarProps) {
           <Icon />
         </span>
         <span className="dd-storage-text">
-          <span className="dd-storage-name">{label}</span>
+          {!hideName && <span className="dd-storage-name">{label}</span>}
           <span className="dd-storage-status">
             <span className={`dd-save-dot tone-${status.tone}`} />
             {status.text}

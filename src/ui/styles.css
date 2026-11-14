@@ -14,6 +14,7 @@
   --panel-2: #161c29;
   --overlay: #1b2230;
   --scrim: rgba(4, 6, 10, 0.62);
+  --minimap-mask: rgba(4, 6, 10, 0.55);
   --border: #232b3a;
   --border-strong: #323d52;
   --text: #e9ecf3;
@@ -63,6 +64,7 @@
   --panel-2: #f5f7fb;
   --overlay: #ffffff;
   --scrim: rgba(24, 34, 56, 0.34);
+  --minimap-mask: rgba(24, 34, 56, 0.09);
   --border: #e1e6f0;
   --border-strong: #ccd5e4;
   --text: #1a2233;
@@ -425,10 +427,6 @@ select.dd-input {
   background: var(--bg);
 }
 .dd-hint {
-  position: absolute;
-  left: 12px;
-  bottom: 58px;
-  z-index: 5;
   font-size: 12px;
   color: var(--muted);
   background: var(--panel);
@@ -437,18 +435,46 @@ select.dd-input {
   padding: 6px 10px;
   pointer-events: none;
   box-shadow: 0 4px 16px var(--shadow-soft);
-  max-width: calc(100% - 24px);
+  white-space: nowrap;
 }
-/* 画布左下角工具坞：保存/落盘 + 重新布局。和右下角的缩放、俯视图分居两角。 */
+/* 画布左下角工具坞：落盘状态 + 重新布局，长提示语在下一行（贴底）。 */
 .dd-canvas-dock {
   position: absolute;
   left: 12px;
   bottom: 12px;
   z-index: 6;
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: calc(100% - 24px);
+}
+.dd-dock-row {
+  display: flex;
   align-items: center;
   gap: 8px;
-  max-width: calc(100% - 24px);
+}
+/* 坞里两个胶囊等宽，排成一条整齐的带子；文件名不再显示，只留保存状态。 */
+.dd-canvas-dock .dd-storage-pill,
+.dd-canvas-dock .dd-dock-btn {
+  width: 108px;
+  max-width: none;
+  height: 32px;
+  padding: 0 8px;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.dd-canvas-dock .dd-storage-info {
+  display: none;
+}
+.dd-canvas-dock .dd-storage-text {
+  min-width: 0;
+}
+.dd-canvas-dock .dd-storage-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .dd-canvas-dock .dd-storage-pop {
   /* 坞在最底下：弹层往上开，并且从胶囊左缘向右展开（右对齐会捅出屏幕左边）。 */
@@ -461,6 +487,32 @@ select.dd-input {
   white-space: nowrap;
   background: var(--panel);
   box-shadow: 0 4px 16px var(--shadow-soft);
+}
+/* 画布全屏按钮：贴着左下缩放控件，与它们同高同圆角。 */
+.dd-canvas-fs {
+  position: absolute;
+  right: 241px;
+  bottom: 29px;
+  z-index: 6;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  box-shadow: 0 4px 16px var(--shadow-soft);
+  cursor: pointer;
+}
+.dd-canvas-fs svg {
+  flex: none;
+}
+.dd-canvas-fs:hover {
+  background: var(--overlay);
+  border-color: var(--border-strong);
 }
 
 /* ---------- 左侧导航轨 ---------- */
@@ -1679,7 +1731,8 @@ select.dd-input {
   overflow: hidden;
 }
 .react-flow__minimap-mask {
-  fill: var(--scrim);
+  /* 别复用 --scrim（那是弹窗遮罩）：亮色下会把小地图压成一圈黑框 */
+  fill: var(--minimap-mask);
 }
 .react-flow__attribution {
   background: transparent;

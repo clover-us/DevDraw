@@ -37,7 +37,7 @@ import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData, type FieldRow } from './components';
 import { EdgePicker } from './EdgePicker';
 import { EntityDrawer } from './EntityDrawer';
-import { RedoIcon, UndoIcon } from './icons';
+import { MaximizeIcon, MinimizeIcon, RedoIcon, UndoIcon } from './icons';
 import { NavPanel } from './NavPanel';
 import { NavRail, type NavSection } from './NavRail';
 import { QuickCreate } from './QuickCreate';
@@ -151,6 +151,18 @@ export function App() {
   // 拖线松手时 onConnect 拿不到鼠标坐标，所以自己盯着指针（连线落点 = 当前指针处）。
   const pointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [lastEdge, setLastEdge] = useState<Partial<Record<LensId, EdgeType>>>(readLastEdge);
+  // 画布全屏：把画布元素本身扔进全屏，顶栏/导航暂时让位，Esc 退出。
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === canvasRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void canvasRef.current?.requestFullscreen();
+  }, []);
 
   // 项目加载完：把架构镜片存的场景恢复回来 —— what-if 假设不该因为刷新就消失。
   useEffect(() => {
@@ -873,6 +885,7 @@ export function App() {
           ))}
         <div
           className="dd-canvas"
+          ref={canvasRef}
           onPointerMove={(e) => {
             pointerRef.current = { x: e.clientX, y: e.clientY };
           }}
@@ -914,7 +927,7 @@ export function App() {
             proOptions={{ hideAttribution: true }}
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} color="var(--canvas-dot)" />
-            <Controls showInteractive={false} position="bottom-right" style={{ right: 204, bottom: 14 }} />
+            <Controls showInteractive={false} position="bottom-right" style={{ right: 190, bottom: 14 }} />
             <MiniMap
               pannable
               zoomable
@@ -926,37 +939,48 @@ export function App() {
             />
           </ReactFlow>
           <div className="dd-canvas-dock">
-            {project.fsaSupported && project.storeKind !== 'folder' && (
+            <div className="dd-dock-row">
+              {project.fsaSupported && project.storeKind !== 'folder' && (
+                <button
+                  className="dd-primary"
+                  onClick={() => void project.openFolder()}
+                  title="授权一个本地文件夹，之后每次改动自动保存到磁盘"
+                >
+                  打开文件夹
+                </button>
+              )}
+              <StorageBar
+                modelName={model.name}
+                kind={project.storeKind}
+                label={project.storeLabel}
+                autoSave={project.autoSave}
+                dirty={project.dirty}
+                saving={project.saving}
+                fsaSupported={project.fsaSupported}
+                hideName
+                onOpenFolder={() => void project.openFolder()}
+                onImportZip={(f) => void project.importZip(f)}
+                onExportZip={project.exportZip}
+                onSaveNow={() => void project.saveNow()}
+              />
               <button
-                className="dd-primary"
-                onClick={() => void project.openFolder()}
-                title="授权一个本地文件夹，之后每次改动自动保存到磁盘"
+                className="dd-dock-btn"
+                onClick={relayout}
+                title="清掉手动摆位，让 ELK 重新自动布局当前镜片"
               >
-                打开文件夹
+                重新布局
               </button>
-            )}
-            <StorageBar
-              modelName={model.name}
-              kind={project.storeKind}
-              label={project.storeLabel}
-              autoSave={project.autoSave}
-              dirty={project.dirty}
-              saving={project.saving}
-              fsaSupported={project.fsaSupported}
-              onOpenFolder={() => void project.openFolder()}
-              onImportZip={(f) => void project.importZip(f)}
-              onExportZip={project.exportZip}
-              onSaveNow={() => void project.saveNow()}
-            />
-            <button
-              className="dd-dock-btn"
-              onClick={relayout}
-              title="清掉手动摆位，让 ELK 重新自动布局当前镜片"
-            >
-              重新布局
-            </button>
+            </div>
+            <div className="dd-hint">{HINTS[lens]}</div>
           </div>
-          <div className="dd-hint">{HINTS[lens]}</div>
+          <button
+            className="dd-canvas-fs"
+            onClick={toggleFullscreen}
+            title={fullscreen ? '退出全屏 (Esc)' : '画布全屏'}
+            aria-label={fullscreen ? '退出全屏' : '画布全屏'}
+          >
+            {fullscreen ? <MinimizeIcon size={15} /> : <MaximizeIcon size={15} />}
+          </button>
           {quickCreate && (
             <QuickCreate
               model={model}
