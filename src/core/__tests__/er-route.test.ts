@@ -94,6 +94,34 @@ describe('routeFkPath', () => {
     expect(isOrthogonal(points)).toBe(true);
   });
 
+  it('就近横带要绕太远时，改走顶部通道（不穿卡、也不来回折）', () => {
+    // 中间列这张卡很高，横带只能落在它上方 78 或下方 822 —— 两个都太远。
+    const tall = { left: 604, top: 100, right: 836, bottom: 800 };
+    const points = routeFkPath({
+      sx: 232,
+      sy: 140,
+      tx: 1004,
+      ty: 200,
+      lane: 0,
+      laneCount: 1,
+      cards: [parent, tall, child],
+      topY: -40,
+    });
+    expect(isOrthogonal(points)).toBe(true);
+    expect(hitsCard(tall, points)).toBe(false);
+    // 横穿那一段落在所有卡片之上。
+    expect(points[2].y).toBe(-40);
+    expect(points[3].y).toBe(-40);
+  });
+
+  it('没有顶部通道可走时，仍然退回到最不坏的那条横带', () => {
+    const tall = { left: 604, top: 100, right: 836, bottom: 800 };
+    const points = routeFkPath({ sx: 232, sy: 140, tx: 1004, ty: 200, lane: 0, laneCount: 1, cards: [parent, tall, child] });
+    expect(points).toHaveLength(6);
+    expect(isOrthogonal(points)).toBe(true);
+    expect(points[2].y < tall.top || points[2].y > tall.bottom).toBe(true);
+  });
+
   it('longestVerticalMidpoint 取最长竖段的中点（标签定位用）', () => {
     const mid = longestVerticalMidpoint([
       { x: 0, y: 0 },
