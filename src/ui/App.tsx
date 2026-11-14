@@ -766,9 +766,8 @@ export function App() {
   return (
     <div className="dd-app">
       <header className="dd-header">
-        <div className="dd-brand">
-          DevDraw · 研绘 <span className="dd-tag">三镜片原型</span>
-        </div>
+        <div className="dd-brand">DevDraw · 研绘</div>
+        <div className="dd-model-name">{model.name}</div>
         <nav className="dd-lens-tabs">
           {LENSES.map((l) => (
             <button
@@ -781,30 +780,7 @@ export function App() {
             </button>
           ))}
         </nav>
-        <div className="dd-model-name">{model.name}</div>
-        <StorageBar
-          modelName={model.name}
-          kind={project.storeKind}
-          label={project.storeLabel}
-          autoSave={project.autoSave}
-          dirty={project.dirty}
-          saving={project.saving}
-          fsaSupported={project.fsaSupported}
-          onOpenFolder={() => void project.openFolder()}
-          onImportZip={(f) => void project.importZip(f)}
-          onExportZip={project.exportZip}
-          onSaveNow={() => void project.saveNow()}
-        />
         <div className="dd-actions">
-          {project.fsaSupported && project.storeKind !== 'folder' && (
-            <button
-              className="dd-primary"
-              onClick={() => void project.openFolder()}
-              title="授权一个本地文件夹，之后每次改动自动保存到磁盘"
-            >
-              打开文件夹
-            </button>
-          )}
           <button
             className="dd-icon-btn"
             onClick={project.undo}
@@ -831,9 +807,6 @@ export function App() {
               清除推演
             </button>
           )}
-          <button onClick={relayout} title="清掉手动摆位，让 ELK 重新自动布局当前镜片">
-            重新布局
-          </button>
           <button onClick={resetAll}>重置示例</button>
         </div>
       </header>
@@ -941,16 +914,48 @@ export function App() {
             proOptions={{ hideAttribution: true }}
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} color="var(--canvas-dot)" />
-            <Controls showInteractive={false} />
+            <Controls showInteractive={false} position="bottom-right" style={{ right: 204, bottom: 14 }} />
             <MiniMap
               pannable
               zoomable
+              style={{ width: 176, height: 116 }}
               nodeColor={(n) => {
                 const state = (n.data as DevDrawNodeData).state;
                 return state === 'failed' ? 'var(--danger)' : state === 'degraded' ? 'var(--warning)' : 'var(--minimap-node)';
               }}
             />
           </ReactFlow>
+          <div className="dd-canvas-dock">
+            {project.fsaSupported && project.storeKind !== 'folder' && (
+              <button
+                className="dd-primary"
+                onClick={() => void project.openFolder()}
+                title="授权一个本地文件夹，之后每次改动自动保存到磁盘"
+              >
+                打开文件夹
+              </button>
+            )}
+            <StorageBar
+              modelName={model.name}
+              kind={project.storeKind}
+              label={project.storeLabel}
+              autoSave={project.autoSave}
+              dirty={project.dirty}
+              saving={project.saving}
+              fsaSupported={project.fsaSupported}
+              onOpenFolder={() => void project.openFolder()}
+              onImportZip={(f) => void project.importZip(f)}
+              onExportZip={project.exportZip}
+              onSaveNow={() => void project.saveNow()}
+            />
+            <button
+              className="dd-dock-btn"
+              onClick={relayout}
+              title="清掉手动摆位，让 ELK 重新自动布局当前镜片"
+            >
+              重新布局
+            </button>
+          </div>
           <div className="dd-hint">{HINTS[lens]}</div>
           {quickCreate && (
             <QuickCreate

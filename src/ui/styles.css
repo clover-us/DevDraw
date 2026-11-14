@@ -358,15 +358,6 @@ select.dd-input {
   gap: 2px;
   white-space: nowrap;
 }
-.dd-tag {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px 8px;
-  margin-left: 6px;
-}
 .dd-model-name {
   color: var(--muted);
   white-space: nowrap;
@@ -436,7 +427,7 @@ select.dd-input {
 .dd-hint {
   position: absolute;
   left: 12px;
-  bottom: 12px;
+  bottom: 58px;
   z-index: 5;
   font-size: 12px;
   color: var(--muted);
@@ -447,6 +438,29 @@ select.dd-input {
   pointer-events: none;
   box-shadow: 0 4px 16px var(--shadow-soft);
   max-width: calc(100% - 24px);
+}
+/* 画布左下角工具坞：保存/落盘 + 重新布局。和右下角的缩放、俯视图分居两角。 */
+.dd-canvas-dock {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+}
+.dd-canvas-dock .dd-storage-pop {
+  /* 坞在最底下：弹层往上开，并且从胶囊左缘向右展开（右对齐会捅出屏幕左边）。 */
+  top: auto;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: auto;
+}
+.dd-dock-btn {
+  white-space: nowrap;
+  background: var(--panel);
+  box-shadow: 0 4px 16px var(--shadow-soft);
 }
 
 /* ---------- 左侧导航轨 ---------- */
