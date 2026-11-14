@@ -927,7 +927,17 @@ export function App() {
             proOptions={{ hideAttribution: true }}
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} color="var(--canvas-dot)" />
-            <Controls showInteractive={false} position="bottom-right" style={{ right: 190, bottom: 14 }} />
+            <Controls showInteractive={false} position="bottom-right" style={{ right: 190, bottom: 14 }}>
+              {/* 自定义控制项会被渲染在缩放按钮之后，因此和它们同一列、同一样式 */}
+              <button
+                className="dd-canvas-fs"
+                onClick={toggleFullscreen}
+                title={fullscreen ? '退出全屏 (Esc)' : '画布全屏'}
+                aria-label={fullscreen ? '退出全屏' : '画布全屏'}
+              >
+                {fullscreen ? <MinimizeIcon size={14} /> : <MaximizeIcon size={14} />}
+              </button>
+            </Controls>
             <MiniMap
               pannable
               zoomable
@@ -975,14 +985,6 @@ export function App() {
             </div>
             <div className="dd-hint">{HINTS[lens]}</div>
           </div>
-          <button
-            className="dd-canvas-fs"
-            onClick={toggleFullscreen}
-            title={fullscreen ? '退出全屏 (Esc)' : '画布全屏'}
-            aria-label={fullscreen ? '退出全屏' : '画布全屏'}
-          >
-            {fullscreen ? <MinimizeIcon size={15} /> : <MaximizeIcon size={15} />}
-          </button>
           {quickCreate && (
             <QuickCreate
               model={model}

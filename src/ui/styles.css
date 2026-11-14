@@ -504,31 +504,25 @@ select.dd-input {
   background: var(--panel);
   box-shadow: 0 4px 16px var(--shadow-soft);
 }
-/* 画布全屏按钮：贴着左下缩放控件，与它们同高同圆角。 */
-.dd-canvas-fs {
-  position: absolute;
-  right: 241px;
-  bottom: 29px;
-  z-index: 6;
-  width: 28px;
-  height: 28px;
+/* 画布全屏按钮：作为缩放控件的第 4 项渲染在同一列里，样式由 .react-flow__controls button 决定，
+   这里只补居中与最后一格去掉分隔线。 */
+.react-flow__controls .dd-canvas-fs {
   padding: 0;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  color: var(--text);
-  box-shadow: 0 4px 16px var(--shadow-soft);
+  border-radius: 0;
+  box-shadow: none;
   cursor: pointer;
+}
+.react-flow__controls .dd-canvas-fs:last-child {
+  border-bottom: none;
 }
 .dd-canvas-fs svg {
   flex: none;
 }
-.dd-canvas-fs:hover {
+.react-flow__controls .dd-canvas-fs:hover {
   background: var(--overlay);
-  border-color: var(--border-strong);
 }
 
 /* ---------- 左侧导航轨 ---------- */
