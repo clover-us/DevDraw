@@ -694,15 +694,7 @@ export function App() {
           </ReactFlow>
           <div className="dd-hint">{HINTS[lens]}</div>
         </div>
-        {componentEditor ? (
-          <ComponentEditor
-            editing={componentEditor.editing}
-            onSave={saveComponent}
-            onDelete={deleteComponent}
-            onClose={() => setComponentEditor(null)}
-          />
-        ) : (
-          drawerOpen && (
+        {drawerOpen && (
           <EntityDrawer
             model={model}
             lens={lensDef}
@@ -721,7 +713,14 @@ export function App() {
             onChangeMode={changeEdgeMode}
             onClose={closeDrawer}
           />
-          )
+        )}
+        {componentEditor && (
+          <ComponentEditor
+            editing={componentEditor.editing}
+            onSave={saveComponent}
+            onDelete={deleteComponent}
+            onClose={() => setComponentEditor(null)}
+          />
         )}
       </div>
     </div>

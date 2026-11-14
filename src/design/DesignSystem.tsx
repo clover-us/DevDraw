@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Finding, FindingSeverity } from '../core/reasoners/types';
 import { FindingCard, Metric, SEV_LABEL } from '../ui/inspect';
+import { ComponentEditor } from '../ui/ComponentEditor';
 import {
   ArchitectureIcon,
   ErIcon,
@@ -186,6 +187,7 @@ export function DesignSystem() {
   const { theme, toggle } = useTheme();
   const [toast, setToast] = useState<string | null>(null);
   const [toggleDemo, setToggleDemo] = useState(true);
+  const [modalDemo, setModalDemo] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flash = (msg: string) => {
@@ -387,6 +389,19 @@ export function DesignSystem() {
             </div>
           </div>
 
+          <div className="ds-specimen">
+            <div className="ds-specimen-cap">对话框 · 抽屉=看，弹窗=填</div>
+            <div className="ds-row">
+              <button className="dd-primary" onClick={() => setModalDemo(true)}>
+                <PlusIcon size={15} /> 打开对话框标本
+              </button>
+            </div>
+            <p className="ds-note">
+              遮罩 + Esc/点遮罩关闭 + 焦点圈在弹窗内 + 打开时锁背景滚动。用于「需要专心填完的一件事」（这里是真实的组件编辑器）；
+              轻量语境详情仍走右侧抽屉。
+            </p>
+          </div>
+
           <div className="ds-cols">
             <div className="ds-specimen">
               <div className="ds-specimen-cap">ER 表卡片 · 字段入表</div>
@@ -484,6 +499,18 @@ export function DesignSystem() {
           这页本身就是"锁地基"的产物：可点、可复制、可对照，而不是一份会过时的截图规范。
         </div>
       </div>
+
+      {modalDemo && (
+        <ComponentEditor
+          editing={null}
+          onSave={(c) => {
+            setModalDemo(false);
+            flash(`已创建自定义组件「${c.name}」`);
+          }}
+          onDelete={() => {}}
+          onClose={() => setModalDemo(false)}
+        />
+      )}
 
       {toast && (
         <div className="ds-toast">
