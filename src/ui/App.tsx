@@ -16,11 +16,13 @@ import {
 import { applyPatch, applyPatches } from '../core/patch';
 import type { QuestionOption } from '../core/reasoners/types';
 import { getLens, LENSES, projectLens, type LensId } from '../core/registry';
-import { sampleThreeLensModel, threeLensPositions } from '../core/sample-three-lens';
+import { threeLensPositions } from '../core/sample-three-lens';
 import { edgeDependency, simulate, type SimulationResult } from '../core/simulate';
 import type { DependencyMode, Model } from '../core/types';
 import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData } from './components';
+import { ModelPanel } from './ModelPanel';
 import { Sidebar } from './Sidebar';
+import { useProject } from './useProject';
 
 const nodeTypes = { devdraw: DevDrawNode };
 const edgeTypes = { devdraw: DevDrawEdge };
@@ -32,7 +34,8 @@ const HINTS: Record<LensId, string> = {
 };
 
 export function App() {
-  const [model, setModel] = useState<Model>(() => structuredClone(sampleThreeLensModel));
+  const project = useProject();
+  const { model, setModel } = project;
   const [lens, setLens] = useState<LensId>('state-machine');
   const [seeds, setSeeds] = useState<string[]>([]);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
@@ -68,6 +71,9 @@ export function App() {
 
   const positionFor = useCallback(
     (id: string): { x: number; y: number } => {
+      // 优先用持久化视图布局；回退到 sample 手写坐标；再回退到知识节点偏移/默认位。
+      const saved = project.views[lens]?.positions[id];
+      if (saved) return saved;
       const known = threeLensPositions[id];
       if (known) return known;
       const about = model.nodes[id]?.attrs?.about;
@@ -77,7 +83,7 @@ export function App() {
       }
       return { x: -340, y: 40 };
     },
-    [model],
+    [model, project.views, lens],
   );
 
   const fieldCount = useCallback(
@@ -183,13 +189,15 @@ export function App() {
   }, []);
 
   const resetAll = useCallback(() => {
-    setModel(structuredClone(sampleThreeLensModel));
+    project.loadSample();
     setSeeds([]);
     setBaseline(null);
     setSelectedEdge(null);
     setSelectedNode(null);
     setActiveFinding(null);
-  }, []);
+  }, [project]);
+
+  const onModelChange = useCallback((next: Model) => setModel(next), [setModel]);
 
   return (
     <div className="dd-app">
@@ -209,14 +217,40 @@ export function App() {
             </button>
           ))}
         </nav>
-        <div className="dd-model-name">{model.name}</div>
+        <div className="dd-model-name">
+          {model.name}
+          <span className={`dd-store-tag${project.dirty ? ' dirty' : ''}`} title={project.storeLabel}>
+            {project.storeLabel}
+            {project.saving ? ' · 保存中…' : project.dirty ? (project.autoSave ? ' · 待自动保存' : ' · 未导出') : ' · 已保存'}
+          </span>
+        </div>
         <div className="dd-actions">
+          {project.fsaSupported && <button onClick={() => void project.openFolder()}>打开文件夹</button>}
+          <label className="dd-file-btn">
+            导入 zip
+            <input
+              type="file"
+              accept=".zip"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void project.importZip(f);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          <button onClick={project.exportZip}>导出 zip</button>
+          {!project.autoSave && (
+            <button onClick={() => void project.saveNow()} disabled={!project.dirty}>
+              保存
+            </button>
+          )}
           {lens === 'architecture' && (
             <button onClick={clearScenario} disabled={seeds.length === 0}>
               清除推演
             </button>
           )}
-          <button onClick={resetAll}>重置模型</button>
+          <button onClick={resetAll}>重置示例</button>
         </div>
       </header>
       <div className="dd-main">
@@ -253,21 +287,31 @@ export function App() {
           </ReactFlow>
           <div className="dd-hint">{HINTS[lens]}</div>
         </div>
-        <Sidebar
-          model={model}
-          lens={lensDef}
-          findings={findings}
-          activeFinding={activeFinding}
-          onSelectFinding={setActiveFinding}
-          onAnswer={answer}
-          selectedNode={selectedNode}
-          selectedEdge={selectedEdge}
-          seeds={seeds}
-          result={result}
-          baseline={baseline}
-          onChangeMode={changeEdgeMode}
-          onClearEdge={() => setSelectedEdge(null)}
-        />
+        <div className="dd-rightcol">
+          <ModelPanel
+            model={model}
+            lensNodeTypes={lensDef.nodeTypes}
+            selectedNode={selectedNode}
+            selectedEdge={selectedEdge}
+            onChange={onModelChange}
+            onSelectNode={setSelectedNode}
+          />
+          <Sidebar
+            model={model}
+            lens={lensDef}
+            findings={findings}
+            activeFinding={activeFinding}
+            onSelectFinding={setActiveFinding}
+            onAnswer={answer}
+            selectedNode={selectedNode}
+            selectedEdge={selectedEdge}
+            seeds={seeds}
+            result={result}
+            baseline={baseline}
+            onChangeMode={changeEdgeMode}
+            onClearEdge={() => setSelectedEdge(null)}
+          />
+        </div>
       </div>
     </div>
   );

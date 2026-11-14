@@ -5,6 +5,7 @@
  * 不可变：返回新模型，绝不修改入参。
  */
 import type { EdgeAttrs, Model, ModelEdge, ModelNode } from './types';
+import { checkIntegrity } from './validate';
 
 export type Patch =
   | { op: 'update-edge'; id: string; attrs: Partial<EdgeAttrs> }
@@ -73,4 +74,28 @@ export function applyPatch(model: Model, patch: Patch): Model {
 /** 顺序应用多个补丁（决策卡片的一次选择可能产生多处变更）。 */
 export function applyPatches(model: Model, patches: Patch[]): Model {
   return patches.reduce((m, p) => applyPatch(m, p), model);
+}
+
+/**
+ * 语义守门员：应用补丁后校验完整性，悬空边/非法引用直接拒绝。
+ * 手动编辑、AI 草稿、未来 CRDT 合并都走这道闸——字节不打架 ≠ 语义对。
+ * 返回新模型；若破坏完整性则抛错（调用方可捕获并提示用户）。
+ */
+export function applyPatchChecked(model: Model, patch: Patch): Model {
+  const next = applyPatch(model, patch);
+  const issues = checkIntegrity(next);
+  if (issues.length > 0) {
+    throw new Error(`patch rejected (integrity): ${issues.map((i) => i.detail).join('; ')}`);
+  }
+  return next;
+}
+
+/** applyPatches 的守门版本：整批落地后统一校验。 */
+export function applyPatchesChecked(model: Model, patches: Patch[]): Model {
+  const next = applyPatches(model, patches);
+  const issues = checkIntegrity(next);
+  if (issues.length > 0) {
+    throw new Error(`patches rejected (integrity): ${issues.map((i) => i.detail).join('; ')}`);
+  }
+  return next;
 }
