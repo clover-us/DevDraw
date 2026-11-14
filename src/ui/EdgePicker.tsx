@@ -53,8 +53,8 @@ export function EdgePicker({ options, value, x, y, onPick, onCancel }: Props) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [options, cursor, onPick, onCancel]);
 
-  const W = 236;
-  const H = 52 + options.length * 38;
+  const W = 188;
+  const H = 58 + options.length * 38;
   const left = Math.min(x, window.innerWidth - W - 12);
   const top = Math.min(y, window.innerHeight - H - 12);
 

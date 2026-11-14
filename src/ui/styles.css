@@ -2776,7 +2776,7 @@ select.dd-input {
 .dd-edge-opt {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 14px;
   width: 100%;
   background: transparent;
   border: 0;
@@ -2784,6 +2784,7 @@ select.dd-input {
   padding: 8px 8px;
   cursor: pointer;
   color: var(--text);
+  text-align: left;
 }
 .dd-edge-opt.on {
   background: var(--accent-soft);
