@@ -4,6 +4,15 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      // 双入口：产品 index.html + 活体设计语言参考页 design.html（相对路径由 Vite 按 root 解析）
+      input: {
+        main: 'index.html',
+        design: 'design.html',
+      },
+    },
+  },
   server: {
     host: '127.0.0.1',
     port: 5173,
