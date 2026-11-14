@@ -9,6 +9,8 @@ import {
   Controls,
   MiniMap,
   ReactFlow,
+  useEdgesState,
+  useNodesState,
   type Connection,
   type Edge,
   type Node,
@@ -44,10 +46,32 @@ const CONNECT_TYPE: Record<LensId, EdgeType> = {
   'state-machine': 'transition',
 };
 
+/**
+ * 把模型目标态合入画布现有节点：保留 React Flow 已测量的尺寸（避免边线抖动），
+ * 若某节点正被拖拽则保留其实时位置，不让外部同步打断手势。
+ */
+function syncNodes(
+  prev: Node<DevDrawNodeData>[],
+  derived: Node<DevDrawNodeData>[],
+): Node<DevDrawNodeData>[] {
+  const byId = new Map(prev.map((n) => [n.id, n]));
+  return derived.map((n) => {
+    const old = byId.get(n.id);
+    if (!old) return n;
+    return {
+      ...n,
+      measured: old.measured,
+      width: old.width,
+      height: old.height,
+      ...(old.dragging ? { position: old.position, dragging: true } : {}),
+    };
+  });
+}
+
 export function App() {
   const project = useProject();
   const { model, setModel, setViews } = project;
-  const [lens, setLens] = useState<LensId>('state-machine');
+  const [lens, setLens] = useState<LensId>('architecture');
   const [seeds, setSeeds] = useState<string[]>([]);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -186,12 +210,14 @@ export function App() {
     setRelayoutNonce((n) => n + 1);
   }, [setViews, lens]);
 
-  const rfNodes: Node<DevDrawNodeData>[] = useMemo(
+  // 模型 → React Flow 节点/边的"目标态"。位置由 positionFor 给出权威值。
+  const derivedNodes = useMemo<Node<DevDrawNodeData>[]>(
     () =>
       Object.entries(projection.nodes).map(([id, n]) => ({
         id,
         type: 'devdraw',
         position: positionFor(id),
+        selected: selectedNode === id,
         data: {
           name: n.name,
           kind: n.type,
@@ -215,7 +241,7 @@ export function App() {
     [projection, positionFor, result, seeds, highlightNodes, selectedNode, fieldCount, selectNode, renamingId, commitRename, cancelRename],
   );
 
-  const rfEdges: Edge<DevDrawEdgeData>[] = useMemo(
+  const derivedEdges = useMemo<Edge<DevDrawEdgeData>[]>(
     () =>
       Object.entries(projection.edges).map(([id, e]) => {
         const effectedBy = e.attrs?.effectedBy;
@@ -226,6 +252,7 @@ export function App() {
           source: e.from,
           target: e.to,
           type: 'devdraw',
+          selected: selectedEdge === id,
           data: {
             edgeType: e.type,
             mode: edgeDependency(e),
@@ -240,8 +267,24 @@ export function App() {
           },
         };
       }),
-    [projection, model, impactedEdges, highlightEdges, selectEdge],
+    [projection, model, impactedEdges, highlightEdges, selectEdge, selectedEdge],
   );
+
+  // 受控画布：onNodesChange/onEdgesChange 实时应用拖拽/选择变更（修复"拖动落地才动"）。
+  // 目标态变化时在渲染期同步（而非 effect），保证 remount+fitView 当帧就拿到新坐标。
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<Node<DevDrawNodeData>>(derivedNodes);
+  const [prevDerivedNodes, setPrevDerivedNodes] = useState(derivedNodes);
+  if (derivedNodes !== prevDerivedNodes) {
+    setPrevDerivedNodes(derivedNodes);
+    setRfNodes((prev) => syncNodes(prev, derivedNodes));
+  }
+
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<Edge<DevDrawEdgeData>>(derivedEdges);
+  const [prevDerivedEdges, setPrevDerivedEdges] = useState(derivedEdges);
+  if (derivedEdges !== prevDerivedEdges) {
+    setPrevDerivedEdges(derivedEdges);
+    setRfEdges(derivedEdges);
+  }
 
   const onNodeContextMenu: NodeMouseHandler = useCallback(
     (event, node) => {
@@ -351,6 +394,9 @@ export function App() {
             edges={rfEdges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            deleteKeyCode={null}
             onNodeContextMenu={onNodeContextMenu}
             onNodeDoubleClick={onNodeDoubleClick}
             onNodeDragStop={(_, node) => persistPosition(node.id, node.position)}
