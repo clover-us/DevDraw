@@ -3,16 +3,17 @@
  * 把旧右栏那堆内容拆成三个可导航分区：实体 / 发现 / 推演。
  * 镜片切换留在顶部 header（用户要求顶部不变）。底部：主题切换 + 展开/收起。
  */
-import { ChevronLeftIcon, ChevronRightIcon, EntitiesIcon, FindingsIcon, LibraryIcon, LogoIcon, MoonIcon, SimulationIcon, SunIcon } from './icons';
+import { ChevronLeftIcon, ChevronRightIcon, EntitiesIcon, FindingsIcon, LibraryIcon, LogoIcon, MoonIcon, SessionsIcon, SimulationIcon, SunIcon } from './icons';
 import type { Theme } from './theme';
 
-export type NavSection = 'library' | 'entities' | 'findings' | 'simulation';
+export type NavSection = 'library' | 'entities' | 'findings' | 'simulation' | 'sessions';
 
 interface NavRailProps {
   section: NavSection;
   expanded: boolean;
   findingsBadge: number;
   simulationBadge: number;
+  sessionsBadge: number;
   theme: Theme;
   onSection: (s: NavSection) => void;
   onToggleExpand: () => void;
@@ -24,6 +25,7 @@ const SECTIONS: Array<{ id: NavSection; label: string; Icon: typeof EntitiesIcon
   { id: 'entities', label: '实体', Icon: EntitiesIcon, hint: '浏览与建模当前镜片的实体' },
   { id: 'findings', label: '发现', Icon: FindingsIcon, hint: '模型顶嘴：推演器发现的问题与反问' },
   { id: 'simulation', label: '推演', Icon: SimulationIcon, hint: '失效推演：设失效源，看爆炸半径' },
+  { id: 'sessions', label: '会话', Icon: SessionsIcon, hint: '存档过的推演现场：当时的判断今天还成立吗' },
 ];
 
 export function NavRail({
@@ -31,12 +33,14 @@ export function NavRail({
   expanded,
   findingsBadge,
   simulationBadge,
+  sessionsBadge,
   theme,
   onSection,
   onToggleExpand,
   onToggleTheme,
 }: NavRailProps) {
-  const badgeFor = (id: NavSection) => (id === 'findings' ? findingsBadge : id === 'simulation' ? simulationBadge : 0);
+  const badgeFor = (id: NavSection) =>
+    id === 'findings' ? findingsBadge : id === 'simulation' ? simulationBadge : id === 'sessions' ? sessionsBadge : 0;
   return (
     <nav className="dd-rail" aria-label="主导航">
       <div className="dd-rail-logo" title="DevDraw · 研绘">

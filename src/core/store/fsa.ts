@@ -5,11 +5,15 @@
  * 设计依据：持久化定调第 3 条、core-semantics.md §1.3。
  */
 import { deserializeModel, deserializeViews, serializeModel, serializeViews } from '../serialize';
+import { deserializeSession, serializeSession, sessionFileName, sortSessions } from '../session';
+import type { ReasoningSession } from '../session';
 import type { ModelStore, ProjectSnapshot } from './types';
 
 const DB_NAME = 'devdraw';
 const DB_STORE = 'handles';
 const HANDLE_KEY = 'project-dir';
+/** 推演会话目录：一会话一文件，git diff 干净。 */
+const REASONING_DIR = 'reasoning';
 
 /** 最小 FSA 类型声明（避免依赖 DOM lib 的实验性类型）。 */
 interface FSHandle {
@@ -20,6 +24,7 @@ interface FSHandle {
   getFileHandle(name: string, opts?: { create?: boolean }): Promise<FSHandle>;
   getDirectoryHandle(name: string, opts?: { create?: boolean }): Promise<FSHandle>;
   removeEntry(name: string): Promise<void>;
+  values?(): AsyncIterableIterator<FSHandle>;
   queryPermission?(desc: { mode: 'read' | 'readwrite' }): Promise<PermissionState>;
   requestPermission?(desc: { mode: 'read' | 'readwrite' }): Promise<PermissionState>;
 }
@@ -86,6 +91,33 @@ async function writeAtomic(dir: FSHandle, name: string, text: string): Promise<v
   await dir.removeEntry(tmpName);
 }
 
+/** 取 reasoning/ 目录（不存在时返回 null；create=true 则创建）。 */
+async function reasoningDir(dir: FSHandle, create = false): Promise<FSHandle | null> {
+  try {
+    return await dir.getDirectoryHandle(REASONING_DIR, create ? { create: true } : undefined);
+  } catch {
+    return null;
+  }
+}
+
+/** 读全部会话；单个坏文件跳过 —— 一个坏存档不该让整个项目打不开。 */
+async function readSessions(dir: FSHandle): Promise<ReasoningSession[]> {
+  const rdir = await reasoningDir(dir);
+  if (!rdir) return [];
+  const entries = rdir.values?.();
+  if (!entries) return [];
+  const out: ReasoningSession[] = [];
+  for await (const entry of entries) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue;
+    try {
+      out.push(deserializeSession(await (await entry.getFile()).text()));
+    } catch {
+      // 忽略坏存档
+    }
+  }
+  return sortSessions(out);
+}
+
 export class FsaStore implements ModelStore {
   readonly kind = 'folder' as const;
   readonly autoSave = true;
@@ -120,11 +152,27 @@ export class FsaStore implements ModelStore {
     return {
       model: deserializeModel(modelText),
       views: viewsText ? deserializeViews(viewsText) : {},
+      sessions: await readSessions(this.dir),
     };
   }
 
   async save(snapshot: ProjectSnapshot): Promise<void> {
     await writeAtomic(this.dir, 'model.json', serializeModel(snapshot.model));
     await writeAtomic(this.dir, 'views.json', serializeViews(snapshot.views));
+  }
+
+  async saveSession(session: ReasoningSession): Promise<void> {
+    const rdir = await this.dir.getDirectoryHandle(REASONING_DIR, { create: true });
+    await writeAtomic(rdir, sessionFileName(session.id), serializeSession(session));
+  }
+
+  async deleteSession(id: string): Promise<void> {
+    const rdir = await reasoningDir(this.dir);
+    if (!rdir) return;
+    try {
+      await rdir.removeEntry(sessionFileName(id));
+    } catch {
+      // 已经不存在
+    }
   }
 }

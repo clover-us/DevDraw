@@ -6,14 +6,20 @@
  */
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { deserializeModel, deserializeViews, serializeModel, serializeViews } from '../serialize';
+import { deserializeSession, serializeSession, sessionFileName, sortSessions } from '../session';
+import type { ReasoningSession } from '../session';
 import type { ModelStore, ProjectSnapshot } from './types';
 
-/** 把项目快照打包成 zip 字节（标准文件夹结构）。 */
+/** 把项目快照打包成 zip 字节（标准文件夹结构，含 reasoning/ 会话）。 */
 export function packProject(snapshot: ProjectSnapshot): Uint8Array {
-  return zipSync({
+  const files: Record<string, Uint8Array> = {
     'model.json': strToU8(serializeModel(snapshot.model)),
     'views.json': strToU8(serializeViews(snapshot.views)),
-  });
+  };
+  for (const s of snapshot.sessions ?? []) {
+    files[`reasoning/${sessionFileName(s.id)}`] = strToU8(serializeSession(s));
+  }
+  return zipSync(files);
 }
 
 /** 从 zip 字节解出项目快照。 */
@@ -22,9 +28,19 @@ export function unpackProject(bytes: Uint8Array): ProjectSnapshot {
   const modelText = files['model.json'];
   if (!modelText) throw new Error('invalid project zip: missing model.json');
   const viewsText = files['views.json'];
+  const sessions: ReasoningSession[] = [];
+  for (const [name, data] of Object.entries(files)) {
+    if (!name.startsWith('reasoning/') || !name.endsWith('.json')) continue;
+    try {
+      sessions.push(deserializeSession(strFromU8(data)));
+    } catch {
+      // 忽略坏存档
+    }
+  }
   return {
     model: deserializeModel(strFromU8(modelText)),
     views: viewsText ? deserializeViews(strFromU8(viewsText)) : {},
+    sessions: sortSessions(sessions),
   };
 }
 
@@ -62,6 +78,15 @@ export class ZipStore implements ModelStore {
 
   async save(snapshot: ProjectSnapshot): Promise<void> {
     this.snapshot = structuredClone(snapshot);
+  }
+
+  async saveSession(session: ReasoningSession): Promise<void> {
+    const rest = (this.snapshot.sessions ?? []).filter((s) => s.id !== session.id);
+    this.snapshot = { ...this.snapshot, sessions: sortSessions([...rest, structuredClone(session)]) };
+  }
+
+  async deleteSession(id: string): Promise<void> {
+    this.snapshot = { ...this.snapshot, sessions: (this.snapshot.sessions ?? []).filter((s) => s.id !== id) };
   }
 
   /** 导出当前状态为 zip 下载。 */

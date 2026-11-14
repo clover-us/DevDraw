@@ -28,6 +28,7 @@ import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
 import type { QuestionOption } from '../core/reasoners/types';
 import { getLens, LENSES, projectLens, type LensId } from '../core/registry';
 import { threeLensPositions } from '../core/sample-three-lens';
+import { createSession, type ReasoningSession } from '../core/session';
 import { edgeDependency, simulate, type SimulationResult } from '../core/simulate';
 import type { ComponentDef, DependencyMode, EdgeType, Model } from '../core/types';
 import { ComponentEditor } from './ComponentEditor';
@@ -37,6 +38,7 @@ import { EntityDrawer } from './EntityDrawer';
 import { RedoIcon, UndoIcon } from './icons';
 import { NavPanel } from './NavPanel';
 import { NavRail, type NavSection } from './NavRail';
+import { SessionsPanel } from './SessionsPanel';
 import { SimulationPanel } from './SimulationPanel';
 import { StorageBar } from './StorageBar';
 import { useTheme } from './theme';
@@ -122,6 +124,16 @@ export function App() {
   const [createMode, setCreateMode] = useState(false);
   // 自定义组件编辑器：null=关闭；{editing:null}=新建；{editing:comp}=编辑。
   const [componentEditor, setComponentEditor] = useState<{ editing: ComponentDef | null } | null>(null);
+  // 会话分区里选中的存档（存档本身住在 reasoning/ 里，这里只是"正在看哪一份"）。
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  // 项目加载完：把架构镜片存的场景恢复回来 —— what-if 假设不该因为刷新就消失。
+  useEffect(() => {
+    setSeeds(project.views['architecture']?.seeds ?? []);
+    setBaseline(null);
+    setActiveSessionId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.loadedAt]);
 
   const lensDef = getLens(lens);
   const projection = useMemo(() => projectLens(model, lensDef), [model, lensDef]);
@@ -383,9 +395,21 @@ export function App() {
     setRfEdges(derivedEdges);
   }
 
-  const toggleSeed = useCallback((id: string) => {
-    setSeeds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  }, []);
+  const applySeeds = useCallback(
+    (next: string[], forLens: LensId) => {
+      setSeeds(next);
+      // 场景写进 views：刷新/换设备后 still 是你上次在推演的那个假设。
+      setViews((v) => ({ ...v, [forLens]: { ...(v[forLens] ?? { positions: {} }), seeds: next } }));
+    },
+    [setViews],
+  );
+
+  const toggleSeed = useCallback(
+    (id: string) => {
+      applySeeds(seeds.includes(id) ? seeds.filter((x) => x !== id) : [...seeds, id], lens);
+    },
+    [seeds, lens, applySeeds],
+  );
 
   const onNodeContextMenu: NodeMouseHandler = useCallback(
     (event, node) => {
@@ -411,29 +435,78 @@ export function App() {
     setModel((m) => applyPatches(m, option.patches));
   }, []);
 
-  const switchLens = useCallback((id: LensId) => {
-    setLens(id);
-    setSelectedEdge(null);
-    setSelectedNode(null);
-    setActiveFinding(null);
-    setCreateMode(false);
-    setRenamingId(null);
-    setRenamingFieldId(null);
-  }, []);
+  const switchLens = useCallback(
+    (id: LensId) => {
+      setLens(id);
+      setSelectedEdge(null);
+      setSelectedNode(null);
+      setActiveFinding(null);
+      setCreateMode(false);
+      setRenamingId(null);
+      setRenamingFieldId(null);
+      // 每个镜片有自己的场景：切过去就该看见那个镜片上次在推演的东西。
+      setSeeds(project.views[id]?.seeds ?? []);
+      setBaseline(null);
+    },
+    [project.views],
+  );
 
   // 推演面板里点失效源：若不在架构镜片，先跳过去，让控制永远有可见反馈。
   const toggleSeedFromPanel = useCallback(
     (id: string) => {
-      if (lens !== 'architecture') switchLens('architecture');
-      toggleSeed(id);
+      const target: LensId = 'architecture';
+      // 从目标镜片自己的场景出发算下一步，别被当前镜片的 seeds 带偏。
+      const base = lens === target ? seeds : project.views[target]?.seeds ?? [];
+      if (lens !== target) switchLens(target);
+      applySeeds(base.includes(id) ? base.filter((x) => x !== id) : [...base, id], target);
     },
-    [lens, switchLens, toggleSeed],
+    [lens, seeds, project.views, switchLens, applySeeds],
   );
 
   const clearScenario = useCallback(() => {
-    setSeeds([]);
+    applySeeds([], lens);
     setBaseline(null);
-  }, []);
+  }, [applySeeds, lens]);
+
+  // ── 推演会话：把「场景 + 此刻的结论」存进 reasoning/<id>.json ──
+  const archiveSession = useCallback(() => {
+    const session = createSession({
+      lens,
+      lensLabel: getLens(lens).label,
+      seeds,
+      seedNames: seeds.map((id) => model.nodes[id]?.name ?? id),
+      findings,
+      blast: result
+        ? {
+            failed: result.blastRadius.failed,
+            degraded: result.blastRadius.degraded,
+            affectedEntries: [...result.blastRadius.affectedEntries],
+          }
+        : undefined,
+    });
+    void project.saveSession(session);
+    setActiveSessionId(session.id);
+    setSection('sessions');
+    setNavExpanded(true);
+  }, [lens, seeds, model, findings, result, project]);
+
+  const openSession = useCallback(
+    (session: ReasoningSession) => {
+      if (session.lens !== lens) switchLens(session.lens);
+      applySeeds(session.seeds, session.lens);
+      setBaseline(null);
+      setActiveSessionId(session.id);
+    },
+    [lens, switchLens, applySeeds],
+  );
+
+  const removeSession = useCallback(
+    (id: string) => {
+      void project.deleteSession(id);
+      setActiveSessionId((cur) => (cur === id ? null : cur));
+    },
+    [project],
+  );
 
   const resetAll = useCallback(() => {
     project.loadSample();
@@ -443,6 +516,7 @@ export function App() {
     setSelectedNode(null);
     setActiveFinding(null);
     setCreateMode(false);
+    setActiveSessionId(null);
   }, [project]);
 
   // ── 组件库：点添加 / 拖入画布 / 自定义组件 CRUD（语义底座稳定，图标是表现层）──
@@ -606,6 +680,7 @@ export function App() {
           expanded={navExpanded}
           findingsBadge={findingsBadge}
           simulationBadge={seeds.length}
+          sessionsBadge={project.sessions.length}
           theme={theme.theme}
           onSection={onSection}
           onToggleExpand={toggleExpand}
@@ -632,6 +707,16 @@ export function App() {
               onToggleSeed={toggleSeedFromPanel}
               onClearScenario={clearScenario}
               onSelectNode={selectNode}
+              onClose={collapseNav}
+            />
+          ) : section === 'sessions' ? (
+            <SessionsPanel
+              model={model}
+              sessions={project.sessions}
+              activeId={activeSessionId}
+              onArchive={archiveSession}
+              onOpen={openSession}
+              onDelete={removeSession}
               onClose={collapseNav}
             />
           ) : (

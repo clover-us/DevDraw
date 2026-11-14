@@ -50,11 +50,13 @@ export function deserializeModel(text: string): Model {
   };
 }
 
-/** views.json：每镜片的布局/过滤/样式覆盖。与模型分离，挪位置不污染语义 diff。 */
+/** views.json：每镜片的布局/过滤/样式覆盖/当前场景。与模型分离，挪位置不污染语义 diff。 */
 export interface LensView {
   positions: Record<string, { x: number; y: number }>;
   filter?: Record<string, unknown>;
   styleOverrides?: Record<string, unknown>;
+  /** 当前失效场景（what-if 假设），刷新后不丢。 */
+  seeds?: string[];
 }
 export type Views = Record<string, LensView>;
 

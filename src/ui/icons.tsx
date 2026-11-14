@@ -93,6 +93,17 @@ export function SimulationIcon(p: IconProps) {
   );
 }
 
+/** 会话 / 存档：带回溯箭头的时钟（"昨天的判断今天还成立吗"）。 */
+export function SessionsIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1" />
+      <path d="M3.2 4.6v4.2h4.2" />
+      <path d="M12 7.8V12l3 1.8" />
+    </svg>
+  );
+}
+
 export function SunIcon(p: IconProps) {
   return (
     <svg {...base(p)}>

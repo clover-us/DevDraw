@@ -88,6 +88,11 @@ export function newComponentId(now: number = Date.now()): string {
   return `comp_${ulidBody(now)}`;
 }
 
+/** 生成推演会话 id，如 ses_01JABC...（reasoning/<id>.json）。 */
+export function newSessionId(now: number = Date.now()): string {
+  return `ses_${ulidBody(now)}`;
+}
+
 /** 把任意显示名转成可读 slug（仅用于文件名/展示，不作唯一 id）。 */
 export function slugify(name: string): string {
   return (
