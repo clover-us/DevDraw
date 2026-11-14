@@ -437,7 +437,7 @@ select.dd-input {
   box-shadow: 0 4px 16px var(--shadow-soft);
   white-space: nowrap;
 }
-/* 画布左下角工具坞：落盘状态 + 重新布局，长提示语在下一行（贴底）。 */
+/* 画布左下角工具坞：重新布局，长提示语在下一行（贴底）。 */
 .dd-canvas-dock {
   position: absolute;
   left: 12px;
@@ -454,34 +454,50 @@ select.dd-input {
   align-items: center;
   gap: 8px;
 }
-/* 坞里两个胶囊等宽，排成一条整齐的带子；文件名不再显示，只留保存状态。 */
-.dd-canvas-dock .dd-storage-pill,
-.dd-canvas-dock .dd-dock-btn {
-  width: 108px;
+/* 画布右上角：落盘状态。与坞里按钮同字号同高，靠右对齐。 */
+.dd-canvas-status {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.dd-canvas-status .dd-storage-pill {
+  width: auto;
   max-width: none;
   height: 32px;
-  padding: 0 8px;
+  padding: 0 12px;
   justify-content: center;
   gap: 6px;
   white-space: nowrap;
+  background: var(--panel);
+  box-shadow: 0 4px 16px var(--shadow-soft);
 }
-.dd-canvas-dock .dd-storage-info {
+.dd-canvas-status .dd-storage-info {
   display: none;
 }
-.dd-canvas-dock .dd-storage-text {
+.dd-canvas-status .dd-storage-text {
   min-width: 0;
 }
-.dd-canvas-dock .dd-storage-status {
+.dd-canvas-status .dd-storage-status {
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.dd-canvas-dock .dd-storage-pop {
-  /* 坞在最底下：弹层往上开，并且从胶囊左缘向右展开（右对齐会捅出屏幕左边）。 */
-  top: auto;
-  bottom: calc(100% + 8px);
-  left: 0;
-  right: auto;
+.dd-canvas-status .dd-storage-pop {
+  /* 在右上角：弹层往下开，并从胶囊右缘向左展开。 */
+  top: calc(100% + 8px);
+  bottom: auto;
+  left: auto;
+  right: 0;
+}
+.dd-canvas-dock .dd-dock-btn {
+  height: 32px;
+  padding: 0 12px;
 }
 .dd-dock-btn {
   white-space: nowrap;

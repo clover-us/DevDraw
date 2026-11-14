@@ -218,7 +218,9 @@ export function RedoIcon(p: IconProps) {
 export function MaximizeIcon(p: IconProps) {
   return (
     <svg {...base(p)}>
-      <path d="M9 3H4a1 1 0 0 0-1 1v5M15 3h5a1 1 0 0 1 1 1v5M21 15v5a1 1 0 0 1-1 1h-5M3 15v5a1 1 0 0 0 1 1h5" />
+      {/* 斜向双箭头（maximize-2）：刻意不用四角括号——React Flow 自带的"适应视图"就是括号，
+          两个按钮长一样会让人分不清哪个是全屏。 */}
+      <path d="M14 3h7v7M10 21H3v-7M21 3l-7 7M3 21l7-7" />
     </svg>
   );
 }
@@ -227,7 +229,7 @@ export function MaximizeIcon(p: IconProps) {
 export function MinimizeIcon(p: IconProps) {
   return (
     <svg {...base(p)}>
-      <path d="M4 9h5V4M20 9h-5V4M20 15h-5v5M4 15h5v5" />
+      <path d="M4 14h6v6M20 10h-6V4M10 14l-7 7M14 10l7-7" />
     </svg>
   );
 }

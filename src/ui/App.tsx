@@ -938,6 +938,22 @@ export function App() {
               }}
             />
           </ReactFlow>
+          <div className="dd-canvas-status">
+            <StorageBar
+              modelName={model.name}
+              kind={project.storeKind}
+              label={project.storeLabel}
+              autoSave={project.autoSave}
+              dirty={project.dirty}
+              saving={project.saving}
+              fsaSupported={project.fsaSupported}
+              hideName
+              onOpenFolder={() => void project.openFolder()}
+              onImportZip={(f) => void project.importZip(f)}
+              onExportZip={project.exportZip}
+              onSaveNow={() => void project.saveNow()}
+            />
+          </div>
           <div className="dd-canvas-dock">
             <div className="dd-dock-row">
               {project.fsaSupported && project.storeKind !== 'folder' && (
@@ -949,20 +965,6 @@ export function App() {
                   打开文件夹
                 </button>
               )}
-              <StorageBar
-                modelName={model.name}
-                kind={project.storeKind}
-                label={project.storeLabel}
-                autoSave={project.autoSave}
-                dirty={project.dirty}
-                saving={project.saving}
-                fsaSupported={project.fsaSupported}
-                hideName
-                onOpenFolder={() => void project.openFolder()}
-                onImportZip={(f) => void project.importZip(f)}
-                onExportZip={project.exportZip}
-                onSaveNow={() => void project.saveNow()}
-              />
               <button
                 className="dd-dock-btn"
                 onClick={relayout}
