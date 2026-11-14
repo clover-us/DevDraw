@@ -814,6 +814,12 @@ export function App() {
           <button onClick={project.exportZip} title="把当前状态打包下载一份 zip 快照（备份 / 分享 / 换浏览器）">
             导出 zip
           </button>
+          <button
+            onClick={relayout}
+            title="清掉当前镜片的手动摆位，让 ELK 重新自动布局"
+          >
+            重新布局
+          </button>
           {lens === 'architecture' && (
             <button onClick={clearScenario} disabled={seeds.length === 0}>
               清除推演
@@ -965,24 +971,15 @@ export function App() {
             />
           </div>
           <div className="dd-canvas-dock">
-            <div className="dd-dock-row">
-              {project.fsaSupported && project.storeKind !== 'folder' && (
-                <button
-                  className="dd-primary"
-                  onClick={() => void project.openFolder()}
-                  title="授权一个本地文件夹，之后每次改动自动保存到磁盘"
-                >
-                  打开文件夹
-                </button>
-              )}
+            {project.fsaSupported && project.storeKind !== 'folder' && (
               <button
-                className="dd-dock-btn"
-                onClick={relayout}
-                title="清掉手动摆位，让 ELK 重新自动布局当前镜片"
+                className="dd-primary"
+                onClick={() => void project.openFolder()}
+                title="授权一个本地文件夹，之后每次改动自动保存到磁盘"
               >
-                重新布局
+                打开文件夹
               </button>
-            </div>
+            )}
             <div className="dd-hint">{HINTS[lens]}</div>
           </div>
           {quickCreate && (

@@ -437,7 +437,7 @@ select.dd-input {
   box-shadow: 0 4px 16px var(--shadow-soft);
   white-space: nowrap;
 }
-/* 画布左下角工具坞：重新布局，长提示语在下一行（贴底）。 */
+/* 画布左下角工具坞：未落盘时的"打开文件夹"引导 + 底部长提示语。 */
 .dd-canvas-dock {
   position: absolute;
   left: 12px;
@@ -448,11 +448,6 @@ select.dd-input {
   align-items: flex-start;
   gap: 6px;
   max-width: calc(100% - 24px);
-}
-.dd-dock-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 /* 画布右上角：落盘状态。与坞里按钮同字号同高，靠右对齐。 */
 .dd-canvas-status {
@@ -494,15 +489,6 @@ select.dd-input {
   bottom: auto;
   left: auto;
   right: 0;
-}
-.dd-canvas-dock .dd-dock-btn {
-  height: 32px;
-  padding: 0 12px;
-}
-.dd-dock-btn {
-  white-space: nowrap;
-  background: var(--panel);
-  box-shadow: 0 4px 16px var(--shadow-soft);
 }
 /* 画布全屏按钮：作为缩放控件的第 4 项渲染在同一列里，样式由 .react-flow__controls button 决定，
    这里只补居中与最后一格去掉分隔线。 */
