@@ -2,23 +2,26 @@
  * 一个模型多副镜片：镜片切换 = 投影 + 推演器分派。模型统一，推演穿镜而过。
  * 设计依据：docs/design/lens-model.md §4。所有变更经 applyPatch/applyPatches 唯一咽喉点。
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   BackgroundVariant,
   Controls,
   MiniMap,
   ReactFlow,
+  type Connection,
   type Edge,
   type Node,
   type NodeMouseHandler,
 } from '@xyflow/react';
-import { applyPatch, applyPatches } from '../core/patch';
+import { newEdgeId } from '../core/id';
+import { layoutProjection, type Positions } from '../core/layout';
+import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
 import type { QuestionOption } from '../core/reasoners/types';
 import { getLens, LENSES, projectLens, type LensId } from '../core/registry';
 import { threeLensPositions } from '../core/sample-three-lens';
 import { edgeDependency, simulate, type SimulationResult } from '../core/simulate';
-import type { DependencyMode, Model } from '../core/types';
+import type { DependencyMode, EdgeType, Model } from '../core/types';
 import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData } from './components';
 import { ModelPanel } from './ModelPanel';
 import { Sidebar } from './Sidebar';
@@ -29,23 +32,59 @@ const nodeTypes = { devdraw: DevDrawNode };
 const edgeTypes = { devdraw: DevDrawEdge };
 
 const HINTS: Record<LensId, string> = {
-  architecture: '右键节点：切换失效源 · 点击边标签：改依赖模式',
-  er: '点击字段：看改列牵连 · 红色外键：N:M 缺中间表',
-  'state-machine': '红色迁移：缺服务实现 · 在右侧回答模型的反问',
+  architecture: '拖拽节点摆位 · 从右侧圆点拖出连线 · 双击改名 · 右键切换失效源 · 点边标签改依赖模式',
+  er: '拖拽摆位 · 拖出外键 · 双击改名 · 点字段看改列牵连 · 红色外键=N:M 缺中间表',
+  'state-machine': '拖拽摆位 · 拖出迁移 · 双击改名 · 红色迁移=缺服务 · 在右侧回答模型的反问',
+};
+
+/** 拖拽连线时按镜片落的默认边类型（之后可在右侧改具体属性）。 */
+const CONNECT_TYPE: Record<LensId, EdgeType> = {
+  architecture: 'calls',
+  er: 'fk',
+  'state-machine': 'transition',
 };
 
 export function App() {
   const project = useProject();
-  const { model, setModel } = project;
+  const { model, setModel, setViews } = project;
   const [lens, setLens] = useState<LensId>('state-machine');
   const [seeds, setSeeds] = useState<string[]>([]);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [activeFinding, setActiveFinding] = useState<string | null>(null);
   const [baseline, setBaseline] = useState<SimulationResult | null>(null);
+  const [autoPos, setAutoPos] = useState<Positions>({});
+  const [fitTick, setFitTick] = useState(0);
+  const [relayoutNonce, setRelayoutNonce] = useState(0);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
 
   const lensDef = getLens(lens);
   const projection = useMemo(() => projectLens(model, lensDef), [model, lensDef]);
+  const projectionRef = useRef(projection);
+  projectionRef.current = projection;
+
+  // 结构签名：节点 id + 边(id/type/from/to)。改名/改属性不触发重布局，增删节点/改连线才触发。
+  const structKey = useMemo(() => {
+    const nodes = Object.keys(projection.nodes).sort().join(',');
+    const edges = Object.entries(projection.edges)
+      .map(([id, e]) => `${id}:${e.type}:${e.from}>${e.to}`)
+      .sort()
+      .join(',');
+    return `${lens}|${nodes}|${edges}`;
+  }, [projection, lens]);
+
+  // 结构变化 / 切镜片 / 手动重新布局 → ELK 重算坐标，随后 remount + fitView。
+  useEffect(() => {
+    let cancelled = false;
+    void layoutProjection(projectionRef.current, lens).then((pos) => {
+      if (cancelled) return;
+      setAutoPos(pos);
+      setFitTick((t) => t + 1);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [structKey, lens, relayoutNonce]);
   const findings = useMemo(() => lensDef.reasoner.run(model), [model, lensDef]);
   const result = useMemo(() => {
     if (lens !== 'architecture' || seeds.length === 0) return null;
@@ -72,9 +111,11 @@ export function App() {
 
   const positionFor = useCallback(
     (id: string): { x: number; y: number } => {
-      // 优先用持久化视图布局；回退到 sample 手写坐标；再回退到知识节点偏移/默认位。
+      // 优先级：用户拖拽持久化坐标 > ELK 自动布局 > sample 手写坐标 > 知识节点偏移 > 默认位。
       const saved = project.views[lens]?.positions[id];
       if (saved) return saved;
+      const auto = autoPos[id];
+      if (auto) return auto;
       const known = threeLensPositions[id];
       if (known) return known;
       const about = model.nodes[id]?.attrs?.about;
@@ -84,7 +125,7 @@ export function App() {
       }
       return { x: -340, y: 40 };
     },
-    [model, project.views, lens],
+    [model, project.views, lens, autoPos],
   );
 
   const fieldCount = useCallback(
@@ -101,6 +142,49 @@ export function App() {
     setSelectedEdge(id);
     setSelectedNode(null);
   }, []);
+
+  const commitRename = useCallback(
+    (id: string, name: string) => {
+      const trimmed = name.trim();
+      setRenamingId(null);
+      if (!trimmed) return;
+      setModel((m) => applyPatchChecked(m, { op: 'update-node', id, name: trimmed }));
+    },
+    [setModel],
+  );
+  const cancelRename = useCallback(() => setRenamingId(null), []);
+
+  // 拖拽落点 → 写进 views.json（语义与布局分离，挪位置不污染 model diff）。
+  const persistPosition = useCallback(
+    (id: string, pos: { x: number; y: number }) => {
+      setViews((v) => ({ ...v, [lens]: { ...v[lens], positions: { ...v[lens]?.positions, [id]: pos } } }));
+    },
+    [setViews, lens],
+  );
+
+  // 拖拽连线：按镜片落默认边类型，经守门员校验后入模型。
+  const onConnect = useCallback(
+    (params: Connection) => {
+      if (!params.source || !params.target || params.source === params.target) return;
+      const type = CONNECT_TYPE[lens];
+      const id = newEdgeId(type);
+      setModel((m) => applyPatchChecked(m, { op: 'add-edge', id, edge: { type, from: params.source!, to: params.target! } }));
+      setSelectedEdge(id);
+      setSelectedNode(null);
+    },
+    [lens, setModel],
+  );
+
+  const onNodeDoubleClick = useCallback<NodeMouseHandler>((_, node) => {
+    setRenamingId(node.id);
+    setSelectedNode(node.id);
+  }, []);
+
+  // 重新布局：清掉本镜片的手动坐标，让 ELK 重新接管。
+  const relayout = useCallback(() => {
+    setViews((v) => ({ ...v, [lens]: { ...v[lens], positions: {} } }));
+    setRelayoutNonce((n) => n + 1);
+  }, [setViews, lens]);
 
   const rfNodes: Node<DevDrawNodeData>[] = useMemo(
     () =>
@@ -122,10 +206,13 @@ export function App() {
           fieldCount: n.type === 'Table' ? fieldCount(id) : undefined,
           detail: typeof n.attrs?.detail === 'string' ? n.attrs.detail : undefined,
           onSelect: selectNode,
+          renaming: renamingId === id,
+          onRename: commitRename,
+          onRenameCancel: cancelRename,
         },
-        draggable: false,
+        draggable: true,
       })),
-    [projection, positionFor, result, seeds, highlightNodes, selectedNode, fieldCount, selectNode],
+    [projection, positionFor, result, seeds, highlightNodes, selectedNode, fieldCount, selectNode, renamingId, commitRename, cancelRename],
   );
 
   const rfEdges: Edge<DevDrawEdgeData>[] = useMemo(
@@ -250,25 +337,32 @@ export function App() {
               清除推演
             </button>
           )}
+          <button onClick={relayout} title="清掉手动摆位，让 ELK 重新自动布局当前镜片">
+            重新布局
+          </button>
           <button onClick={resetAll}>重置示例</button>
         </div>
       </header>
       <div className="dd-main">
         <div className="dd-canvas">
           <ReactFlow
-            key={lens}
+            key={`${lens}-${fitTick}`}
             nodes={rfNodes}
             edges={rfEdges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             onNodeContextMenu={onNodeContextMenu}
+            onNodeDoubleClick={onNodeDoubleClick}
+            onNodeDragStop={(_, node) => persistPosition(node.id, node.position)}
+            onConnect={onConnect}
             onEdgeClick={(_, edge) => selectEdge(edge.id)}
             onPaneClick={() => {
               setSelectedEdge(null);
               setSelectedNode(null);
               setActiveFinding(null);
+              setRenamingId(null);
             }}
-            nodesDraggable={false}
+            connectionLineStyle={{ stroke: '#4a9eda', strokeWidth: 2 }}
             fitView
             fitViewOptions={{ padding: 0.2 }}
             minZoom={0.3}

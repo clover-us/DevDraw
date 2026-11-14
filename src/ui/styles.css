@@ -1145,3 +1145,54 @@ button:disabled {
   margin: 4px 0;
   word-break: break-all;
 }
+
+/* ---------- 画布交互：拖拽摆位 / 拖出连线 / 双击改名 ---------- */
+.react-flow__node {
+  cursor: grab;
+}
+.react-flow__node.dragging {
+  cursor: grabbing;
+}
+.react-flow__node.dragging .dd-node {
+  border-color: var(--blue);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* 连接点：平时弱化，靠近节点时浮现，悬停变蓝——"从这里拖出连线"的可感知暗示。 */
+.react-flow__handle {
+  width: 9px;
+  height: 9px;
+  background: #2e3644;
+  border: 1.5px solid #4a5366;
+  opacity: 0.4;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+}
+.react-flow__node:hover .react-flow__handle,
+.react-flow__node.selected .react-flow__handle {
+  opacity: 1;
+}
+.react-flow__handle:hover {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+.react-flow__handle.connectionindicator:hover {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+/* 内联改名输入框：贴合暗色语义风格，聚焦蓝环。 */
+.dd-rename-input {
+  width: 100%;
+  min-width: 120px;
+  background: var(--bg);
+  border: 1.5px solid var(--blue);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 8px;
+  outline: none;
+  cursor: text;
+  box-shadow: 0 0 0 3px rgba(74, 158, 218, 0.2);
+}

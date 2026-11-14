@@ -2,7 +2,7 @@
  * 镜片感知的节点 / 边渲染。一个模型多副镜片：同一组件按 kind / edgeType 切换形态。
  * 架构=失效着色；ER=表/字段/外键基数；状态机=状态/迁移（缺服务标红）。
  */
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import {
   EdgeLabelRenderer,
   Handle,
@@ -27,6 +27,9 @@ export interface DevDrawNodeData extends Record<string, unknown> {
   fieldCount?: number;
   detail?: string;
   onSelect: (id: string) => void;
+  renaming?: boolean;
+  onRename?: (id: string, name: string) => void;
+  onRenameCancel?: () => void;
 }
 
 const KIND_LABEL: Record<NodeType, string> = {
@@ -58,8 +61,38 @@ export function DevDrawNode({ id, data }: NodeProps) {
     .filter(Boolean)
     .join(' ');
 
+  const cancelRef = useRef(false);
+  useEffect(() => {
+    if (d.renaming) cancelRef.current = false;
+  }, [d.renaming]);
+
   let body: ReactNode;
-  if (d.kind === 'Field') {
+  if (d.renaming) {
+    body = (
+      <input
+        className="dd-rename-input nodrag nowheel"
+        autoFocus
+        defaultValue={d.name}
+        aria-label="重命名节点"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.currentTarget.blur();
+          } else if (e.key === 'Escape') {
+            cancelRef.current = true;
+            d.onRenameCancel?.();
+          }
+        }}
+        onBlur={(e) => {
+          if (cancelRef.current) {
+            cancelRef.current = false;
+            return;
+          }
+          d.onRename?.(id, e.currentTarget.value);
+        }}
+      />
+    );
+  } else if (d.kind === 'Field') {
     body = (
       <>
         {d.keyRole && <span className={`dd-key dd-key-${d.keyRole.toLowerCase()}`}>{d.keyRole}</span>}
