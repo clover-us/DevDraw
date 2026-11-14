@@ -175,8 +175,9 @@ export function App() {
   const pendingFitRef = useRef(false);
   // 折叠会改卡片高度 → 需要 ELK 按新高度重排一次，并且用结果覆盖旧坐标（而不是只补空缺）。
   const forceLayoutRef = useRef(false);
-  // 每张表的折叠选择（没选过的按字段数自动决定）。只在 ER 镜片有意义。
-  const [foldedTables, setFoldedTables] = useState<Record<string, boolean>>({});
+  // 每张表的折叠选择存在 views.json 里（和坐标一样属于"这一镜片怎么摆"），
+  // 没记过的表按字段数自动决定。只在 ER 镜片有意义。
+  const foldedTables = useMemo<Record<string, boolean>>(() => project.views[lens]?.folded ?? {}, [project.views, lens]);
   const foldedRef = useRef(foldedTables);
   foldedRef.current = foldedTables;
   const [lastEdge, setLastEdge] = useState<Partial<Record<LensId, EdgeType>>>(readLastEdge);
@@ -334,16 +335,19 @@ export function App() {
   const toggleFold = useCallback(
     (id: string) => {
       const all = erFieldRows(model, id);
-      setFoldedTables((prev) => {
+      // 折叠状态跟着 views.json 走：刷新、导出 zip、在别人机器上打开，折过的表都还是折着的。
+      setViews((v) => {
+        const view = v[lens] ?? { positions: {} };
+        const prev = view.folded ?? {};
         const folded = prev[id] ?? shouldAutoFold(all);
-        return { ...prev, [id]: !folded };
+        return { ...v, [lens]: { ...view, folded: { ...prev, [id]: !folded } } };
       });
       // 卡片高度变了 → 整列都要重新码：要求 ELK 用新高度重排，并整体覆盖旧坐标。
       forceLayoutRef.current = true;
       setAutoPos({});
       setRelayoutNonce((n) => n + 1);
     },
-    [model],
+    [model, setViews, lens],
   );
 
   const selectNode = useCallback((id: string | null) => {

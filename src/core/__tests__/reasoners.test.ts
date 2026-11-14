@@ -22,12 +22,12 @@ describe('镜片注册表 / 投影', () => {
     expect(Object.keys(p.edges).sort()).toEqual(Object.keys(sampleModel.edges).sort());
   });
 
-  it('ER 镜片只含表（5 表，字段折进表卡片不独立投影），跨镜片胶水边隐藏', () => {
+  it('ER 镜片只含表（7 表，字段折进表卡片不独立投影），跨镜片胶水边隐藏', () => {
     const p = projectLens(M, getLens('er'));
-    expect(Object.keys(p.nodes)).toHaveLength(5);
+    expect(Object.keys(p.nodes)).toHaveLength(7);
     expect(Object.values(p.nodes).every((n) => n.type === 'Table')).toBe(true);
-    // 字段不投影 → contains 边两端不全在投影内被隐藏；只剩 5 条表间外键。
-    expect(Object.keys(p.edges)).toHaveLength(5);
+    // 字段不投影 → contains 边两端不全在投影内被隐藏；只剩表间外键（含 audit_log / shipments / refunds 的长边）。
+    expect(Object.keys(p.edges)).toHaveLength(9);
     expect(Object.values(p.edges).every((e) => e.type === 'fk')).toBe(true);
   });
 

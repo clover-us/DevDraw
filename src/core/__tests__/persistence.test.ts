@@ -61,6 +61,12 @@ describe('稳定序列化（git 友好硬约束）', () => {
     const views = { architecture: { positions: { n_order: { x: 1, y: 2 } } } };
     expect(deserializeViews(serializeViews(views))).toEqual(views);
   });
+
+  it('折叠状态跟着 views 一起落盘、一起读回', () => {
+    const views = { er: { positions: {}, folded: { t_audit_log: false, t_shipments: true } } };
+    const back = deserializeViews(serializeViews(views));
+    expect(back.er.folded).toEqual({ t_audit_log: false, t_shipments: true });
+  });
 });
 
 describe('完整性守门（协作隐患①：字节不打架 ≠ 语义对）', () => {

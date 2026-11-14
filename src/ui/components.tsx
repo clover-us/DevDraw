@@ -448,6 +448,13 @@ function orthoPath(points: Pt[], radius = 9): string {
   return `${d} L ${last.x} ${last.y}`;
 }
 
+/** 标签牌大致宽度：中文按 10px、拉丁按 6.2px 估（只用来判断会不会压到卡片）。 */
+function labelWidth(text: string): number {
+  let w = 0;
+  for (const ch of text) w += /[\u3000-\u9fff]/.test(ch) ? 10 : 6.2;
+  return w + 10;
+}
+
 /**
  * 外键走线规则在 core/er-route.ts（纯函数，可单测）：出门 → 列间车道 → 落到目标行 → 进线，
  * 跨列长边遇上中间列的卡片就绕开。这里只负责把它画成圆角折线。
@@ -470,7 +477,7 @@ export function DevDrawEdge(props: EdgeProps) {
   let path: string;
   let tagX: number;
   let tagY: number;
-  let tagOrigin: 'center' | 'left' = 'center';
+  let tagOrigin: 'center' | 'left' | 'right' = 'center';
   if (points) {
     path = orthoPath(points);
     if (fieldLevel) {
@@ -478,10 +485,16 @@ export function DevDrawEdge(props: EdgeProps) {
       tagY = sourceY;
     } else {
       // 卡片级外键：标签挂最长竖段旁边（列间空地），不压线也不压卡片。
+      // 只写基数 —— 列名放不进两列之间的过道，而且这种边本来就没解析到具体列（见 title）。
       const mid = longestVerticalMidpoint(points);
-      tagX = mid.x + 8;
+      const label = d.cardinality ?? 'FK';
+      const width = labelWidth(label);
+      const collides = (d.cards ?? []).some(
+        (c) => mid.y > c.top - 10 && mid.y < c.bottom + 10 && c.left < mid.x + 8 + width && c.right > mid.x,
+      );
+      tagX = collides ? mid.x - 8 : mid.x + 8;
       tagY = mid.y;
-      tagOrigin = 'left';
+      tagOrigin = collides ? 'right' : 'left';
     }
   } else {
     [path] = getBezierPath({
@@ -510,7 +523,8 @@ export function DevDrawEdge(props: EdgeProps) {
   let text: string;
   if (d.edgeType === 'fk') {
     cls = `edge-fk${d.cardinality === 'N:M' ? ' nm-error' : ''}`;
-    text = `${d.cardinality ?? ''}${d.keyCol ? ` · ${d.keyCol}` : ''}`;
+    // 字段级外键的文字标签不画（基数拆成两端小标记）；卡片级只写基数，列名挂 title。
+    text = fieldLevel ? '' : (d.cardinality ?? 'FK');
   } else if (d.edgeType === 'transition') {
     cls = `edge-transition${d.missingService ? ' missing-service' : ''}`;
     text = `${d.event ?? 'transition'}${d.missingService ? ' ⚠ 缺服务' : ''}`;
@@ -555,11 +569,14 @@ export function DevDrawEdge(props: EdgeProps) {
         ) : (
           <div
             className={`dd-edge-label ${cls}`}
+            title={d.edgeType === 'fk' && d.keyCol ? `${d.cardinality ?? ''} · ${d.keyCol}` : undefined}
             style={{
               transform:
                 tagOrigin === 'left'
                   ? `translate(0, -50%) translate(${tagX}px, ${tagY}px)`
-                  : `translate(-50%, -50%) translate(${tagX}px, ${tagY}px)`,
+                  : tagOrigin === 'right'
+                    ? `translate(-100%, -50%) translate(${tagX}px, ${tagY}px)`
+                    : `translate(-50%, -50%) translate(${tagX}px, ${tagY}px)`,
             }}
             onClick={(event) => {
               event.stopPropagation();

@@ -57,6 +57,8 @@ export interface LensView {
   styleOverrides?: Record<string, unknown>;
   /** 当前失效场景（what-if 假设），刷新后不丢。 */
   seeds?: string[];
+  /** ER 里被手动折起来的表（true=折叠）。没记过的表按字段数自动判断。 */
+  folded?: Record<string, boolean>;
 }
 export type Views = Record<string, LensView>;
 

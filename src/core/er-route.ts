@@ -46,8 +46,8 @@ const LANE_STEP = 10;
 const BAND_GAP = 22;
 /** 卡片之间至少要留这么宽才开车道。 */
 const MIN_LANE = 26;
-/** 横带离两端太远就干脆走顶部：省得横穿一堆车道，读起来更绕。 */
-const MAX_BAND_DETOUR = 170;
+/** 横带比"直接跌到目标行"多走超过这么多，就不如干脆从顶部绕一次。 */
+const MAX_BAND_DETOUR = 90;
 
 export function routeFkPath(route: FkRoute): Pt[] {
   const { sx, sy, tx, ty, laneCount } = route;
@@ -99,20 +99,36 @@ export function routeFkPath(route: FkRoute): Pt[] {
   // 只认上下的极值会逼出"绕整列一大圈"的空心框——卡片之间那几十像素的空当同样能穿过去。
   // 候选要保证在 [laneX, inX] 这段横穿范围内不碰到任何卡片（源列、目标列的卡不在此区间内）。
   const blockers = between.filter((c) => c.right > laneX && c.left < inX);
+  const isFree = (y: number) => !blockers.some((c) => y > c.top - 2 && y < c.bottom + 2);
   const candidates: number[] = [];
-  for (const c of between) candidates.push(c.top - BAND_GAP - offset, c.bottom + BAND_GAP + offset);
+  for (const c of between) candidates.push(c.top - BAND_GAP, c.bottom + BAND_GAP);
   candidates.push(
-    Math.min(...between.map((c) => c.top)) - BAND_GAP - offset,
-    Math.max(...between.map((c) => c.bottom)) + BAND_GAP + offset,
+    Math.min(...between.map((c) => c.top)) - BAND_GAP,
+    Math.max(...between.map((c) => c.bottom)) + BAND_GAP,
   );
-  const free = candidates.filter((y) => !blockers.some((c) => y > c.top - 2 && y < c.bottom + 2));
+  const free = candidates.filter(isFree);
   const cost = (y: number) => Math.abs(sy - y) + Math.abs(ty - y);
-  const band = free.length > 0 ? free.reduce((best, y) => (cost(y) < cost(best) ? y : best)) : undefined;
+  const bestBand = free.length > 0 ? free.reduce((best, y) => (cost(y) < cost(best) ? y : best)) : undefined;
+  // 同源字段的多条线叠在一条横带上会糊成一根，所以在空当里上下错开一点；
+  // 错开会撞进卡片时就不错开（宁可两条线共用一条横带，也不要为了错开而穿卡）。
+  const band =
+    bestBand === undefined
+      ? undefined
+      : offset === 0
+        ? bestBand
+        : isFree(bestBand - offset)
+          ? bestBand - offset
+          : isFree(bestBand + offset)
+            ? bestBand + offset
+            : bestBand;
 
-  // 就近横带优先（截图中 orders→order_items 从 payments 与 products 之间穿过去的走法），
-  // 但绕得太远就走顶部留白：横带一远，它在列间来回折的次数比"上绕一次"还多。
+  // 就近横带优先（截图中 orders→order_items 从 payments 与 products 之间穿过去的走法）。
+  // 判定用"比直线多绕多少"，而不是绝对距离：横带本来就夹在两端之间时，它只走 |sy-ty|，
+  // 哪怕两端差着三百像素也是最优解 —— 拿绝对值去卡会把它误判成"绕太远"，
+  // 结果拐出一个一路顶到画布上沿、再折回目标的大回环。
   const topY = route.topY;
-  if (band !== undefined && cost(band) <= MAX_BAND_DETOUR) {
+  const direct = Math.abs(ty - sy);
+  if (band !== undefined && cost(band) <= direct + MAX_BAND_DETOUR) {
     return [
       { x: sx, y: sy },
       { x: laneX, y: sy },
