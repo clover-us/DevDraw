@@ -1651,21 +1651,16 @@ select.dd-input {
   stroke: var(--accent);
 }
 
-/* 内联改名输入框 */
-/* 原地改名：同一个 span 直接编辑，字体/字号/颜色不变，只加一层极淡的编辑提示。 */
+/* 原地改名：不加任何选框/底色，就是原文字被选中——选中高亮统一用主色。 */
 .dd-editing {
   outline: none;
   cursor: text;
   user-select: text;
   -webkit-user-select: text;
-  background: var(--bg-elevated);
-  border-radius: 3px;
-  box-shadow: 0 0 0 2px var(--ring);
-  min-width: 2ch;
 }
-.dd-table-head .dd-node-name.dd-editing {
-  overflow: visible;
-  white-space: normal;
+.dd-editing::selection {
+  background: var(--accent);
+  color: #fff;
 }
 
 /* ---------- 存储状态条（结构不变，颜色随主题） ---------- */
