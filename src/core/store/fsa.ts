@@ -87,6 +87,7 @@ async function writeAtomic(dir: FSHandle, name: string, text: string): Promise<v
 }
 
 export class FsaStore implements ModelStore {
+  readonly kind = 'folder' as const;
   readonly autoSave = true;
   constructor(private dir: FSHandle) {}
 

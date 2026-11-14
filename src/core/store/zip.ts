@@ -42,6 +42,7 @@ export function downloadProject(snapshot: ProjectSnapshot, filename?: string): v
 
 /** 内存中的 zip 项目（导入后编辑，导出时再打包）。autoSave=false。 */
 export class ZipStore implements ModelStore {
+  readonly kind = 'zip' as const;
   readonly label: string;
   readonly autoSave = false;
   private snapshot: ProjectSnapshot;

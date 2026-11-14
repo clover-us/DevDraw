@@ -2,6 +2,7 @@
 import type { ProjectSnapshot, ModelStore } from './types';
 
 export class MemoryStore implements ModelStore {
+  readonly kind = 'memory' as const;
   readonly label = '内存（未持久化）';
   readonly autoSave = false;
   private snapshot: ProjectSnapshot | null;

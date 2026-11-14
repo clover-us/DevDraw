@@ -22,6 +22,7 @@ import type { DependencyMode, Model } from '../core/types';
 import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData } from './components';
 import { ModelPanel } from './ModelPanel';
 import { Sidebar } from './Sidebar';
+import { StorageBar } from './StorageBar';
 import { useProject } from './useProject';
 
 const nodeTypes = { devdraw: DevDrawNode };
@@ -217,34 +218,33 @@ export function App() {
             </button>
           ))}
         </nav>
-        <div className="dd-model-name">
-          {model.name}
-          <span className={`dd-store-tag${project.dirty ? ' dirty' : ''}`} title={project.storeLabel}>
-            {project.storeLabel}
-            {project.saving ? ' · 保存中…' : project.dirty ? (project.autoSave ? ' · 待自动保存' : ' · 未导出') : ' · 已保存'}
-          </span>
-        </div>
+        <div className="dd-model-name">{model.name}</div>
+        <StorageBar
+          modelName={model.name}
+          kind={project.storeKind}
+          label={project.storeLabel}
+          autoSave={project.autoSave}
+          dirty={project.dirty}
+          saving={project.saving}
+          fsaSupported={project.fsaSupported}
+          onOpenFolder={() => void project.openFolder()}
+          onImportZip={(f) => void project.importZip(f)}
+          onExportZip={project.exportZip}
+          onSaveNow={() => void project.saveNow()}
+        />
         <div className="dd-actions">
-          {project.fsaSupported && <button onClick={() => void project.openFolder()}>打开文件夹</button>}
-          <label className="dd-file-btn">
-            导入 zip
-            <input
-              type="file"
-              accept=".zip"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void project.importZip(f);
-                e.target.value = '';
-              }}
-            />
-          </label>
-          <button onClick={project.exportZip}>导出 zip</button>
-          {!project.autoSave && (
-            <button onClick={() => void project.saveNow()} disabled={!project.dirty}>
-              保存
+          {project.fsaSupported && project.storeKind !== 'folder' && (
+            <button
+              className="dd-primary"
+              onClick={() => void project.openFolder()}
+              title="授权一个本地文件夹，之后每次改动自动保存到磁盘"
+            >
+              打开文件夹
             </button>
           )}
+          <button onClick={project.exportZip} title="把当前状态打包下载一份 zip 快照（备份 / 分享 / 换浏览器）">
+            导出 zip
+          </button>
           {lens === 'architecture' && (
             <button onClick={clearScenario} disabled={seeds.length === 0}>
               清除推演

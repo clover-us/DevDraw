@@ -13,12 +13,14 @@ import {
   restoreStore,
   ZipStore,
   type ModelStore,
+  type StoreKind,
 } from '../core/store';
 import { sampleThreeLensModel, threeLensPositions } from '../core/sample-three-lens';
 
 export interface ProjectState {
   model: Model;
   views: Views;
+  storeKind: StoreKind;
   storeLabel: string;
   autoSave: boolean;
   dirty: boolean;
@@ -149,6 +151,7 @@ export function useProject(): ProjectState {
   return {
     model,
     views,
+    storeKind: store.kind,
     storeLabel: store.label,
     autoSave: store.autoSave,
     dirty,

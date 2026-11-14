@@ -12,7 +12,12 @@ export interface ProjectSnapshot {
   views: Views;
 }
 
+/** 存储形态：本地文件夹（FSA 自动保存）/ zip 快照（手动）/ 内存（未持久化）。 */
+export type StoreKind = 'folder' | 'zip' | 'memory';
+
 export interface ModelStore {
+  /** 存储形态，供 UI 选择图标与解释文案。 */
+  readonly kind: StoreKind;
   /** 人类可读的项目标识（文件夹名 / zip 名 / "内存"）。 */
   readonly label: string;
   /** 是否支持自动保存（FSA=true；zip/内存=false，需手动导出）。 */
