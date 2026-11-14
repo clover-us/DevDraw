@@ -22,13 +22,13 @@ describe('镜片注册表 / 投影', () => {
     expect(Object.keys(p.edges).sort()).toEqual(Object.keys(sampleModel.edges).sort());
   });
 
-  it('ER 镜片只含表+字段（5 表 15 字段），跨镜片胶水边隐藏', () => {
+  it('ER 镜片只含表（5 表，字段折进表卡片不独立投影），跨镜片胶水边隐藏', () => {
     const p = projectLens(M, getLens('er'));
-    expect(Object.keys(p.nodes)).toHaveLength(20);
-    expect(Object.values(p.nodes).every((n) => n.type === 'Table' || n.type === 'Field')).toBe(true);
-    // 15 contains + 5 fk；跨镜片 contains/reads/writes/has-lifecycle/encodes 均隐藏
-    expect(Object.keys(p.edges)).toHaveLength(20);
-    expect(Object.values(p.edges).every((e) => e.type === 'contains' || e.type === 'fk')).toBe(true);
+    expect(Object.keys(p.nodes)).toHaveLength(5);
+    expect(Object.values(p.nodes).every((n) => n.type === 'Table')).toBe(true);
+    // 字段不投影 → contains 边两端不全在投影内被隐藏；只剩 5 条表间外键。
+    expect(Object.keys(p.edges)).toHaveLength(5);
+    expect(Object.values(p.edges).every((e) => e.type === 'fk')).toBe(true);
   });
 
   it('状态机镜片只含状态（Lifecycle 仅作锚点不投影），6 条迁移', () => {

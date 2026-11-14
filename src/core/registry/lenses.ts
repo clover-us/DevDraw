@@ -21,8 +21,9 @@ export const LENSES: LensDef[] = [
   {
     id: 'er',
     label: 'ER',
-    description: '表结构与外键基数。推演器查外键位置、N:M 中间表、可空孤儿；选中字段看改列牵连。',
-    nodeTypes: ['Table', 'Field', 'Decision', 'Assumption', 'Note'],
+    description: '表结构与外键基数。字段折进所属表卡片（不再游离）；推演器查外键位置、N:M 中间表、可空孤儿；点字段看改列牵连。',
+    // 字段不作为独立画布节点：折进 Table 卡片内部渲染（仍在模型里，推演器读全模型）。
+    nodeTypes: ['Table', 'Decision', 'Assumption', 'Note'],
     layout: 'elk-layered',
     reasoner: erReasoner,
   },

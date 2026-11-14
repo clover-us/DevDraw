@@ -8,7 +8,7 @@ import type { EdgeAttrs, Model, ModelEdge, ModelNode } from './types';
 import { checkIntegrity } from './validate';
 
 export type Patch =
-  | { op: 'update-edge'; id: string; attrs: Partial<EdgeAttrs> }
+  | { op: 'update-edge'; id: string; attrs?: Partial<EdgeAttrs>; label?: string }
   | { op: 'update-node'; id: string; name?: string; attrs?: Record<string, string | number | boolean> }
   | { op: 'add-node'; id: string; node: ModelNode }
   | { op: 'remove-node'; id: string }
@@ -22,7 +22,14 @@ export function applyPatch(model: Model, patch: Patch): Model {
       if (!edge) throw new Error(`update-edge: edge not found: ${patch.id}`);
       return {
         ...model,
-        edges: { ...model.edges, [patch.id]: { ...edge, attrs: { ...edge.attrs, ...patch.attrs } } },
+        edges: {
+          ...model.edges,
+          [patch.id]: {
+            ...edge,
+            label: patch.label === undefined ? edge.label : patch.label || undefined,
+            attrs: { ...edge.attrs, ...patch.attrs },
+          },
+        },
       };
     }
     case 'update-node': {

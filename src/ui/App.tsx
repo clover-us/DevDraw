@@ -1,6 +1,10 @@
 /**
  * 一个模型多副镜片：镜片切换 = 投影 + 推演器分派。模型统一，推演穿镜而过。
  * 设计依据：docs/design/lens-model.md §4。所有变更经 applyPatch/applyPatches 唯一咽喉点。
+ *
+ * 布局（用户 m01049 定调）：顶部 header 保持不变（镜片切换在此）；
+ * 左侧导航轨把旧右栏拆成可导航分区（实体 / 发现 / 推演，默认收起）；
+ * 右侧 = 语境抽屉（选中实体/边 → 详情 + 相关内容 + 上下文建模）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -24,27 +28,51 @@ import { getLens, LENSES, projectLens, type LensId } from '../core/registry';
 import { threeLensPositions } from '../core/sample-three-lens';
 import { edgeDependency, simulate, type SimulationResult } from '../core/simulate';
 import type { DependencyMode, EdgeType, Model } from '../core/types';
-import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData } from './components';
-import { ModelPanel } from './ModelPanel';
-import { Sidebar } from './Sidebar';
+import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData, type FieldRow } from './components';
+import { EntityDrawer } from './EntityDrawer';
+import { RedoIcon, UndoIcon } from './icons';
+import { NavPanel } from './NavPanel';
+import { NavRail, type NavSection } from './NavRail';
+import { SimulationPanel } from './SimulationPanel';
 import { StorageBar } from './StorageBar';
+import { useTheme } from './theme';
 import { useProject } from './useProject';
 
 const nodeTypes = { devdraw: DevDrawNode };
 const edgeTypes = { devdraw: DevDrawEdge };
 
 const HINTS: Record<LensId, string> = {
-  architecture: '拖拽节点摆位 · 从右侧圆点拖出连线 · 双击改名 · 右键切换失效源 · 点边标签改依赖模式',
-  er: '拖拽摆位 · 拖出外键 · 双击改名 · 点字段看改列牵连 · 红色外键=N:M 缺中间表',
-  'state-machine': '拖拽摆位 · 拖出迁移 · 双击改名 · 红色迁移=缺服务 · 在右侧回答模型的反问',
+  architecture: '拖拽摆位 · 从圆点拖出连线 · 双击改名 · 右键设失效源 · 点实体/边在右侧抽屉编辑',
+  er: '拖拽摆位 · 拖出外键 · 双击改名 · 点表内字段看改列牵连 · 红色外键=N:M 缺中间表',
+  'state-machine': '拖拽摆位 · 拖出迁移 · 双击改名 · 红色迁移=缺服务 · 在「发现」回答模型的反问',
 };
 
-/** 拖拽连线时按镜片落的默认边类型（之后可在右侧改具体属性）。 */
+/** 拖拽连线时按镜片落的默认边类型（之后可在右侧抽屉改具体属性）。 */
 const CONNECT_TYPE: Record<LensId, EdgeType> = {
   architecture: 'calls',
   er: 'fk',
   'state-machine': 'transition',
 };
+
+/** ER 表卡片内的字段行：从全模型 contains 边折叠而来（字段不再游离）。 */
+function fieldsOf(model: Model, tableId: string): FieldRow[] {
+  const rows: FieldRow[] = [];
+  for (const e of Object.values(model.edges)) {
+    if (e.type === 'contains' && e.from === tableId) {
+      const f = model.nodes[e.to];
+      if (f?.type === 'Field') {
+        rows.push({
+          id: e.to,
+          name: f.name,
+          dataType: typeof f.attrs?.dataType === 'string' ? f.attrs.dataType : undefined,
+          nullable: f.attrs?.nullable === true,
+          keyRole: typeof f.attrs?.key === 'string' ? f.attrs.key : undefined,
+        });
+      }
+    }
+  }
+  return rows;
+}
 
 /**
  * 把模型目标态合入画布现有节点：保留 React Flow 已测量的尺寸（避免边线抖动），
@@ -71,6 +99,7 @@ function syncNodes(
 export function App() {
   const project = useProject();
   const { model, setModel, setViews } = project;
+  const theme = useTheme();
   const [lens, setLens] = useState<LensId>('architecture');
   const [seeds, setSeeds] = useState<string[]>([]);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
@@ -81,6 +110,10 @@ export function App() {
   const [fitTick, setFitTick] = useState(0);
   const [relayoutNonce, setRelayoutNonce] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  // 左导航：默认收起，仅图标轨；点分区展开对应面板。
+  const [section, setSection] = useState<NavSection>('entities');
+  const [navExpanded, setNavExpanded] = useState(false);
+  const [createMode, setCreateMode] = useState(false);
 
   const lensDef = getLens(lens);
   const projection = useMemo(() => projectLens(model, lensDef), [model, lensDef]);
@@ -100,7 +133,7 @@ export function App() {
   // 结构变化 / 切镜片 / 手动重新布局 → ELK 重算坐标，随后 remount + fitView。
   useEffect(() => {
     let cancelled = false;
-    void layoutProjection(projectionRef.current, lens).then((pos) => {
+    void layoutProjection(projectionRef.current, lens, model).then((pos) => {
       if (cancelled) return;
       setAutoPos(pos);
       setFitTick((t) => t + 1);
@@ -108,6 +141,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structKey, lens, relayoutNonce]);
   const findings = useMemo(() => lensDef.reasoner.run(model), [model, lensDef]);
   const result = useMemo(() => {
@@ -126,12 +160,13 @@ export function App() {
     return set;
   }, [result]);
 
-  // 每副镜片的错误/反问计数（标签上的小红点，引导用户去看"顶嘴"）
+  // 每副镜片的错误/反问计数（顶部标签小红点，引导用户去看"顶嘴"）
   const lensBadges = useMemo(() => {
     const out: Record<string, number> = {};
     for (const l of LENSES) out[l.id] = l.reasoner.run(model).filter((f) => f.severity === 'error' || f.severity === 'question').length;
     return out;
   }, [model]);
+  const findingsBadge = findings.filter((f) => f.severity === 'error' || f.severity === 'question').length;
 
   const positionFor = useCallback(
     (id: string): { x: number; y: number } => {
@@ -158,14 +193,41 @@ export function App() {
     [model],
   );
 
-  const selectNode = useCallback((id: string) => {
+  const selectNode = useCallback((id: string | null) => {
     setSelectedNode(id);
     setSelectedEdge(null);
+    setCreateMode(false);
   }, []);
-  const selectEdge = useCallback((id: string) => {
+  const selectEdge = useCallback((id: string | null) => {
     setSelectedEdge(id);
     setSelectedNode(null);
+    setCreateMode(false);
   }, []);
+  const closeDrawer = useCallback(() => {
+    setSelectedNode(null);
+    setSelectedEdge(null);
+    setCreateMode(false);
+  }, []);
+  const startCreate = useCallback(() => {
+    setCreateMode(true);
+    setSelectedNode(null);
+    setSelectedEdge(null);
+  }, []);
+
+  // 左导航分区：点当前已展开分区 → 收起；否则切到该分区并展开。
+  const onSection = useCallback(
+    (s: NavSection) => {
+      if (section === s && navExpanded) {
+        setNavExpanded(false);
+      } else {
+        setSection(s);
+        setNavExpanded(true);
+      }
+    },
+    [section, navExpanded],
+  );
+  const toggleExpand = useCallback(() => setNavExpanded((v) => !v), []);
+  const collapseNav = useCallback(() => setNavExpanded(false), []);
 
   const commitRename = useCallback(
     (id: string, name: string) => {
@@ -195,6 +257,7 @@ export function App() {
       setModel((m) => applyPatchChecked(m, { op: 'add-edge', id, edge: { type, from: params.source!, to: params.target! } }));
       setSelectedEdge(id);
       setSelectedNode(null);
+      setCreateMode(false);
     },
     [lens, setModel],
   );
@@ -230,6 +293,9 @@ export function App() {
           keyRole: typeof n.attrs?.key === 'string' ? n.attrs.key : undefined,
           initial: n.attrs?.initial === true,
           fieldCount: n.type === 'Table' ? fieldCount(id) : undefined,
+          fields: n.type === 'Table' ? fieldsOf(model, id) : undefined,
+          selectedFieldId: n.type === 'Table' ? selectedNode : undefined,
+          onFieldSelect: selectNode,
           detail: typeof n.attrs?.detail === 'string' ? n.attrs.detail : undefined,
           onSelect: selectNode,
           renaming: renamingId === id,
@@ -238,7 +304,7 @@ export function App() {
         },
         draggable: true,
       })),
-    [projection, positionFor, result, seeds, highlightNodes, selectedNode, fieldCount, selectNode, renamingId, commitRename, cancelRename],
+    [projection, positionFor, result, seeds, highlightNodes, selectedNode, fieldCount, selectNode, renamingId, commitRename, cancelRename, model],
   );
 
   const derivedEdges = useMemo<Edge<DevDrawEdgeData>[]>(
@@ -286,13 +352,20 @@ export function App() {
     setRfEdges(derivedEdges);
   }
 
+  const toggleSeed = useCallback((id: string) => {
+    setSeeds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  }, []);
+
   const onNodeContextMenu: NodeMouseHandler = useCallback(
     (event, node) => {
       event.preventDefault();
       if (lens !== 'architecture') return;
-      setSeeds((s) => (s.includes(node.id) ? s.filter((x) => x !== node.id) : [...s, node.id]));
+      toggleSeed(node.id);
+      // 设失效源 → 自动展开"推演"分区，给即时反馈。
+      setSection('simulation');
+      setNavExpanded(true);
     },
-    [lens],
+    [lens, toggleSeed],
   );
 
   const changeEdgeMode = useCallback(
@@ -312,7 +385,17 @@ export function App() {
     setSelectedEdge(null);
     setSelectedNode(null);
     setActiveFinding(null);
+    setCreateMode(false);
   }, []);
+
+  // 推演面板里点失效源：若不在架构镜片，先跳过去，让控制永远有可见反馈。
+  const toggleSeedFromPanel = useCallback(
+    (id: string) => {
+      if (lens !== 'architecture') switchLens('architecture');
+      toggleSeed(id);
+    },
+    [lens, switchLens, toggleSeed],
+  );
 
   const clearScenario = useCallback(() => {
     setSeeds([]);
@@ -326,9 +409,33 @@ export function App() {
     setSelectedEdge(null);
     setSelectedNode(null);
     setActiveFinding(null);
+    setCreateMode(false);
   }, [project]);
 
   const onModelChange = useCallback((next: Model) => setModel(next), [setModel]);
+  const drawerOpen = createMode || selectedNode !== null || selectedEdge !== null;
+
+  // 撤销/重做快捷键：Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做；输入框内不拦截。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'z' && key !== 'y') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      e.preventDefault();
+      if (key === 'y' || e.shiftKey) project.redo();
+      else project.undo();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [project.redo, project.undo]);
+
+  // 撤销/重做或删除可能让选中实体/边消失 → 清掉悬空选择，避免抽屉读到不存在的节点。
+  useEffect(() => {
+    if (selectedNode && !model.nodes[selectedNode]) setSelectedNode(null);
+    if (selectedEdge && !model.edges[selectedEdge]) setSelectedEdge(null);
+  }, [model, selectedNode, selectedEdge]);
 
   return (
     <div className="dd-app">
@@ -372,6 +479,24 @@ export function App() {
               打开文件夹
             </button>
           )}
+          <button
+            className="dd-icon-btn"
+            onClick={project.undo}
+            disabled={!project.canUndo}
+            title="撤销 (Ctrl+Z)"
+            aria-label="撤销"
+          >
+            <UndoIcon size={16} />
+          </button>
+          <button
+            className="dd-icon-btn"
+            onClick={project.redo}
+            disabled={!project.canRedo}
+            title="重做 (Ctrl+Shift+Z)"
+            aria-label="重做"
+          >
+            <RedoIcon size={16} />
+          </button>
           <button onClick={project.exportZip} title="把当前状态打包下载一份 zip 快照（备份 / 分享 / 换浏览器）">
             导出 zip
           </button>
@@ -387,6 +512,45 @@ export function App() {
         </div>
       </header>
       <div className="dd-main">
+        <NavRail
+          section={section}
+          expanded={navExpanded}
+          findingsBadge={findingsBadge}
+          simulationBadge={seeds.length}
+          theme={theme.theme}
+          onSection={onSection}
+          onToggleExpand={toggleExpand}
+          onToggleTheme={theme.toggle}
+        />
+        {navExpanded &&
+          (section === 'simulation' ? (
+            <SimulationPanel
+              model={model}
+              lens={lensDef}
+              seeds={seeds}
+              result={result}
+              baseline={baseline}
+              onToggleSeed={toggleSeedFromPanel}
+              onClearScenario={clearScenario}
+              onSelectNode={selectNode}
+              onClose={collapseNav}
+            />
+          ) : (
+            <NavPanel
+              section={section}
+              lens={lensDef}
+              model={model}
+              projection={projection}
+              findings={findings}
+              activeFinding={activeFinding}
+              selectedNode={selectedNode}
+              onSelectFinding={setActiveFinding}
+              onAnswer={answer}
+              onSelectNode={selectNode}
+              onCreate={startCreate}
+              onClose={collapseNav}
+            />
+          ))}
         <div className="dd-canvas">
           <ReactFlow
             key={`${lens}-${fitTick}`}
@@ -407,51 +571,48 @@ export function App() {
               setSelectedNode(null);
               setActiveFinding(null);
               setRenamingId(null);
+              setCreateMode(false);
             }}
-            connectionLineStyle={{ stroke: '#4a9eda', strokeWidth: 2 }}
+            connectionLineStyle={{ stroke: 'var(--accent)', strokeWidth: 2 }}
             fitView
             fitViewOptions={{ padding: 0.2 }}
             minZoom={0.3}
             maxZoom={2}
+            proOptions={{ hideAttribution: true }}
           >
-            <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} color="#2a2f3a" />
+            <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} color="var(--canvas-dot)" />
             <Controls showInteractive={false} />
             <MiniMap
               pannable
               zoomable
               nodeColor={(n) => {
                 const state = (n.data as DevDrawNodeData).state;
-                return state === 'failed' ? '#e5484d' : state === 'degraded' ? '#d99a2b' : '#3a4150';
+                return state === 'failed' ? 'var(--danger)' : state === 'degraded' ? 'var(--warning)' : 'var(--minimap-node)';
               }}
             />
           </ReactFlow>
           <div className="dd-hint">{HINTS[lens]}</div>
         </div>
-        <div className="dd-rightcol">
-          <ModelPanel
-            model={model}
-            lensNodeTypes={lensDef.nodeTypes}
-            selectedNode={selectedNode}
-            selectedEdge={selectedEdge}
-            onChange={onModelChange}
-            onSelectNode={setSelectedNode}
-          />
-          <Sidebar
+        {drawerOpen && (
+          <EntityDrawer
             model={model}
             lens={lensDef}
-            findings={findings}
-            activeFinding={activeFinding}
-            onSelectFinding={setActiveFinding}
-            onAnswer={answer}
+            projection={projection}
             selectedNode={selectedNode}
             selectedEdge={selectedEdge}
-            seeds={seeds}
+            createMode={createMode}
+            findings={findings}
+            activeFinding={activeFinding}
             result={result}
-            baseline={baseline}
+            onSelectNode={selectNode}
+            onSelectEdge={selectEdge}
+            onSelectFinding={setActiveFinding}
+            onAnswer={answer}
+            onChange={onModelChange}
             onChangeMode={changeEdgeMode}
-            onClearEdge={() => setSelectedEdge(null)}
+            onClose={closeDrawer}
           />
-        </div>
+        )}
       </div>
     </div>
   );

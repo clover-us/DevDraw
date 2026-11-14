@@ -1,6 +1,6 @@
 /**
  * 镜片感知的节点 / 边渲染。一个模型多副镜片：同一组件按 kind / edgeType 切换形态。
- * 架构=失效着色；ER=表/字段/外键基数；状态机=状态/迁移（缺服务标红）。
+ * 架构=失效着色；ER=表卡片（字段折进表内，不再游离）/外键基数；状态机=状态/迁移（缺服务标红）。
  */
 import { useEffect, useRef, type ReactNode } from 'react';
 import {
@@ -12,6 +12,15 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import type { DependencyMode, EdgeType, NodeState, NodeType } from '../core/types';
+
+/** 表卡片内的一行字段（从全模型 contains 边折叠而来）。 */
+export interface FieldRow {
+  id: string;
+  name: string;
+  dataType?: string;
+  nullable?: boolean;
+  keyRole?: string;
+}
 
 export interface DevDrawNodeData extends Record<string, unknown> {
   name: string;
@@ -26,6 +35,10 @@ export interface DevDrawNodeData extends Record<string, unknown> {
   initial?: boolean;
   fieldCount?: number;
   detail?: string;
+  /** ER 表卡片：内部字段行。 */
+  fields?: FieldRow[];
+  selectedFieldId?: string | null;
+  onFieldSelect?: (id: string) => void;
   onSelect: (id: string) => void;
   renaming?: boolean;
   onRename?: (id: string, name: string) => void;
@@ -92,6 +105,44 @@ export function DevDrawNode({ id, data }: NodeProps) {
         }}
       />
     );
+  } else if (d.kind === 'Table') {
+    const fields = d.fields ?? [];
+    body = (
+      <>
+        <div className="dd-table-head">
+          <span className="dd-node-kind">表</span>
+          <span className="dd-node-name">{d.name}</span>
+          <span className="dd-table-count">{fields.length || d.fieldCount || 0} 列</span>
+        </div>
+        <div className="dd-table-fields">
+          {fields.length === 0 && <div className="dd-table-empty">无字段 · 在右侧抽屉添加</div>}
+          {fields.map((f) => (
+            <div
+              key={f.id}
+              className={`dd-field-row${d.selectedFieldId === f.id ? ' selected' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                d.onFieldSelect?.(f.id);
+              }}
+              title="点击查看字段详情 / 改列牵连"
+            >
+              {f.keyRole ? (
+                <span className={`dd-key dd-key-${f.keyRole.toLowerCase()}`}>{f.keyRole}</span>
+              ) : (
+                <span className="dd-key-spacer" />
+              )}
+              <span className="dd-field-name">{f.name}</span>
+              <span className="dd-field-type">{f.dataType}</span>
+              {f.nullable && (
+                <span className="dd-nullable" title="可空">
+                  ?
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </>
+    );
   } else if (d.kind === 'Field') {
     body = (
       <>
@@ -99,14 +150,6 @@ export function DevDrawNode({ id, data }: NodeProps) {
         <span className="dd-field-name">{d.name}</span>
         <span className="dd-field-type">{d.dataType}</span>
         {d.nullable && <span className="dd-nullable" title="可空">?</span>}
-      </>
-    );
-  } else if (d.kind === 'Table') {
-    body = (
-      <>
-        <div className="dd-node-kind">表</div>
-        <div className="dd-node-name">{d.name}</div>
-        <div className="dd-table-count">{d.fieldCount ?? 0} 列</div>
       </>
     );
   } else if (d.kind === 'State') {

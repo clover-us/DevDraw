@@ -16,17 +16,16 @@ describe('layoutProjection（ELK 自动布局）', () => {
     }
   });
 
-  it('ER 镜片：字段排在所属表下方（contains 边驱动分层）', async () => {
+  it('ER 镜片：表卡片分层布局，外键父表在子表上方（字段已折进卡片）', async () => {
     const projection = projectLens(sampleThreeLensModel, getLens('er'));
-    const pos = await layoutProjection(projection, 'er');
-    expect(Object.keys(pos).length).toBe(Object.keys(projection.nodes).length);
-    const containsTableField = Object.values(projection.edges).filter(
-      (e) => e.type === 'contains' && projection.nodes[e.from]?.type === 'Table' && projection.nodes[e.to]?.type === 'Field',
-    );
-    expect(containsTableField.length).toBeGreaterThan(0);
-    for (const e of containsTableField) {
-      expect(pos[e.to].y).toBeGreaterThan(pos[e.from].y);
+    const pos = await layoutProjection(projection, 'er', sampleThreeLensModel);
+    expect(Object.keys(pos).length).toBe(5);
+    for (const id of Object.keys(projection.nodes)) {
+      expect(Number.isFinite(pos[id].x)).toBe(true);
+      expect(Number.isFinite(pos[id].y)).toBe(true);
     }
+    // orders 1—N order_items：父表 orders 在子表 order_items 上方。
+    expect(pos['t_orders'].y).toBeLessThan(pos['t_order_items'].y);
   });
 
   it('状态机镜片：初始态在终态左侧（左→右流）', async () => {

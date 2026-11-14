@@ -1,6 +1,6 @@
 /**
- * useProject —— 持久化状态 hook：ModelStore 接线 + 脏标记 + 自动保存（FSA）/手动导出（zip）。
- * 设计依据：持久化定调第 1/3 条。所有模型变更经 applyPatch 咽喉点，再标脏。
+ * useProject —— 持久化状态 hook：ModelStore 接线 + 脏标记 + 自动保存（FSA）/手动导出（zip）+ 撤销/重做。
+ * 设计依据：持久化定调第 1/3 条。所有模型变更经 applyPatch 咽喉点，再标脏；不可变模型让历史栈几乎免费。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Model } from '../core/types';
@@ -28,6 +28,10 @@ export interface ProjectState {
   fsaSupported: boolean;
   setModel: (updater: Model | ((m: Model) => Model)) => void;
   setViews: (updater: Views | ((v: Views) => Views)) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  undo: () => void;
+  redo: () => void;
   openFolder: () => Promise<void>;
   importZip: (file: File) => Promise<void>;
   exportZip: () => void;
@@ -36,6 +40,7 @@ export interface ProjectState {
 }
 
 const DEFAULT_VIEWS: Views = { architecture: { positions: {} }, er: { positions: {} }, 'state-machine': { positions: {} } };
+const HISTORY_CAP = 60;
 
 export function useProject(): ProjectState {
   const [model, setModelState] = useState<Model>(() => structuredClone(sampleThreeLensModel));
@@ -43,6 +48,17 @@ export function useProject(): ProjectState {
   const [store, setStore] = useState<ModelStore>(() => new MemoryStore());
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  // 撤销/重做：不可变模型快照栈。historyTick 仅用于驱动 canUndo/canRedo 重渲染。
+  const pastRef = useRef<Model[]>([]);
+  const futureRef = useRef<Model[]>([]);
+  const [, setHistoryTick] = useState(0);
+  const bumpHistory = useCallback(() => setHistoryTick((v) => v + 1), []);
+  const resetHistory = useCallback(() => {
+    pastRef.current = [];
+    futureRef.current = [];
+    bumpHistory();
+  }, [bumpHistory]);
+
   const storeRef = useRef(store);
   storeRef.current = store;
   const snapshotRef = useRef({ model, views });
@@ -61,22 +77,54 @@ export function useProject(): ProjectState {
         setModelState(snap.model);
         setViewsState(snap.views);
         setDirty(false);
+        resetHistory();
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [resetHistory]);
 
-  const setModel = useCallback((updater: Model | ((m: Model) => Model)) => {
-    setModelState((m) => (typeof updater === 'function' ? (updater as (m: Model) => Model)(m) : updater));
-    setDirty(true);
-  }, []);
+  const setModel = useCallback(
+    (updater: Model | ((m: Model) => Model)) => {
+      const prev = snapshotRef.current.model;
+      const next = typeof updater === 'function' ? (updater as (m: Model) => Model)(prev) : updater;
+      if (next === prev) return;
+      pastRef.current = [...pastRef.current.slice(-(HISTORY_CAP - 1)), prev];
+      futureRef.current = [];
+      setModelState(next);
+      setDirty(true);
+      bumpHistory();
+    },
+    [bumpHistory],
+  );
 
   const setViews = useCallback((updater: Views | ((v: Views) => Views)) => {
     setViewsState((v) => (typeof updater === 'function' ? (updater as (v: Views) => Views)(v) : updater));
     setDirty(true);
   }, []);
+
+  const undo = useCallback(() => {
+    const past = pastRef.current;
+    if (past.length === 0) return;
+    const prev = past[past.length - 1]!;
+    pastRef.current = past.slice(0, -1);
+    futureRef.current = [snapshotRef.current.model, ...futureRef.current].slice(0, HISTORY_CAP);
+    setModelState(prev);
+    setDirty(true);
+    bumpHistory();
+  }, [bumpHistory]);
+
+  const redo = useCallback(() => {
+    const future = futureRef.current;
+    if (future.length === 0) return;
+    const next = future[0]!;
+    futureRef.current = future.slice(1);
+    pastRef.current = [...pastRef.current.slice(-(HISTORY_CAP - 1)), snapshotRef.current.model];
+    setModelState(next);
+    setDirty(true);
+    bumpHistory();
+  }, [bumpHistory]);
 
   const saveNow = useCallback(async () => {
     const s = storeRef.current;
@@ -122,19 +170,24 @@ export function useProject(): ProjectState {
       await s.save(snapshotRef.current);
     }
     setDirty(false);
-  }, []);
+    resetHistory();
+  }, [resetHistory]);
 
-  const importZip = useCallback(async (file: File) => {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const s = ZipStore.fromBytes(bytes, file.name.replace(/\.devdraw\.zip$|\.zip$/i, ''));
-    const snap = await s.load();
-    setStore(s);
-    if (snap) {
-      setModelState(snap.model);
-      setViewsState(snap.views);
-    }
-    setDirty(false);
-  }, []);
+  const importZip = useCallback(
+    async (file: File) => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const s = ZipStore.fromBytes(bytes, file.name.replace(/\.devdraw\.zip$|\.zip$/i, ''));
+      const snap = await s.load();
+      setStore(s);
+      if (snap) {
+        setModelState(snap.model);
+        setViewsState(snap.views);
+      }
+      setDirty(false);
+      resetHistory();
+    },
+    [resetHistory],
+  );
 
   const exportZip = useCallback(() => {
     downloadProject(snapshotRef.current);
@@ -146,7 +199,8 @@ export function useProject(): ProjectState {
     setModelState(structuredClone(sampleThreeLensModel));
     setViewsState(structuredClone(DEFAULT_VIEWS));
     setDirty(false);
-  }, []);
+    resetHistory();
+  }, [resetHistory]);
 
   return {
     model,
@@ -159,6 +213,10 @@ export function useProject(): ProjectState {
     fsaSupported: isFsaSupported(),
     setModel,
     setViews,
+    canUndo: pastRef.current.length > 0,
+    canRedo: futureRef.current.length > 0,
+    undo,
+    redo,
     openFolder,
     importZip,
     exportZip,
