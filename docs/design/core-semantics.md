@@ -1,7 +1,7 @@
-# DevDraw 核心语义设计 v0.1
+# DevDraw 核心语义设计 v0.2
 
 > 配套 [../vision.md](../vision.md)。本文把构思中的开放问题落成可评审的具体设计：语义模型、推演语义、知识引用、思路图谱。
-> 状态：讨论稿。每节末尾标注「已定 / 待确认」。
+> 状态：作者已确认（2026-11-14）——**v1 严格语义**（思路图谱后置 v2+）；模拟 = 可达性 + 依赖模式，纯手工标注；项目先私有。剩余开放问题见 §6。
 
 ## 1. 语义模型（model.json）
 
@@ -18,8 +18,7 @@
     "n_risk":      { "type": "Service", "name": "风控服务" },
     "n_order_db":  { "type": "Database", "name": "订单库" },
     "n_events":    { "type": "Queue", "name": "订单事件队列" },
-    "n_notify":    { "type": "Service", "name": "通知服务" },
-    "n_idea_1":    { "type": "Idea", "name": "要不要做异地多活？" }
+    "n_notify":    { "type": "Service", "name": "通知服务" }
   },
   "edges": {
     "e_gw_order":    { "type": "calls", "from": "n_gateway", "to": "n_order", "attrs": { "protocol": "HTTP", "latencyMs": 8 } },
@@ -27,8 +26,7 @@
     "e_order_risk":  { "type": "calls", "from": "n_order", "to": "n_risk", "attrs": { "dependency": "soft", "fallback": "降级为事后人工审核" } },
     "e_order_db":    { "type": "writes", "from": "n_order", "to": "n_order_db" },
     "e_order_evt":   { "type": "publishes", "from": "n_order", "to": "n_events", "attrs": { "dependency": "soft", "fallback": "本地 outbox 暂存" } },
-    "e_evt_notify":  { "type": "subscribes", "from": "n_notify", "to": "n_events" },
-    "e_idea_pay":    { "type": "relates-to", "from": "n_idea_1", "to": "n_payment" }
+    "e_evt_notify":  { "type": "subscribes", "from": "n_notify", "to": "n_events" }
   },
   "groups": {
     "g_trade": { "name": "交易域", "members": ["n_order", "n_payment", "n_risk", "n_order_db"] }
@@ -66,7 +64,7 @@
 | `soft` | 有降级/兜底（fallback 文本必填） | 依赖方 → `degraded`，继续传播 degraded |
 | `async` | 异步解耦（队列缓冲） | 依赖方 → `degraded`（标注「积压」），不立即失效 |
 
-边类型的默认模式：`calls`/`reads`/`writes` → hard；`publishes` → hard（可改 soft+outbox）；`subscribes` → async；`depends-on` → hard；`contains` → 整体失效则部分失效（向下传播）；`relates-to` → 不传播（思路关联无语义）。
+边类型的默认模式：`calls`/`reads`/`writes` → hard；`publishes` → hard（可改 soft+outbox）；`subscribes` → async；`depends-on` → hard；`contains` → 整体失效则部分失效（向下传播）。
 
 **节点状态格**：`ok < degraded < failed`，传播只升不降 → 有环也保证终止。算法 = 从失效集出发的 worklist BFS，逐边套用规则，为每个受影响节点记录**传播路径**（侧栏展示「为什么受影响」）。
 
@@ -89,7 +87,7 @@
 
 这是产品最有力的一句话：**推演让架构权衡可见、可量化**（爆炸半径 = failed/degraded 计数 + 受影响入口）。设计评审从口头争论变成对着同一场景做实验。
 
-### 2.5 模拟属性来源（待确认，建议已给）
+### 2.5 模拟属性来源（已确认）
 
 - **v1：纯手工标注**（结构化 attrs：latencyMs、replicas、dependency、fallback…）。
 - 从代码/监控推导 = 需要集成，违背 local-first  simplicity，放 v2+；attrs 结构化已为导入留口。
@@ -125,15 +123,16 @@
 - 图元 `links: [{ kind:"code", repo, path, symbol }]`，渲染为 `vscode://file/...` 可点击链接；repo 根路径项目级配置。
 - 代码→图草稿（M4）：tree-sitter 提取候选实体 + LLM 整理，走 applyPatch 草稿 diff 确认，与文本生图同一条管道。
 
-## 4. 思路图谱与「升格」（待确认）
+## 4. 思路图谱与「升格」（已确认：不纳入 v1，设计保留）
+
+**决定**：v1 聚焦严格语义的架构/流程图与推演；思路图谱后置 v2+。以下设计保留备用——类型系统天然支持，届时无需重构即可启用。
 
 **张力**：早期思考是混乱、前语义的；过早上类型会杀死思路流动。而 README 承诺了思路图谱。
 
-**提案**：思路图谱不是独立引擎，而是同一模型的宽松投影——
+**保留提案**：思路图谱不是独立引擎，而是同一模型的宽松投影——
 - 内置 `Idea` 节点 + `relates-to` 边（无类型关联、不参与传播），加自由 Note，即成思路图谱；
 - **升格（crystallization）**：Idea 想清楚后，一键升格为 Service/Decision/Assumption…，id 不变（笔记、链接、provenance 全保留）；
 - 工作流变成：**先画思路图谱 → 逐步升格为架构模型 → 对模型推演**。这是 "Think first, draw later" 的最直接体现：思考的痕迹结晶为可推演的模型。
-- 成本：类型系统已支持，几乎免费；建议纳入 v1（M0 即有 Idea/relates-to）。
 
 ## 5. 一致性校验清单（软警告，不阻塞）
 
@@ -144,7 +143,7 @@
 
 ## 6. 剩余开放问题
 
-- 开源策略与许可证（待作者决定）。
-- 思路图谱是否纳入 v1（§4 提案待确认）。
-- 模拟深度 v1 边界（§2.5 建议待确认）。
+- Obsidian 插件形态（点击跳转 DevDraw 视图）是否列入 v2——知识卡片机制已覆盖大部分价值。
 - 自定义类型注册表的 UI 深度（v1 只做「名称+颜色」级自定义？）。
+
+已确认关闭：模拟深度（§2.5）、思路图谱取舍（§4）、开源策略（先私有，见 vision §1）。
