@@ -1,2 +1,7 @@
-# DevDraw
-DevDraw・研绘 — A developer-focused canvas for reasoning and diagramming.
+# DevDraw · 研绘
+
+> Think first, draw later.
+>
+> 研思落绘，将推演化为可视之形。
+
+面向开发者的推演画布，用于架构、数据模型、流程与思路图谱的可视化，可与知识库协同迭代。
