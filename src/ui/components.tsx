@@ -360,7 +360,7 @@ export function DevDrawEdge(props: EdgeProps) {
   const d = data as DevDrawEdgeData;
   if (HIDDEN_EDGES.has(d.edgeType)) return null;
 
-  const [path, labelX, labelY] = getBezierPath({
+  const [path] = getBezierPath({
     sourceX,
     sourceY,
     targetX,
@@ -369,7 +369,21 @@ export function DevDrawEdge(props: EdgeProps) {
     targetPosition,
   });
 
+  // 标签放在哪：默认在中点，外键边往前挪到三成处——ER 里两张表之间常常还站着第三张表，
+// 正中间的标签一定会落到别人身上，贴着"头一张表刚出门"的位置反而永远是空地。
+  const t = d.edgeType === 'fk' ? 0.3 : 0.5;
+  const bx = sourceX + (targetX - sourceX) * t;
+  const by = sourceY + (targetY - sourceY) * t;
+  // 再沿法线抬离连线一小段：文字压在线上读不清。方向固定取左法线，
+  // 水平边于是标签在上、竖直边在右，相邻边不会互相叠。
+  const dx = targetX - sourceX;
+  const dy = targetY - sourceY;
+  const len = Math.hypot(dx, dy) || 1;
+  const gap = 13;
+  const tagX = bx + (dy / len) * gap;
+  const tagY = by - (dx / len) * gap;
   let cls: string;
+  // 标签只留一句话：依赖模式靠线型与颜色表达，不再挤进标签文字里。
   let text: string;
   if (d.edgeType === 'fk') {
     cls = `edge-fk${d.cardinality === 'N:M' ? ' nm-error' : ''}`;
@@ -379,7 +393,7 @@ export function DevDrawEdge(props: EdgeProps) {
     text = `${d.event ?? 'transition'}${d.missingService ? ' ⚠ 缺服务' : ''}`;
   } else {
     cls = `mode-${d.mode}`;
-    text = `${d.label ? `${d.label} · ` : ''}${d.edgeType} · ${d.mode}`;
+    text = d.label || d.edgeType;
   }
   cls += `${d.impacted ? ' impacted' : ''}${d.highlighted ? ' highlighted' : ''}${selected ? ' selected' : ''}`;
 
@@ -390,7 +404,7 @@ export function DevDrawEdge(props: EdgeProps) {
       <EdgeLabelRenderer>
         <div
           className={`dd-edge-label ${cls}`}
-          style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+          style={{ transform: `translate(-50%, -50%) translate(${tagX}px, ${tagY}px)` }}
           onClick={(event) => {
             event.stopPropagation();
             d.onSelect(id);

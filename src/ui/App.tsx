@@ -11,6 +11,7 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  ControlButton,
   MiniMap,
   ReactFlow,
   useEdgesState,
@@ -37,7 +38,7 @@ import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData, type FieldRow } from './components';
 import { EdgePicker } from './EdgePicker';
 import { EntityDrawer } from './EntityDrawer';
-import { LayoutIcon, MaximizeIcon, MinimizeIcon, RedoIcon, UndoIcon } from './icons';
+import { FitFrameIcon, LayoutIcon, MaximizeIcon, MinimizeIcon, MinusIcon, PlusIcon, RedoIcon, UndoIcon } from './icons';
 import { NavPanel } from './NavPanel';
 import { NavRail, type NavSection } from './NavRail';
 import { QuickCreate } from './QuickCreate';
@@ -124,7 +125,7 @@ export function App() {
   const project = useProject();
   const { model, setModel, setViews } = project;
   const theme = useTheme();
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, zoomIn, zoomOut, fitView } = useReactFlow();
   const [lens, setLens] = useState<LensId>('architecture');
   const [seeds, setSeeds] = useState<string[]>([]);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
@@ -938,16 +939,30 @@ export function App() {
             proOptions={{ hideAttribution: true }}
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} color="var(--canvas-dot)" />
-            <Controls showInteractive={false} position="bottom-right" style={{ right: 190, bottom: 0 }}>
-              {/* 自定义控制项会被渲染在缩放按钮之后，因此和它们同一列、同一样式 */}
-              <button
-                className="dd-canvas-ctl dd-canvas-fs"
+            <Controls
+              showZoom={false}
+              showFitView={false}
+              showInteractive={false}
+              position="bottom-right"
+              style={{ right: 190, bottom: 0 }}
+            >
+              {/* 四个按钮全部自带图标：React Flow 内置的是实心图形，混在描边图标里粗细不一。 */}
+              <ControlButton onClick={() => void zoomIn({ duration: 140 })} title="放大" aria-label="放大">
+                <PlusIcon size={15} />
+              </ControlButton>
+              <ControlButton onClick={() => void zoomOut({ duration: 140 })} title="缩小" aria-label="缩小">
+                <MinusIcon size={15} />
+              </ControlButton>
+              <ControlButton onClick={() => void fitView({ padding: 0.16, duration: 220 })} title="适应视图" aria-label="适应视图">
+                <FitFrameIcon size={15} />
+              </ControlButton>
+              <ControlButton
                 onClick={toggleFullscreen}
                 title={fullscreen ? '退出全屏 (Esc)' : '画布全屏'}
                 aria-label={fullscreen ? '退出全屏' : '画布全屏'}
               >
-                {fullscreen ? <MinimizeIcon size={14} /> : <MaximizeIcon size={14} />}
-              </button>
+                {fullscreen ? <MinimizeIcon size={15} /> : <MaximizeIcon size={15} />}
+              </ControlButton>
             </Controls>
             <MiniMap
               pannable

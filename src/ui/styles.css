@@ -519,9 +519,9 @@ select.dd-input {
   left: auto;
   right: 0;
 }
-/* 画布自定义控件（全屏 / 重新布局）：作为缩放控件的后两项渲染在同一列里，
-   样式由 .react-flow__controls button 决定，这里只补居中与最后一格去掉分隔线。 */
-.react-flow__controls .dd-canvas-ctl {
+/* 画布控件四连（放大 / 缩小 / 适应视图 / 全屏）：图标全部自带、同一套描边，
+   所以这里只做盒子对齐，别再让 React Flow 的实心图标混进来。 */
+.react-flow__controls .react-flow__controls-button {
   padding: 0;
   display: flex;
   align-items: center;
@@ -530,13 +530,24 @@ select.dd-input {
   box-shadow: none;
   cursor: pointer;
 }
-.react-flow__controls .dd-canvas-ctl:last-child {
+.react-flow__controls .react-flow__controls-button:last-child {
   border-bottom: none;
 }
-.dd-canvas-ctl svg {
+.react-flow__controls .react-flow__controls-button svg {
   flex: none;
+  /* React Flow 默认把图标罩在 12px（max-width/max-height），描边图标在 12px 下会显得发虚，
+     这里放大一点并补上描边粗细，四个按钮都用同一套参数。 */
+  width: 14px;
+  height: 14px;
+  max-width: 14px;
+  max-height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
-.react-flow__controls .dd-canvas-ctl:hover {
+.react-flow__controls .react-flow__controls-button:hover {
   background: var(--overlay);
 }
 
@@ -1645,14 +1656,17 @@ select.dd-input {
   pointer-events: all;
   cursor: pointer;
   font-size: 11px;
-  background: var(--node-bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px 9px;
+  line-height: 1.2;
+  background: none;
+  border: none;
+  padding: 0 2px;
   color: var(--muted);
   white-space: nowrap;
   user-select: none;
-  box-shadow: 0 1px 4px var(--shadow-soft);
+  /* 没有底色了，靠一圈跟画布同色的微光把文字从线上"抠"出来 */
+  text-shadow:
+    0 0 3px var(--bg),
+    0 0 6px var(--bg);
 }
 .dd-edge-label.mode-soft {
   color: var(--warning);
@@ -1662,27 +1676,46 @@ select.dd-input {
 }
 .dd-edge-label.impacted {
   color: var(--danger);
-  border-color: var(--danger);
 }
 .dd-edge-label.edge-fk {
   color: var(--accent);
 }
 .dd-edge-label.edge-fk.nm-error {
   color: var(--danger);
-  border-color: var(--danger);
 }
 .dd-edge-label.edge-transition.missing-service {
   color: var(--danger);
-  border-color: var(--danger);
 }
 .dd-edge-label.highlighted {
-  border-color: var(--accent);
+  color: var(--text);
+}
+.dd-edge-label.mode-soft {
+  color: var(--warning);
+}
+.dd-edge-label.mode-async {
+  color: var(--accent);
+}
+.dd-edge-label.impacted {
+  color: var(--danger);
+}
+.dd-edge-label.edge-fk {
+  color: var(--accent);
+}
+.dd-edge-label.edge-fk.nm-error {
+  color: var(--danger);
+}
+.dd-edge-label.edge-transition.missing-service {
+  color: var(--danger);
+}
+.dd-edge-label.highlighted {
   color: var(--text);
 }
 .dd-edge-label.selected {
-  border-color: var(--accent);
-  color: var(--text);
-  box-shadow: 0 0 0 2px var(--ring);
+  color: var(--accent);
+  text-shadow:
+    0 0 3px var(--bg),
+    0 0 6px var(--bg),
+    0 0 2px var(--accent);
 }
 
 /* ---------- React Flow 主题化 ---------- */

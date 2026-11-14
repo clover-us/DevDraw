@@ -111,7 +111,7 @@ export async function layoutProjection(projection: Projection, lens: LensId, mod
       'elk.algorithm': 'layered',
       'elk.direction': DIRECTION[lens],
       'elk.spacing.nodeNode': '36',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '72',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '96',
       'elk.layered.spacing.edgeNodeBetweenLayers': '28',
       'elk.padding': '[top=24,left=24,bottom=24,right=24]',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',

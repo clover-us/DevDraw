@@ -145,6 +145,23 @@ export function PlusIcon(p: IconProps) {
   );
 }
 
+export function MinusIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+/** 适应视图：四角括号（与全屏的斜向箭头区分开）。 */
+export function FitFrameIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M9 3H5a2 2 0 0 0-2 2v4M15 3h4a2 2 0 0 1 2 2v4M21 15v4a2 2 0 0 1-2 2h-4M9 21H5a2 2 0 0 1-2-2v-4" />
+    </svg>
+  );
+}
+
 export function CloseIcon(p: IconProps) {
   return (
     <svg {...base(p)}>
