@@ -18,7 +18,24 @@ export const DEFAULT_DEPENDENCY: Record<EdgeType, DependencyMode> = {
   subscribes: 'async',
   'depends-on': 'hard',
   contains: 'hard',
+  // 结构/行为边（ER 外键、状态机迁移、跨镜片锚点）不承载失效传播，
+  // 仅为满足 edgeDependency 的全类型查询而给默认值；simulate 会跳过它们。
+  fk: 'hard',
+  transition: 'hard',
+  'has-lifecycle': 'hard',
+  encodes: 'hard',
 };
+
+/** 承载失效传播的边类型。其余（fk/transition/has-lifecycle/encodes）是结构边，不参与传播。 */
+const PROPAGATING_EDGES = new Set<EdgeType>([
+  'calls',
+  'reads',
+  'writes',
+  'publishes',
+  'subscribes',
+  'depends-on',
+  'contains',
+]);
 
 export function edgeDependency(edge: ModelEdge): DependencyMode {
   return edge.attrs?.dependency ?? DEFAULT_DEPENDENCY[edge.type];
@@ -75,6 +92,7 @@ export function simulate(model: Model, seeds: string[]): SimulationResult {
   };
   for (const [edgeId, edge] of Object.entries(model.edges)) {
     if (!model.nodes[edge.from] || !model.nodes[edge.to]) continue;
+    if (!PROPAGATING_EDGES.has(edge.type)) continue;
     if (edge.type === 'contains') {
       addLink(edge.from, { edgeId, target: edge.to, mode: 'hard' });
     } else {

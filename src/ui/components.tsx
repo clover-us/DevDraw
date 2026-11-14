@@ -1,3 +1,8 @@
+/**
+ * 镜片感知的节点 / 边渲染。一个模型多副镜片：同一组件按 kind / edgeType 切换形态。
+ * 架构=失效着色；ER=表/字段/外键基数；状态机=状态/迁移（缺服务标红）。
+ */
+import type { ReactNode } from 'react';
 import {
   EdgeLabelRenderer,
   Handle,
@@ -13,6 +18,15 @@ export interface DevDrawNodeData extends Record<string, unknown> {
   kind: NodeType;
   state: NodeState;
   isSeed: boolean;
+  highlighted: boolean;
+  selected: boolean;
+  dataType?: string;
+  nullable?: boolean;
+  keyRole?: string;
+  initial?: boolean;
+  fieldCount?: number;
+  detail?: string;
+  onSelect: (id: string) => void;
 }
 
 const KIND_LABEL: Record<NodeType, string> = {
@@ -27,16 +41,70 @@ const KIND_LABEL: Record<NodeType, string> = {
   Decision: '决策',
   Assumption: '假设',
   Note: '笔记',
+  Lifecycle: '生命周期',
+  State: '状态',
 };
 
-export function DevDrawNode({ data }: NodeProps) {
+export function DevDrawNode({ id, data }: NodeProps) {
   const d = data as DevDrawNodeData;
+  const cls = [
+    'dd-node',
+    `kind-${d.kind.toLowerCase()}`,
+    `state-${d.state}`,
+    d.isSeed ? 'seed' : '',
+    d.highlighted ? 'highlighted' : '',
+    d.selected ? 'selected' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  let body: ReactNode;
+  if (d.kind === 'Field') {
+    body = (
+      <>
+        {d.keyRole && <span className={`dd-key dd-key-${d.keyRole.toLowerCase()}`}>{d.keyRole}</span>}
+        <span className="dd-field-name">{d.name}</span>
+        <span className="dd-field-type">{d.dataType}</span>
+        {d.nullable && <span className="dd-nullable" title="可空">?</span>}
+      </>
+    );
+  } else if (d.kind === 'Table') {
+    body = (
+      <>
+        <div className="dd-node-kind">表</div>
+        <div className="dd-node-name">{d.name}</div>
+        <div className="dd-table-count">{d.fieldCount ?? 0} 列</div>
+      </>
+    );
+  } else if (d.kind === 'State') {
+    body = (
+      <>
+        <div className="dd-node-name">{d.name}</div>
+        {d.initial && <div className="dd-initial-badge">初始</div>}
+      </>
+    );
+  } else if (d.kind === 'Decision' || d.kind === 'Assumption' || d.kind === 'Note') {
+    body = (
+      <>
+        <div className="dd-node-kind">{KIND_LABEL[d.kind]}</div>
+        <div className="dd-node-name">{d.name}</div>
+        {d.detail && <div className="dd-knowledge-detail">{d.detail}</div>}
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <div className="dd-node-kind">{KIND_LABEL[d.kind]}</div>
+        <div className="dd-node-name">{d.name}</div>
+        {d.isSeed && <div className="dd-seed-badge">失效源</div>}
+      </>
+    );
+  }
+
   return (
-    <div className={`dd-node state-${d.state}${d.isSeed ? ' seed' : ''}`}>
+    <div className={cls} onClick={() => d.onSelect(id)}>
       <Handle type="target" position={Position.Left} />
-      <div className="dd-node-kind">{KIND_LABEL[d.kind]}</div>
-      <div className="dd-node-name">{d.name}</div>
-      {d.isSeed && <div className="dd-seed-badge">失效源</div>}
+      {body}
       <Handle type="source" position={Position.Right} />
     </div>
   );
@@ -47,12 +115,21 @@ export interface DevDrawEdgeData extends Record<string, unknown> {
   mode: DependencyMode;
   label?: string;
   impacted: boolean;
+  highlighted: boolean;
+  cardinality?: string;
+  keyCol?: string;
+  event?: string;
+  missingService?: boolean;
   onSelect: (edgeId: string) => void;
 }
+
+const HIDDEN_EDGES = new Set<EdgeType>(['contains', 'has-lifecycle', 'encodes']);
 
 export function DevDrawEdge(props: EdgeProps) {
   const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected } = props;
   const d = data as DevDrawEdgeData;
+  if (HIDDEN_EDGES.has(d.edgeType)) return null;
+
   const [path, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -61,12 +138,24 @@ export function DevDrawEdge(props: EdgeProps) {
     sourcePosition,
     targetPosition,
   });
-  const cls = `mode-${d.mode}${d.impacted ? ' impacted' : ''}${selected ? ' selected' : ''}`;
+
+  let cls: string;
+  let text: string;
+  if (d.edgeType === 'fk') {
+    cls = `edge-fk${d.cardinality === 'N:M' ? ' nm-error' : ''}`;
+    text = `${d.cardinality ?? ''}${d.keyCol ? ` · ${d.keyCol}` : ''}`;
+  } else if (d.edgeType === 'transition') {
+    cls = `edge-transition${d.missingService ? ' missing-service' : ''}`;
+    text = `${d.event ?? 'transition'}${d.missingService ? ' ⚠ 缺服务' : ''}`;
+  } else {
+    cls = `mode-${d.mode}`;
+    text = `${d.label ? `${d.label} · ` : ''}${d.edgeType} · ${d.mode}`;
+  }
+  cls += `${d.impacted ? ' impacted' : ''}${d.highlighted ? ' highlighted' : ''}${selected ? ' selected' : ''}`;
+
   return (
     <>
-      {/* 可见边 */}
       <path id={id} d={path} fill="none" className={`dd-edge ${cls}`} />
-      {/* 加宽的透明交互层，方便点击 */}
       <path d={path} fill="none" stroke="transparent" strokeWidth={20} style={{ cursor: 'pointer' }} />
       <EdgeLabelRenderer>
         <div
@@ -77,8 +166,7 @@ export function DevDrawEdge(props: EdgeProps) {
             d.onSelect(id);
           }}
         >
-          {d.label ? `${d.label} · ` : ''}
-          {d.edgeType} · {d.mode}
+          {text}
         </div>
       </EdgeLabelRenderer>
     </>

@@ -481,3 +481,353 @@ button:disabled {
   background: transparent;
   color: var(--muted);
 }
+
+/* ---------- lens tabs ---------- */
+.dd-lens-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.dd-lens-tab {
+  position: relative;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.dd-lens-tab.active {
+  border-color: var(--blue);
+  background: #17202e;
+  color: var(--text);
+}
+
+.dd-lens-badge {
+  margin-left: 6px;
+  background: var(--red);
+  color: #fff;
+  font-size: 10px;
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+.dd-reasoner {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 6px;
+}
+
+/* ---------- findings ("模型顶嘴") ---------- */
+.dd-finding-counts {
+  display: flex;
+  gap: 6px;
+}
+
+.dd-count {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.dd-count.sev-error {
+  background: rgba(229, 72, 77, 0.18);
+  color: var(--red);
+}
+
+.dd-count.sev-question {
+  background: rgba(74, 158, 218, 0.18);
+  color: var(--blue);
+}
+
+.dd-finding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dd-finding {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: #1a1f2a;
+  padding: 8px 10px;
+}
+
+.dd-finding.sev-error {
+  border-left-color: var(--red);
+}
+
+.dd-finding.sev-question {
+  border-left-color: var(--blue);
+}
+
+.dd-finding.sev-warning {
+  border-left-color: var(--amber);
+}
+
+.dd-finding.sev-info {
+  border-left-color: var(--muted);
+}
+
+.dd-finding.active {
+  box-shadow: 0 0 0 2px rgba(74, 158, 218, 0.4);
+}
+
+.dd-finding-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.dd-finding-head:hover {
+  background: none;
+}
+
+.dd-sev-chip {
+  flex: none;
+  font-size: 10px;
+  border-radius: 999px;
+  padding: 1px 7px;
+  background: #2a2f3a;
+  color: var(--muted);
+}
+
+.sev-error .dd-sev-chip {
+  background: var(--red);
+  color: #fff;
+}
+
+.sev-question .dd-sev-chip {
+  background: var(--blue);
+  color: #fff;
+}
+
+.sev-warning .dd-sev-chip {
+  background: var(--amber);
+  color: #1a1d24;
+}
+
+.dd-finding-detail {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 6px 0 0;
+}
+
+/* ---------- interactive question ---------- */
+.dd-question {
+  margin-top: 8px;
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+}
+
+.dd-question-prompt {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.dd-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #12151d;
+}
+
+.dd-option:hover {
+  border-color: var(--blue);
+  background: #17202e;
+}
+
+.dd-option-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dd-option-desc {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* ---------- node variants ---------- */
+.dd-node.highlighted {
+  box-shadow: 0 0 0 3px rgba(74, 158, 218, 0.5);
+  border-color: var(--blue);
+}
+
+.dd-node.selected {
+  border-color: var(--text);
+}
+
+.dd-node.kind-field {
+  min-width: 190px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 7px;
+}
+
+.dd-key {
+  flex: none;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.dd-key-pk {
+  background: var(--amber);
+  color: #1a1d24;
+}
+
+.dd-key-fk {
+  background: var(--blue);
+  color: #fff;
+}
+
+.dd-field-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dd-field-type {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.dd-nullable {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--red);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dd-node.kind-table {
+  min-width: 190px;
+  border-color: #3a4150;
+  background: #202736;
+}
+
+.dd-table-count {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.dd-node.kind-state {
+  min-width: 130px;
+  border-radius: 999px;
+  text-align: center;
+  padding: 10px 18px;
+}
+
+.dd-initial-badge {
+  font-size: 9px;
+  color: var(--green);
+  margin-top: 2px;
+}
+
+.dd-node.kind-decision,
+.dd-node.kind-assumption,
+.dd-node.kind-note {
+  min-width: 160px;
+  border-style: dashed;
+  border-color: var(--green);
+  background: #16211a;
+}
+
+.dd-node.kind-assumption {
+  border-color: var(--amber);
+  background: #221d12;
+}
+
+.dd-knowledge-detail {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+/* ---------- edge variants ---------- */
+.dd-edge.edge-fk {
+  stroke: var(--blue);
+}
+
+.dd-edge.edge-fk.nm-error {
+  stroke: var(--red);
+  stroke-width: 2.6;
+  stroke-dasharray: 5 3;
+}
+
+.dd-edge.edge-transition {
+  stroke: #7d8598;
+}
+
+.dd-edge.edge-transition.missing-service {
+  stroke: var(--red);
+  stroke-width: 2.6;
+  stroke-dasharray: 6 4;
+}
+
+.dd-edge.highlighted {
+  stroke: var(--blue);
+  stroke-width: 3;
+}
+
+.dd-edge-label.edge-fk {
+  color: var(--blue);
+}
+
+.dd-edge-label.edge-fk.nm-error {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.dd-edge-label.edge-transition.missing-service {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.dd-edge-label.highlighted {
+  border-color: var(--blue);
+  color: var(--text);
+}
+
+/* severity dots (legend) */
+.dot.sev-error {
+  background: var(--red);
+}
+
+.dot.sev-question {
+  background: var(--blue);
+}
+
+.dot.sev-warning {
+  background: var(--amber);
+}

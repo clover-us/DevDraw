@@ -11,7 +11,9 @@ export type NodeType =
   | 'Actor'
   | 'Decision'
   | 'Assumption'
-  | 'Note';
+  | 'Note'
+  | 'Lifecycle'
+  | 'State';
 
 export type EdgeType =
   | 'calls'
@@ -20,7 +22,11 @@ export type EdgeType =
   | 'publishes'
   | 'subscribes'
   | 'depends-on'
-  | 'contains';
+  | 'contains'
+  | 'fk'
+  | 'transition'
+  | 'has-lifecycle'
+  | 'encodes';
 
 /** 依赖模式：推演语义的核心。hard=无兜底强依赖；soft=有降级兜底；async=异步缓冲。 */
 export type DependencyMode = 'hard' | 'soft' | 'async';
@@ -42,6 +48,16 @@ export interface EdgeAttrs {
   latencyMs?: number;
   protocol?: string;
   when?: string;
+  /** ER：外键基数 */
+  cardinality?: '1:1' | '1:N' | 'N:M';
+  /** ER：外键列名 */
+  key?: string;
+  /** 状态机：触发事件 */
+  event?: string;
+  /** 状态机→架构：实现该迁移的服务（跨镜片属性引用，避免超图） */
+  effectedBy?: string;
+  /** 状态机：人工迁移（无服务实现，推演跳过 effectedBy 检查） */
+  manual?: boolean;
   [key: string]: string | number | boolean | undefined;
 }
 
