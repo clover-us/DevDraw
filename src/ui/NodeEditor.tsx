@@ -269,7 +269,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                   <Glyph id={displayGlyph} size={22} />
                 </span>
                 <span className="dd-node-arch-text">
-                  <span className="dd-node-kind">{NODE_TYPES[node.type].label}</span>
+                  <span className="dd-node-kind">{identity?.name ?? NODE_TYPES[node.type].label}</span>
                   <span className="dd-node-name">{node.name}</span>
                 </span>
               </div>

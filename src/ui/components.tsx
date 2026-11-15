@@ -356,10 +356,8 @@ export function DevDrawNode({ id, data }: NodeProps) {
           <Glyph id={d.icon ?? KIND_GLYPH[d.kind]} size={22} />
         </span>
         <span className="dd-node-arch-text">
-          <span className="dd-node-kind">
-            {KIND_LABEL[d.kind]}
-            {d.componentLabel ? ` · ${d.componentLabel}` : ''}
-          </span>
+          {/* 有组件身份时只显身份（字号同类型行），不再赘述底座类型 */}
+          <span className="dd-node-kind">{d.componentLabel || KIND_LABEL[d.kind]}</span>
           <InlineName
             className="dd-node-name"
             name={d.name}
