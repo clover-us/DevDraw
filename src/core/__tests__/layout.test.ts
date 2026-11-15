@@ -47,7 +47,7 @@ describe('layoutProjection（ELK 自动布局）', () => {
   it('状态机镜片：初始态在终态左侧（左→右流）', async () => {
     const projection = projectLens(sampleThreeLensModel, getLens('state-machine'));
     const pos = await layoutProjection(projection, 'state-machine');
-    expect(Object.keys(pos).length).toBe(7);
+    expect(Object.keys(pos).length).toBe(11);
     expect(pos['s_created'].x).toBeLessThan(pos['s_completed'].x);
   });
 

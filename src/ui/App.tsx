@@ -42,6 +42,7 @@ import {
   type FkLink,
 } from '../core/er';
 import { packAround, reflowColumn } from '../core/er-arrange';
+import { applySmScope, smMachines as smMachinesOf, unassignedStateIds } from '../core/lifecycle';
 import { newEdgeId, newNodeId } from '../core/id';
 import { layoutProjection, NODE_WIDTH, nodeHeight, type Positions } from '../core/layout';
 import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
@@ -165,6 +166,8 @@ export function App() {
   const [lens, setLens] = useState<LensId>('architecture');
   // ER 按数据库分scope：'all' | 数据库 id | 'unassigned'。架构里有多库时，ER 各看各的内容。
   const [erScope, setErScope] = useState<string>('all');
+  // 状态机按生命周期分scope：'all' | 生命周期 id | 'unassigned'。多台机器时，各看各的状态。
+  const [smScope, setSmScope] = useState<string>('all');
   const [seeds, setSeeds] = useState<string[]>([]);
   // 请求追踪场景（§2.3）：和 seeds 一样是 what-if 假设，住在 views.architecture.trace，不进 model.json。
   const [trace, setTrace] = useState<TraceScenario | null>(null);
@@ -253,9 +256,23 @@ export function App() {
     erScope !== 'all' && !(erScope === 'unassigned' ? erUnassigned.length > 0 : model.nodes[erScope]?.type === 'Database')
       ? 'all'
       : erScope;
+  // 状态机 scope 条的数据源：生命周期 + 各自状态数 + 来源实体名；没挂机器的状态给「未归属」入口。
+  const smMachines = useMemo(() => smMachinesOf(model), [model]);
+  const smUnassigned = useMemo(() => unassignedStateIds(model), [model]);
+  const smStateTotal = useMemo(() => Object.values(model.nodes).filter((n) => n.type === 'State').length, [model]);
+  // 选中的机器被删 / 未归属清空时退回「全部」，不让scope条指着空气。
+  const activeSmScope =
+    smScope !== 'all' && !(smScope === 'unassigned' ? smUnassigned.length > 0 : model.nodes[smScope]?.type === 'Lifecycle')
+      ? 'all'
+      : smScope;
   const projection = useMemo(
-    () => (lens === 'er' ? applyErScope(model, baseProjection, activeErScope) : baseProjection),
-    [lens, model, baseProjection, activeErScope],
+    () =>
+      lens === 'er'
+        ? applyErScope(model, baseProjection, activeErScope)
+        : lens === 'state-machine'
+          ? applySmScope(model, baseProjection, activeSmScope)
+          : baseProjection,
+    [lens, model, baseProjection, activeErScope, activeSmScope],
   );
   const projectionRef = useRef(projection);
   projectionRef.current = projection;
@@ -318,11 +335,11 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structKey, lens, relayoutNonce]);
 
-  // 只有"整幅视角变了"（切镜片 / 手动重新布局 / ER 换库scope）才 remount + fitView，而且必须等布局算完。
+  // 只有"整幅视角变了"（切镜片 / 手动重新布局 / ER 换库scope / 状态机换机器scope）才 remount + fitView，而且必须等布局算完。
   // 新增一个节点不该把整张画布重新缩放挪走——否则「落在鼠标处」就白说了。
   useEffect(() => {
     pendingFitRef.current = true;
-  }, [lens, relayoutNonce, activeErScope]);
+  }, [lens, relayoutNonce, activeErScope, activeSmScope]);
   const findings = useMemo(() => lensDef.reasoner.run(model), [model, lensDef]);
   const result = useMemo(() => {
     if (lens !== 'architecture' || seeds.length === 0) return null;
@@ -1112,6 +1129,8 @@ export function App() {
       // 只要不在任何节点/控件里，就算"空白处"。
       const el = e.target as HTMLElement;
       if (el.closest('.react-flow__node') || el.closest('.react-flow__controls') || el.closest('.react-flow__minimap')) return;
+      // scope 条等面板上的双击有自己的语义（机器chip双击改名），不该再弹就地新建。
+      if (el.closest('.react-flow__panel')) return;
       if (!el.closest('.react-flow')) return;
       const flow = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       setSelectedNode(null);
@@ -1160,9 +1179,11 @@ export function App() {
       setSelectedEdge(null);
       setCreateMode(false);
       // 空白节点的名字本来就得当场起，建完直接进入原地改名。
-      setRenamingId(id);
+      // 但不投影的类型（生命周期锚点）画布上没有卡片可改名——进编辑器起名，scope 条会立刻出现它。
+      if (lensDef.nodeTypes.includes(type)) setRenamingId(id);
+      else setEditorNode({ id, tab: 'details' });
     },
-    [quickCreate, setModel, persistPosition, centerAt],
+    [quickCreate, setModel, persistPosition, centerAt, lensDef],
   );
 
   const changeEdgeMode = useCallback(
@@ -1651,40 +1672,81 @@ export function App() {
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} color="var(--canvas-dot)" />
             {lens === 'er' && (erDbs.length > 0 || erUnassigned.length > 0) && (
-              <Panel position="top-center" className="dd-er-scope-panel">
-                <div className="dd-er-scope" role="group" aria-label="按数据库筛选 ER 内容">
+              <Panel position="top-center" className="dd-scope-panel">
+                <div className="dd-scope-bar" role="group" aria-label="按数据库筛选 ER 内容">
                   <button
                     type="button"
-                    className={`dd-er-scope-chip${activeErScope === 'all' ? ' active' : ''}`}
+                    className={`dd-scope-chip${activeErScope === 'all' ? ' active' : ''}`}
                     aria-pressed={activeErScope === 'all'}
                     onClick={() => setErScope('all')}
                   >
                     全部
-                    <span className="dd-er-scope-count">{erTableTotal}</span>
+                    <span className="dd-scope-count">{erTableTotal}</span>
                   </button>
                   {erDbs.map((d) => (
                     <button
                       key={d.id}
                       type="button"
-                      className={`dd-er-scope-chip${activeErScope === d.id ? ' active' : ''}`}
+                      className={`dd-scope-chip${activeErScope === d.id ? ' active' : ''}`}
                       aria-pressed={activeErScope === d.id}
                       onClick={() => setErScope(d.id)}
                       title={`${d.name} · ${engineLabel(d.engine)} · ${d.tableIds.length} 张表`}
                     >
                       {d.name}
-                      <span className="dd-er-scope-engine">{engineLabel(d.engine)}</span>
-                      <span className="dd-er-scope-count">{d.tableIds.length}</span>
+                      <span className="dd-scope-engine">{engineLabel(d.engine)}</span>
+                      <span className="dd-scope-count">{d.tableIds.length}</span>
                     </button>
                   ))}
                   {erUnassigned.length > 0 && (
                     <button
                       type="button"
-                      className={`dd-er-scope-chip${activeErScope === 'unassigned' ? ' active' : ''}`}
+                      className={`dd-scope-chip${activeErScope === 'unassigned' ? ' active' : ''}`}
                       aria-pressed={activeErScope === 'unassigned'}
                       onClick={() => setErScope('unassigned')}
                     >
                       未归属
-                      <span className="dd-er-scope-count">{erUnassigned.length}</span>
+                      <span className="dd-scope-count">{erUnassigned.length}</span>
+                    </button>
+                  )}
+                </div>
+              </Panel>
+            )}
+            {lens === 'state-machine' && (smMachines.length > 0 || smUnassigned.length > 0) && (
+              <Panel position="top-center" className="dd-scope-panel">
+                <div className="dd-scope-bar" role="group" aria-label="按生命周期筛选状态机内容">
+                  <button
+                    type="button"
+                    className={`dd-scope-chip${activeSmScope === 'all' ? ' active' : ''}`}
+                    aria-pressed={activeSmScope === 'all'}
+                    onClick={() => setSmScope('all')}
+                  >
+                    全部
+                    <span className="dd-scope-count">{smStateTotal}</span>
+                  </button>
+                  {smMachines.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className={`dd-scope-chip${activeSmScope === m.id ? ' active' : ''}`}
+                      aria-pressed={activeSmScope === m.id}
+                      onClick={() => setSmScope(m.id)}
+                      onDoubleClick={() => setEditorNode({ id: m.id, tab: 'details' })}
+                      title={`${m.name} · ${m.stateIds.length} 个状态 · 双击改名`}
+                    >
+                      {m.name}
+                      {m.ownerName && <span className="dd-scope-engine">{m.ownerName}</span>}
+                      <span className="dd-scope-count">{m.stateIds.length}</span>
+                    </button>
+                  ))}
+                  {smUnassigned.length > 0 && (
+                    <button
+                      type="button"
+                      className={`dd-scope-chip${activeSmScope === 'unassigned' ? ' active' : ''}`}
+                      aria-pressed={activeSmScope === 'unassigned'}
+                      onClick={() => setSmScope('unassigned')}
+                    >
+                      未归属
+                      <span className="dd-scope-count">{smUnassigned.length}</span>
                     </button>
                   )}
                 </div>

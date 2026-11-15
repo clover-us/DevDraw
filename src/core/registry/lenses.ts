@@ -30,8 +30,9 @@ export const LENSES: LensDef[] = [
   {
     id: 'state-machine',
     label: '状态机',
-    description: '实体生命周期。推演器查可达/卡死，跨镜片抓履约缺口，并就缺失迁移反问。',
+    description: '实体生命周期。按生命周期分scope，各看各的状态；推演器查可达/卡死，跨镜片抓履约缺口，并就缺失迁移反问。',
     nodeTypes: ['State', 'Decision', 'Assumption', 'Note'],
+    createTypes: ['Lifecycle'],
     layout: 'elk-layered',
     reasoner: stateMachineReasoner,
   },

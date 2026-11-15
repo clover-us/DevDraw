@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom';
 import { applyPatchChecked } from '../core/patch';
 import { componentCatalog, DEFAULT_NODE_ICON, nodeComponent, nodeGlyph } from '../core/components';
 import { erFieldRows } from '../core/er';
+import { lifecycleOfState } from '../core/lifecycle';
 import { newEdgeId, newNodeId } from '../core/id';
 import { connectableEdgeTypes, NODE_TYPES, type LensDef } from '../core/registry';
 import { GLYPH_LIST } from './glyphs';
@@ -166,6 +167,31 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
       return null;
     });
   };
+
+  // 状态机归属：State 经 contains 挂在 Lifecycle 下，Table 经 has-lifecycle 指向 Lifecycle。
+  const lifecycleEntries = Object.entries(model.nodes).filter(([, n]) => n.type === 'Lifecycle');
+  const stateLcId = node.type === 'State' ? lifecycleOfState(model, nodeId) ?? '' : '';
+  const tableLcId =
+    node.type === 'Table' ? Object.values(model.edges).find((e) => e.type === 'has-lifecycle' && e.from === nodeId)?.to ?? '' : '';
+  // 换挂生命周期：先拆旧边再挂新边；空值 = 解除归属。
+  const setLifecycleLink = (kind: 'state' | 'table', lcId: string) =>
+    tryChange(() => {
+      let m = model;
+      if (kind === 'state') {
+        for (const [eid, e] of Object.entries(model.edges)) {
+          if (e.type === 'contains' && e.to === nodeId && model.nodes[e.from]?.type === 'Lifecycle')
+            m = applyPatchChecked(m, { op: 'remove-edge', id: eid });
+        }
+        if (lcId) m = applyPatchChecked(m, { op: 'add-edge', id: newEdgeId('contains'), edge: { type: 'contains', from: lcId, to: nodeId } });
+      } else {
+        for (const [eid, e] of Object.entries(model.edges)) {
+          if (e.type === 'has-lifecycle' && e.from === nodeId) m = applyPatchChecked(m, { op: 'remove-edge', id: eid });
+        }
+        if (lcId) m = applyPatchChecked(m, { op: 'add-edge', id: newEdgeId('has-lifecycle'), edge: { type: 'has-lifecycle', from: nodeId, to: lcId } });
+      }
+      onChange(m);
+      return null;
+    });
 
   const options = componentCatalog(model).filter((c) => c.baseType === node.type);
   const selected = options.find((c) => c.id === componentId);
@@ -402,21 +428,24 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                 </Section>
               )}
 
-              <Section title="添加连线">
-                <div className="dd-connect-row">
-                  <select className="dd-input" value={connectType} onChange={(e) => setConnectType(e.target.value as EdgeType)}>
-                    {allowed.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
-                  <NodePicker model={model} nodes={targets} value={connectTarget} onChange={setConnectTarget} placeholder="选择终点实体…" />
-                  <button className="dd-primary dd-connect-btn" onClick={addConnection} disabled={!connectTarget}>
-                    连接
-                  </button>
-                </div>
-              </Section>
+              {/* 生命周期是锚点：它的连线（contains / has-lifecycle）由状态和表的属性页管理，这里不给手画入口。 */}
+              {node.type !== 'Lifecycle' && (
+                <Section title="添加连线">
+                  <div className="dd-connect-row">
+                    <select className="dd-input" value={connectType} onChange={(e) => setConnectType(e.target.value as EdgeType)}>
+                      {allowed.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                    <NodePicker model={model} nodes={targets} value={connectTarget} onChange={setConnectTarget} placeholder="选择终点实体…" />
+                    <button className="dd-primary dd-connect-btn" onClick={addConnection} disabled={!connectTarget}>
+                      连接
+                    </button>
+                  </div>
+                </Section>
+              )}
 
               {error && <p className="dd-error">{error}</p>}
             </div>
@@ -427,7 +456,47 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
               {node.type === 'Field' ? (
                 <FieldEditor model={model} fieldId={nodeId} onSelectNode={() => {}} updateNode={updateNode} />
               ) : (
-                <AttrsEditor model={model} nodeId={nodeId} updateNode={updateNode} />
+                <>
+                  {node.type === 'State' && (
+                    <Section title="归属生命周期">
+                      <div className="dd-connect-row">
+                        <NodePicker
+                          model={model}
+                          nodes={lifecycleEntries}
+                          value={stateLcId}
+                          onChange={(id) => setLifecycleLink('state', id)}
+                          placeholder="选择生命周期…"
+                        />
+                        {stateLcId && (
+                          <button className="dd-mini-btn" onClick={() => setLifecycleLink('state', '')}>
+                            解除
+                          </button>
+                        )}
+                      </div>
+                      <p className="dd-modal-note">状态机镜片按生命周期分scope；没挂机器的状态在「未归属」里。</p>
+                    </Section>
+                  )}
+                  <AttrsEditor model={model} nodeId={nodeId} updateNode={updateNode} />
+                  {node.type === 'Table' && (
+                    <Section title="生命周期">
+                      <div className="dd-connect-row">
+                        <NodePicker
+                          model={model}
+                          nodes={lifecycleEntries}
+                          value={tableLcId}
+                          onChange={(id) => setLifecycleLink('table', id)}
+                          placeholder="选择生命周期…"
+                        />
+                        {tableLcId && (
+                          <button className="dd-mini-btn" onClick={() => setLifecycleLink('table', '')}>
+                            解除
+                          </button>
+                        )}
+                      </div>
+                      <p className="dd-modal-note">挂上后，状态机 scope 条会显示这张表作为来源。</p>
+                    </Section>
+                  )}
+                </>
               )}
               {error && <p className="dd-error">{error}</p>}
             </div>

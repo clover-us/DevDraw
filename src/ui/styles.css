@@ -4312,8 +4312,9 @@ select.dd-input {
   letter-spacing: 0.02em;
   color: var(--faint);
 }
-/* ER scope 条：架构有多库时各看各的内容；跨库外键只在「全部」里出现。 */
-.dd-er-scope {
+/* scope 条（ER 按数据库 / 状态机按生命周期共用）：多库多机器时各看各的内容；
+   跨库外键、跨机器迁移只在「全部」里出现。 */
+.dd-scope-bar {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -4325,7 +4326,7 @@ select.dd-input {
   border-radius: 12px;
   box-shadow: 0 4px 16px var(--shadow-soft);
 }
-.dd-er-scope-chip {
+.dd-scope-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -4339,25 +4340,25 @@ select.dd-input {
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
-.dd-er-scope-chip:hover {
+.dd-scope-chip:hover {
   background: var(--panel-2);
   color: var(--text);
 }
-.dd-er-scope-chip.active {
+.dd-scope-chip.active {
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent);
 }
-.dd-er-scope-engine {
+.dd-scope-engine {
   font-size: 10px;
   font-weight: 500;
   color: var(--faint);
 }
-.dd-er-scope-chip.active .dd-er-scope-engine {
+.dd-scope-chip.active .dd-scope-engine {
   color: var(--accent);
   opacity: 0.8;
 }
-.dd-er-scope-count {
+.dd-scope-count {
   min-width: 16px;
   padding: 0 5px;
   border-radius: 999px;
@@ -4368,7 +4369,7 @@ select.dd-input {
   text-align: center;
   color: var(--muted);
 }
-.dd-er-scope-chip.active .dd-er-scope-count {
+.dd-scope-chip.active .dd-scope-count {
   background: var(--accent);
   color: var(--accent-contrast);
 }

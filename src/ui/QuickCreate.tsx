@@ -5,7 +5,7 @@
  * 心流断在建模这一步是最贵的，所以这个面板只做一件事：在鼠标处搜索并落下。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { componentCatalog } from '../core/components';
+import { componentCatalog, DEFAULT_NODE_ICON } from '../core/components';
 import { NODE_TYPES, type LensDef } from '../core/registry';
 import type { ComponentDef, Model, NodeType } from '../core/types';
 import { Glyph } from './glyphs';
@@ -50,13 +50,14 @@ export function QuickCreate({ model, lens, x, y, onPickComponent, onPickType, on
       comp,
     }));
     // 该镜片里没有对应组件的类型（ER 的表、状态机的状态）也得能建，否则"就地新建"是残的。
-    const bare: Item[] = lens.nodeTypes
+    // createTypes 是可建但不投影的锚点（生命周期）：建完进编辑器起名，画布上以 scope 条呈现。
+    const bare: Item[] = [...lens.nodeTypes, ...(lens.createTypes ?? [])]
       .filter((t) => !NOT_STANDALONE.includes(t) && !covered.has(t))
       .map((type) => ({
         key: `t:${type}`,
         label: `空白 ${NODE_TYPES[type].label}`,
-        hint: '无组件 · 建完直接改名',
-        glyph: 'component',
+        hint: lens.createTypes?.includes(type) ? '无组件 · 建完进编辑器起名' : '无组件 · 建完直接改名',
+        glyph: DEFAULT_NODE_ICON[type] ?? 'component',
         type,
       }));
     return [...comps, ...bare];

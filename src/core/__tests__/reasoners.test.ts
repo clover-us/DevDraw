@@ -31,11 +31,11 @@ describe('镜片注册表 / 投影', () => {
     expect(Object.values(p.edges).every((e) => e.type === 'fk')).toBe(true);
   });
 
-  it('状态机镜片只含状态（Lifecycle 仅作锚点不投影），6 条迁移', () => {
+  it('状态机镜片只含状态（Lifecycle 仅作锚点不投影），两台机器共 10 条迁移', () => {
     const p = projectLens(M, getLens('state-machine'));
-    expect(Object.keys(p.nodes)).toHaveLength(7);
+    expect(Object.keys(p.nodes)).toHaveLength(11);
     expect(Object.values(p.nodes).every((n) => n.type === 'State')).toBe(true);
-    expect(Object.keys(p.edges)).toHaveLength(6);
+    expect(Object.keys(p.edges)).toHaveLength(10);
     expect(Object.values(p.edges).every((e) => e.type === 'transition')).toBe(true);
   });
 });
@@ -85,6 +85,7 @@ describe('状态机推演器：跨镜片缺口 + 反问', () => {
     expect(findings.some((f) => f.id.startsWith('sm:unreachable'))).toBe(false);
     expect(findings.some((f) => f.id.startsWith('sm:deadlock'))).toBe(false);
     expect(byId(findings, 'sm:summary:sm_order')?.severity).toBe('info');
+    expect(byId(findings, 'sm:summary:sm_payment')?.severity).toBe('info');
   });
 });
 

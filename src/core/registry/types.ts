@@ -33,6 +33,8 @@ export interface LensDef {
   description: string;
   /** 投影：显示哪些节点类型（边按"两端均在投影内"自动筛选）。 */
   nodeTypes: NodeType[];
+  /** 可就地新建但不投影的类型（状态机的生命周期锚点）：建完进编辑器起名，画布上以 scope 条呈现。 */
+  createTypes?: NodeType[];
   layout: string;
   reasoner: Reasoner;
 }

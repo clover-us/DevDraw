@@ -96,6 +96,12 @@ export const sampleThreeLensModel: Model = {
     s_completed: { type: 'State', name: 'Completed' },
     s_cancelled: { type: 'State', name: 'Cancelled' },
     s_refunded: { type: 'State', name: 'Refunded' },
+    // ── 状态机：第二台机器（支付生命周期）——状态机镜片按机器分scope，各看各的状态 ──
+    sm_payment: { type: 'Lifecycle', name: '支付生命周期' },
+    s_pay_pending: { type: 'State', name: 'Pending', attrs: { initial: true } },
+    s_pay_success: { type: 'State', name: 'Success' },
+    s_pay_failed: { type: 'State', name: 'Failed' },
+    s_pay_refunded: { type: 'State', name: 'Refunded' },
   },
   edges: {
     ...sampleModel.edges,
@@ -181,6 +187,17 @@ export const sampleThreeLensModel: Model = {
     tr_fulfill: { type: 'transition', from: 's_paid', to: 's_fulfilling', attrs: { event: 'fulfill', effectedBy: 'n_fulfillment' } },
     tr_deliver: { type: 'transition', from: 's_fulfilling', to: 's_completed', attrs: { event: 'deliver', effectedBy: 'n_fulfillment' } },
     tr_refund: { type: 'transition', from: 's_paid', to: 's_refunded', attrs: { event: 'refund', effectedBy: 'n_payment' } },
+    // ── 状态机：支付生命周期 contains 状态 + 迁移 ──
+    e_payments_lifecycle: { type: 'has-lifecycle', from: 't_payments', to: 'sm_payment' },
+    c_smp_pending: { type: 'contains', from: 'sm_payment', to: 's_pay_pending' },
+    c_smp_success: { type: 'contains', from: 'sm_payment', to: 's_pay_success' },
+    c_smp_failed: { type: 'contains', from: 'sm_payment', to: 's_pay_failed' },
+    c_smp_refunded: { type: 'contains', from: 'sm_payment', to: 's_pay_refunded' },
+    tr_pay_success: { type: 'transition', from: 's_pay_pending', to: 's_pay_success', attrs: { event: 'pay_success', effectedBy: 'n_payment' } },
+    tr_pay_fail: { type: 'transition', from: 's_pay_pending', to: 's_pay_failed', attrs: { event: 'pay_fail', effectedBy: 'n_payment' } },
+    tr_pay_refund: { type: 'transition', from: 's_pay_success', to: 's_pay_refunded', attrs: { event: 'refund', effectedBy: 'n_payment' } },
+    // 跨机器迁移：支付退款同步驱动订单退款——「全部」里可见，单机器scope里自动隐藏。
+    tr_refund_sync: { type: 'transition', from: 's_pay_refunded', to: 's_refunded', attrs: { event: 'refund_sync', effectedBy: 'n_payment' } },
   },
   groups: sampleModel.groups,
 };
@@ -244,4 +261,9 @@ export const threeLensPositions: Record<string, { x: number; y: number }> = {
   s_completed: { x: 1000, y: 110 },
   s_cancelled: { x: 500, y: 380 },
   s_refunded: { x: 750, y: 320 },
+  sm_payment: { x: 0, y: 520 },
+  s_pay_pending: { x: 0, y: 560 },
+  s_pay_success: { x: 250, y: 560 },
+  s_pay_failed: { x: 250, y: 700 },
+  s_pay_refunded: { x: 500, y: 560 },
 };
