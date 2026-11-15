@@ -2820,42 +2820,11 @@ select.dd-input {
   overflow-y: auto;
 }
 .dd-modal-preview-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--faint);
-}
-/* 预览视图切换：结构 / 数据。 */
-.dd-preview-toggle {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-}
-.dd-preview-toggle button {
-  appearance: none;
-  border: none;
-  background: transparent;
-  border-radius: 5px;
-  padding: 2px 8px;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--muted);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-}
-.dd-preview-toggle button.on {
-  background: var(--panel);
-  color: var(--text);
-  box-shadow: 0 1px 4px var(--shadow-soft);
 }
 .dd-modal-canvas {
   display: flex;
@@ -2957,69 +2926,6 @@ select.dd-input {
 }
 .dd-modal-preview-table .dd-field-row:last-child {
   border-radius: 0 0 8px 8px;
-}
-/* 实例数据表格：预览只读紧凑、编辑器可输入；横向可滚以容纳多列。 */
-.dd-data-scroll {
-  overflow: auto;
-  max-height: 240px;
-  border-radius: 0 0 8px 8px;
-}
-.dd-data-scroll.editor {
-  max-height: none;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
-}
-.dd-data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 11px;
-}
-.dd-data-table th,
-.dd-data-table td {
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  white-space: nowrap;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.dd-data-table th {
-  position: sticky;
-  top: 0;
-  background: var(--panel-2);
-  color: var(--muted);
-  font-weight: 600;
-  font-size: 10.5px;
-  z-index: 1;
-}
-.dd-data-table.readonly td {
-  color: var(--text-2);
-}
-.dd-data-table tbody tr:last-child td {
-  border-bottom: none;
-}
-.dd-data-table .dd-data-cell {
-  width: 100%;
-  min-width: 70px;
-  padding: 3px 6px;
-  font-size: 11px;
-}
-.dd-data-table td:has(.dd-data-cell) {
-  max-width: none;
-  overflow: visible;
-  padding: 3px 4px;
-}
-.dd-data-del {
-  width: 26px;
-  max-width: 26px;
-  text-align: center;
-}
-.dd-data-del .dd-icon-btn {
-  width: 20px;
-  height: 20px;
-  padding: 0;
 }
 .dd-modal-meta {
   display: flex;
@@ -4271,7 +4177,7 @@ select.dd-input {
 }
 
 /* ---------- 读 / 写分离：统一编辑弹窗 + 只读抽屉 ---------- */
-/* 弹窗内 tab：详情 / 外观。单一编辑入口，操作在弹窗内划分。 */
+/* 弹窗内 tab：属性 / 字段 / 外观。单一编辑入口，操作在弹窗内划分。 */
 .dd-modal-tabs {
   position: relative;
   display: flex;
@@ -4317,7 +4223,7 @@ select.dd-input {
   pointer-events: none;
   transition: left 0.18s cubic-bezier(0.2, 0.9, 0.3, 1), width 0.18s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
-/* 未应用草稿的小黄点：详情 tab 时也能看见外观有改动挂着。 */
+/* 未应用草稿的小黄点：属性/字段 tab 时也能看见外观有改动挂着。 */
 .dd-tab-dot {
   flex: none;
   width: 5px;
@@ -4326,7 +4232,7 @@ select.dd-input {
   background: var(--warning);
   box-shadow: 0 0 0 2px var(--warning-soft);
 }
-/* 详情 / 属性 / 字段子页面：与外观共用左侧实时预览，右栏是带内边距、可滚动的表单。 */
+/* 属性 / 字段子页面：与外观共用左侧实时预览，右栏是带内边距、可滚动的表单。 */
 .dd-nodeeditor-pane {
   padding: 4px 18px 16px;
   overflow-y: auto;
@@ -4680,15 +4586,6 @@ select.dd-input {
   .dd-modal-tabs-ink {
     transition: none;
   }
-}
-/* 添加连线：类型定宽 + 终点自适应 + 连接按钮收在行内，不再是一整条禁用横 bar。 */
-.dd-connect-row select.dd-input {
-  flex: 0 0 112px;
-}
-.dd-connect-btn {
-  flex: none;
-  margin: 0;
-  padding: 7px 16px;
 }
 /* 关系编辑弹窗：窄、单列。 */
 .dd-modal-narrow {

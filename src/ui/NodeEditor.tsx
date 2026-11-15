@@ -2,10 +2,9 @@
  * NodeEditor —— 右键「编辑…」打开的统一编辑弹窗。
  * 读 / 写分离：抽屉只读详情，所有写操作收进这一个入口。弹窗内按节点类型
  * 动态拆成多个子页面（tab）：
- *   详情 —— 名称 / 笔记内容 / 添加连线 / 删除；
- *   属性 —— 实体级属性（注册表软 schema 驱动），字段节点则为字段属性编辑器；
+ *   属性 —— 名称 / 笔记内容 / 归属关系 / 实体级属性（注册表软 schema 驱动），
+ *           字段节点则为字段属性编辑器；没有其它子页面的类型只剩这一页（不出 tab 栏）；
  *   字段 —— 仅表：左侧预览行即字段导航（点行切换），右栏直接是分组字段属性表单；
- *   数据 —— 表 / Redis 键：示例记录（行）编辑，左侧预览可切换 结构/数据 视图；
  *   外观 —— 仅可换身份的架构实体：组件身份 / 图标。
  * 外观是本地草稿：预览实时看草稿，「应用外观」才落模型；未应用时 tab 上亮小黄点。
  * 其余子页面实时写模型；footer 随子页面切换（删除/完成 vs 还原/取消/应用外观）。
@@ -15,20 +14,19 @@ import { createPortal } from 'react-dom';
 import { applyPatchChecked } from '../core/patch';
 import { componentCatalog, DEFAULT_NODE_ICON, nodeComponent, nodeGlyph } from '../core/components';
 import { erFieldRows } from '../core/er';
-import { emptyInstanceRow, instanceColumns, instanceRows, serializeInstanceRows } from '../core/instance';
 import { lifecycleOfState } from '../core/lifecycle';
 import { newEdgeId, newNodeId } from '../core/id';
-import { connectableEdgeTypes, NODE_TYPES, type LensDef } from '../core/registry';
+import { NODE_TYPES } from '../core/registry';
 import { GLYPH_LIST } from './glyphs';
-import type { EdgeType, Model, ModelNode } from '../core/types';
+import type { Model, ModelNode } from '../core/types';
 import { AttrsEditor, FieldEditor, NodePicker, Section } from './entity-fields';
 import { Glyph } from './glyphs';
 import { CloseIcon, EntitiesIcon, PaletteIcon, PlusIcon, SearchIcon } from './icons';
 
 const APPEARANCE_TYPES = new Set(['Service', 'Database', 'Queue', 'Endpoint', 'ExternalSystem', 'Actor']);
 
-type TabId = 'details' | 'attrs' | 'fields' | 'data' | 'appearance';
-const TAB_LABEL: Record<TabId, string> = { details: '详情', attrs: '属性', fields: '字段', data: '数据', appearance: '外观' };
+type TabId = 'attrs' | 'fields' | 'appearance';
+const TAB_LABEL: Record<TabId, string> = { attrs: '属性', fields: '字段', appearance: '外观' };
 
 /** 非 hash 结构的一句话说明（预览 meta 行用）。 */
 const KEY_META: Record<string, string> = {
@@ -43,41 +41,30 @@ interface Props {
   model: Model;
   node: ModelNode;
   nodeId: string;
-  lens: LensDef;
-  nodes: Array<[string, ModelNode]>;
   onChange: (m: Model) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
-  initialTab?: 'details' | 'appearance';
+  initialTab?: 'attrs' | 'appearance';
 }
 
-export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelete, onClose, initialTab = 'details' }: Props) {
+export function NodeEditor({ model, node, nodeId, onChange, onDelete, onClose, initialTab = 'attrs' }: Props) {
   const hasAppearance = APPEARANCE_TYPES.has(node.type);
-  // 子页面按类型动态组合：有属性 schema（或字段编辑器）才有「属性」，表才有「字段」。
-  const hasAttrs = node.type === 'Field' || Boolean(NODE_TYPES[node.type].attrs);
   const isRedisKey = node.type === 'RedisKey';
   const keyStructure = isRedisKey && typeof node.attrs?.structure === 'string' ? node.attrs.structure : 'string';
   // 表恒有字段页；Redis 键只有 hash 结构才有字段（其余结构是单值/集合，无列）。
   const hasFields = node.type === 'Table' || (isRedisKey && keyStructure === 'hash');
-  // 表 / Redis 键都可挂实例数据（示例记录）。
-  const hasData = node.type === 'Table' || isRedisKey;
-  const tabs: TabId[] = ['details'];
-  if (hasAttrs) tabs.push('attrs');
+  // 「属性」是所有实体的主页（名称 + 属性 + 归属），恒在；其余子页面按类型追加。
+  const tabs: TabId[] = ['attrs'];
   if (hasFields) tabs.push('fields');
-  if (hasData) tabs.push('data');
   if (hasAppearance) tabs.push('appearance');
   const tabsKey = tabs.join('|');
-  const [tab, setTab] = useState<TabId>(tabs.includes(initialTab) ? initialTab : 'details');
+  const [tab, setTab] = useState<TabId>(tabs.includes(initialTab) ? initialTab : 'attrs');
   const [error, setError] = useState<string | null>(null);
-  const [connectTarget, setConnectTarget] = useState('');
-  const [connectType, setConnectType] = useState<EdgeType>(connectableEdgeTypes(lens.id)[0]?.id ?? 'calls');
   const [deleteArmed, setDeleteArmed] = useState(false);
   // 表当前选中的字段：左侧预览行点选切换，右栏直接编辑其属性。
   const [fieldId, setFieldId] = useState<string | null>(null);
   const [focusNameTick, setFocusNameTick] = useState(0);
   const [fieldDeleteArmed, setFieldDeleteArmed] = useState(false);
-  // 左侧预览视图：结构（字段）/ 数据（实例记录）。
-  const [previewMode, setPreviewMode] = useState<'schema' | 'data'>('schema');
   // 外观（本地草稿，应用才落模型）
   const [componentId, setComponentId] = useState(typeof node.attrs?.component === 'string' ? node.attrs.component : '');
   const [icon, setIcon] = useState(nodeGlyph(model, node));
@@ -86,7 +73,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
   const nameRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const tablistRef = useRef<HTMLDivElement>(null);
-  const tabRefs = useRef<Record<TabId, HTMLButtonElement | null>>({ details: null, attrs: null, fields: null, data: null, appearance: null });
+  const tabRefs = useRef<Record<TabId, HTMLButtonElement | null>>({ attrs: null, fields: null, appearance: null });
 
   // tab 下划线滑条：量活跃 tab 的位置，切换 / 尺寸变化时滑动。
   const [ink, setInk] = useState({ left: 0, width: 0 });
@@ -108,10 +95,10 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
       document.body.style.overflow = prev;
     };
   }, []);
-  // 打开即聚焦：详情落在名称输入框，其余子页面落在活跃 tab（键盘可直接操作）。
+  // 打开即聚焦：属性页落在名称输入框（第一件事通常是改名），其余子页面落在活跃 tab。
   useEffect(() => {
     const t = window.setTimeout(() => {
-      if (tab === 'details') nameRef.current?.focus();
+      if (tab === 'attrs') nameRef.current?.focus();
       else tabRefs.current[tab]?.focus();
     }, 40);
     return () => window.clearTimeout(t);
@@ -179,15 +166,6 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
       setFieldDeleteArmed(false);
       return null;
     });
-  const addConnection = () => {
-    if (!connectTarget) return;
-    tryChange(() => {
-      onChange(applyPatchChecked(model, { op: 'add-edge', id: newEdgeId(connectType), edge: { type: connectType, from: nodeId, to: connectTarget } }));
-      setConnectTarget('');
-      return null;
-    });
-  };
-
   // 状态机归属：State 经 contains 挂在 Lifecycle 下，Table 经 has-lifecycle 指向 Lifecycle。
   const lifecycleEntries = Object.entries(model.nodes).filter(([, n]) => n.type === 'Lifecycle');
   const stateLcId = node.type === 'State' ? lifecycleOfState(model, nodeId) ?? '' : '';
@@ -230,19 +208,10 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
       return null;
     });
 
-  // 实例数据：列随结构（字段）走，行存 attrs.data（JSON）。增删改都实时写模型。
-  const dataCols = instanceColumns(model, nodeId);
-  const dataRows = instanceRows(model, nodeId);
-  const writeRows = (rows: ReturnType<typeof instanceRows>) => updateNode(nodeId, { data: serializeInstanceRows(rows) });
-  const addDataRow = () => writeRows([...dataRows, emptyInstanceRow(dataCols)]);
-  const setCell = (idx: number, colId: string, val: string) =>
-    writeRows(dataRows.map((r, i) => (i === idx ? { ...r, [colId]: val } : r)));
-  const deleteDataRow = (idx: number) => writeRows(dataRows.filter((_, i) => i !== idx));
-
   const options = componentCatalog(model).filter((c) => c.baseType === node.type);
   const selected = options.find((c) => c.id === componentId);
   const previewGlyph = icon || selected?.icon || DEFAULT_NODE_ICON[node.type];
-  // 左侧预览所有子页面共用：详情/属性/字段看「已落模型」的样子，外观看「草稿」的样子。
+  // 左侧预览所有子页面共用：属性/字段看「已落模型」的样子，外观看「草稿」的样子。
   const displayGlyph = tab === 'appearance' ? previewGlyph : nodeGlyph(model, node);
   const identity = tab === 'appearance' ? selected : nodeComponent(model, node);
   // 草稿与已落模型的差异：驱动「应用外观」可用性、tab 黄点、预览草稿徽标。
@@ -302,8 +271,6 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
     cells[j]?.focus();
   };
 
-  const allowed = connectableEdgeTypes(lens.id);
-  const targets = nodes.filter(([id]) => id !== nodeId);
   // 表的实时预览行：直接读模型，编辑字段 / 备注 / 类型即时反映在左侧迷你表卡；
   // 预览行同时是字段导航：点哪行，右栏就编辑哪列。
   const previewRows = node.type === 'Table' || (isRedisKey && keyStructure === 'hash') ? erFieldRows(model, nodeId) : [];
@@ -370,14 +337,11 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                 }}
                 onClick={() => setTab(t)}
               >
-                {t === 'details' && <EntitiesIcon size={14} />}
-                {t === 'attrs' && <Glyph id="config" size={14} />}
+                {t === 'attrs' && <EntitiesIcon size={14} />}
                 {t === 'fields' && <Glyph id="table" size={14} />}
-                {t === 'data' && <Glyph id="data" size={14} />}
                 {t === 'appearance' && <PaletteIcon size={14} />}
                 {TAB_LABEL[t]}
                 {t === 'fields' && <span className="dd-tab-count">{previewRows.length}</span>}
-                {t === 'data' && dataRows.length > 0 && <span className="dd-tab-count">{dataRows.length}</span>}
                 {t === 'appearance' && dirty && <span className="dd-tab-dot" aria-label="有未应用的外观改动" />}
               </button>
             ))}
@@ -387,19 +351,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
 
         <div className="dd-modal-body">
           <div className="dd-modal-preview">
-            <div className="dd-modal-preview-label">
-              预览
-              {hasData && (
-                <span className="dd-preview-toggle">
-                  <button type="button" className={previewMode === 'schema' ? 'on' : ''} aria-pressed={previewMode === 'schema'} onClick={() => setPreviewMode('schema')}>
-                    结构
-                  </button>
-                  <button type="button" className={previewMode === 'data' ? 'on' : ''} aria-pressed={previewMode === 'data'} onClick={() => setPreviewMode('data')}>
-                    数据
-                  </button>
-                </span>
-              )}
-            </div>
+            <div className="dd-modal-preview-label">预览</div>
             <div className="dd-modal-canvas">
               {node.type === 'Table' || isRedisKey ? (
                 <div className="dd-modal-preview-table" aria-label={isRedisKey ? 'Redis 键卡片预览' : '表卡片预览'}>
@@ -418,36 +370,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                     )}
                   </div>
                   <div className="dd-table-fields">
-                    {previewMode === 'data' ? (
-                      <div className="dd-data-scroll">
-                        {dataRows.length === 0 ? (
-                          <div className="dd-table-empty">无实例数据 · 在右侧「数据」页添加</div>
-                        ) : (
-                          <table className="dd-data-table readonly">
-                            <thead>
-                              <tr>
-                                {dataCols.map((c) => (
-                                  <th key={c.id} title={c.dataType}>
-                                    {c.name}
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {dataRows.map((r, i) => (
-                                <tr key={i}>
-                                  {dataCols.map((c) => (
-                                    <td key={c.id} title={r[c.id] || ''}>
-                                      {r[c.id] || ''}
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
-                      </div>
-                    ) : isRedisKey && keyStructure !== 'hash' ? (
+                    {isRedisKey && keyStructure !== 'hash' ? (
                       <div className="dd-key-meta">
                         <span className="dd-field-name">{keyStructure}</span>
                         <span className="dd-field-comment">{KEY_META[keyStructure] ?? '单值结构'}</span>
@@ -516,58 +439,37 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                 ? '外观是组件身份的快照：换身份会同步图标，也可单独直挑图标。'
                 : (node.type === 'Table' || isRedisKey) && tab === 'fields'
                   ? '点击预览行切换字段，右侧编辑即时同步到画布。'
-                  : tab === 'data'
-                    ? '实例数据是示例记录，只用于示意与推演，不改变结构；左侧可切换 结构/数据。'
-                    : '左侧为实时预览，编辑会即时反映在这里。'}
+                  : '左侧为实时预览，编辑会即时反映在这里。'}
             </p>
           </div>
 
-          {tab === 'details' && (
-            <div className="dd-modal-form dd-nodeeditor-pane" role="tabpanel" id="dd-node-panel-details" aria-labelledby="dd-node-tab-details">
-              <Section title="名称">
-                <input ref={nameRef} className="dd-input" value={node.name} onChange={(e) => renameNode(e.target.value)} />
-              </Section>
-
-              {node.type === 'Note' && (
-                <Section title="内容">
-                  <textarea
-                    className="dd-input dd-textarea"
-                    rows={4}
-                    value={typeof node.attrs?.detail === 'string' ? node.attrs.detail : ''}
-                    onChange={(e) => updateNode(nodeId, { detail: e.target.value })}
-                  />
-                </Section>
-              )}
-
-              {/* 生命周期是锚点：它的连线（contains / has-lifecycle）由状态和表的属性页管理，这里不给手画入口。 */}
-              {node.type !== 'Lifecycle' && (
-                <Section title="添加连线">
-                  <div className="dd-connect-row">
-                    <select className="dd-input" value={connectType} onChange={(e) => setConnectType(e.target.value as EdgeType)}>
-                      {allowed.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.label}
-                        </option>
-                      ))}
-                    </select>
-                    <NodePicker model={model} nodes={targets} value={connectTarget} onChange={setConnectTarget} placeholder="选择终点实体…" />
-                    <button className="dd-primary dd-connect-btn" onClick={addConnection} disabled={!connectTarget}>
-                      连接
-                    </button>
-                  </div>
-                </Section>
-              )}
-
-              {error && <p className="dd-error">{error}</p>}
-            </div>
-          )}
-
           {tab === 'attrs' && (
-            <div className="dd-modal-form dd-nodeeditor-pane" role="tabpanel" id="dd-node-panel-attrs" aria-labelledby="dd-node-tab-attrs">
+            <div
+              className="dd-modal-form dd-nodeeditor-pane"
+              // 只有一页的类型不出 tab 栏，此时表单不再是 tabpanel，直接标成「属性」分组。
+              role={tabs.length > 1 ? 'tabpanel' : 'group'}
+              id="dd-node-panel-attrs"
+              aria-labelledby={tabs.length > 1 ? 'dd-node-tab-attrs' : undefined}
+              aria-label={tabs.length > 1 ? undefined : '属性'}
+            >
               {node.type === 'Field' ? (
                 <FieldEditor model={model} fieldId={nodeId} onSelectNode={() => {}} updateNode={updateNode} />
               ) : (
                 <>
+                  <Section title="名称">
+                    <input ref={nameRef} className="dd-input" value={node.name} onChange={(e) => renameNode(e.target.value)} />
+                  </Section>
+
+                  {node.type === 'Note' && (
+                    <Section title="内容">
+                      <textarea
+                        className="dd-input dd-textarea"
+                        rows={4}
+                        value={typeof node.attrs?.detail === 'string' ? node.attrs.detail : ''}
+                        onChange={(e) => updateNode(nodeId, { detail: e.target.value })}
+                      />
+                    </Section>
+                  )}
                   {node.type === 'State' && (
                     <Section title="归属生命周期">
                       <div className="dd-connect-row">
@@ -700,72 +602,6 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
             </div>
           )}
 
-          {tab === 'data' && (
-            <div className="dd-modal-form dd-nodeeditor-pane" role="tabpanel" id="dd-node-panel-data" aria-labelledby="dd-node-tab-data">
-              <div className="dd-fields-bar">
-                <span className="dd-fields-bar-title">实例数据</span>
-                <span className="dd-fields-bar-spacer" />
-                <button className="dd-mini-btn dd-fields-add" onClick={addDataRow} title="添加一条示例记录">
-                  <PlusIcon size={12} />
-                  添加行
-                </button>
-                {dataRows.length > 0 && (
-                  <button className="dd-mini-btn dd-danger" onClick={() => writeRows([])} title="清空全部示例记录">
-                    清空
-                  </button>
-                )}
-              </div>
-              {dataRows.length === 0 ? (
-                <div className="dd-fields-empty">
-                  <Glyph id="data" size={24} />
-                  <p>还没有实例数据，添加几条示例记录让模型更具体。</p>
-                  <button className="dd-primary" onClick={addDataRow}>
-                    <PlusIcon size={14} />
-                    添加第一行
-                  </button>
-                </div>
-              ) : (
-                <div className="dd-data-scroll editor">
-                  <table className="dd-data-table">
-                    <thead>
-                      <tr>
-                        {dataCols.map((c) => (
-                          <th key={c.id} title={c.dataType}>
-                            {c.name}
-                          </th>
-                        ))}
-                        <th className="dd-data-del" aria-label="删除行" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dataRows.map((r, i) => (
-                        <tr key={i}>
-                          {dataCols.map((c) => (
-                            <td key={c.id}>
-                              <input
-                                className="dd-input dd-data-cell"
-                                value={r[c.id] ?? ''}
-                                placeholder={c.dataType ?? ''}
-                                aria-label={`${c.name} 第${i + 1}行`}
-                                onChange={(e) => setCell(i, c.id, e.target.value)}
-                              />
-                            </td>
-                          ))}
-                          <td className="dd-data-del">
-                            <button className="dd-icon-btn" title="删除该行" aria-label={`删除第${i + 1}行`} onClick={() => deleteDataRow(i)}>
-                              <CloseIcon size={12} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              {error && <p className="dd-error">{error}</p>}
-            </div>
-          )}
-
           {tab === 'appearance' && (
             <div className="dd-modal-form" role="tabpanel" id="dd-node-panel-appearance" aria-labelledby="dd-node-tab-appearance">
               <div className="dd-modal-fields">
@@ -870,7 +706,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
             </>
           ) : (
             <>
-              {tab === 'details' ? (
+              {tab === 'attrs' ? (
                 <button
                   className={`dd-danger${deleteArmed ? ' armed' : ''}`}
                   onClick={() => (deleteArmed ? onDelete(nodeId) : setDeleteArmed(true))}

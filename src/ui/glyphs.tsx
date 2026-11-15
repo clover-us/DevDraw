@@ -464,17 +464,6 @@ export function KeyGlyph(p: GlyphProps) {
   );
 }
 
-/** 实例数据：带记录点的表格。 */
-export function DataGlyph(p: GlyphProps) {
-  return (
-    <svg {...base(p)}>
-      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
-      <path d="M3.5 9.5h17M3.5 14.5h17" />
-      <path d="M7 12h.01M12 12h.01M17 12h.01M7 17h.01M12 17h.01M17 17h.01" />
-    </svg>
-  );
-}
-
 /** 生命周期：循环。 */
 export function LifecycleGlyph(p: GlyphProps) {
   return (
@@ -574,7 +563,6 @@ export const GLYPHS: Record<string, ComponentType<GlyphProps>> = {
   secret: SecretGlyph,
   table: TableGlyph,
   key: KeyGlyph,
-  data: DataGlyph,
   field: FieldGlyph,
   lifecycle: LifecycleGlyph,
   state: StateGlyph,
@@ -624,7 +612,6 @@ export const GLYPH_LIST: { id: string; label: string }[] = [
   { id: 'secret', label: '密钥' },
   { id: 'table', label: '表' },
   { id: 'key', label: '键' },
-  { id: 'data', label: '数据' },
   { id: 'field', label: '字段' },
   { id: 'lifecycle', label: '生命周期' },
   { id: 'state', label: '状态' },

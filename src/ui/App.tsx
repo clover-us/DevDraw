@@ -203,7 +203,7 @@ export function App() {
   // 自定义组件编辑器：null=关闭；{editing:null}=新建；{editing:comp}=编辑。
   const [componentEditor, setComponentEditor] = useState<{ editing: ComponentDef | null } | null>(null);
   // 统一编辑弹窗：右键「编辑…」打开，tab 划分详情 / 外观（读 / 写分离，抽屉只读）。
-  const [editorNode, setEditorNode] = useState<{ id: string; tab: 'details' | 'appearance' } | null>(null);
+  const [editorNode, setEditorNode] = useState<{ id: string; tab: 'attrs' | 'appearance' } | null>(null);
   // 关系编辑弹窗：右键关系「编辑关系…」打开。
   const [edgeEditor, setEdgeEditor] = useState<string | null>(null);
   // 会话分区里选中的存档（存档本身住在 reasoning/ 里，这里只是"正在看哪一份"）。
@@ -1106,7 +1106,7 @@ export function App() {
       });
     }
     // 单一编辑入口：详情 / 外观在弹窗内用 tab 划分（读 / 写分离）。
-    items.push({ key: 'edit', label: '编辑…', hint: '详情 / 属性 / 字段 / 外观', onSelect: () => setEditorNode({ id, tab: 'details' }) });
+    items.push({ key: 'edit', label: '编辑…', hint: '属性 / 字段 / 外观', onSelect: () => setEditorNode({ id, tab: 'attrs' }) });
     items.push({
       key: 'rename',
       label: '重命名',
@@ -1189,7 +1189,7 @@ export function App() {
       // 空白节点的名字本来就得当场起，建完直接进入原地改名。
       // 但不投影的类型（生命周期锚点）画布上没有卡片可改名——进编辑器起名，scope 条会立刻出现它。
       if (lensDef.nodeTypes.includes(type)) setRenamingId(id);
-      else setEditorNode({ id, tab: 'details' });
+      else setEditorNode({ id, tab: 'attrs' });
     },
     [quickCreate, setModel, persistPosition, centerAt, lensDef],
   );
@@ -1206,7 +1206,7 @@ export function App() {
       setSelectedEdge(null);
       setCreateMode(false);
       if (lensDef.nodeTypes.includes(type)) setRenamingId(id);
-      else setEditorNode({ id, tab: 'details' });
+      else setEditorNode({ id, tab: 'attrs' });
     },
     [screenToFlowPosition, setModel, persistPosition, centerAt, lensDef],
   );
@@ -1755,7 +1755,7 @@ export function App() {
                       className={`dd-scope-chip${activeSmScope === m.id ? ' active' : ''}`}
                       aria-pressed={activeSmScope === m.id}
                       onClick={() => setSmScope(m.id)}
-                      onDoubleClick={() => setEditorNode({ id: m.id, tab: 'details' })}
+                      onDoubleClick={() => setEditorNode({ id: m.id, tab: 'attrs' })}
                       title={`${m.name} · ${m.stateIds.length} 个状态 · 双击改名`}
                     >
                       {m.name}
@@ -1984,8 +1984,6 @@ export function App() {
             model={model}
             node={model.nodes[editorNode.id]}
             nodeId={editorNode.id}
-            lens={lensDef}
-            nodes={Object.entries(projection.nodes)}
             onChange={onModelChange}
             onDelete={deleteNode}
             onClose={() => setEditorNode(null)}
