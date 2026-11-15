@@ -1061,7 +1061,7 @@ export function App() {
       });
     }
     // 单一编辑入口：详情 / 外观在弹窗内用 tab 划分（读 / 写分离）。
-    items.push({ key: 'edit', label: '编辑…', hint: '详情 / 外观', onSelect: () => setEditorNode({ id, tab: 'details' }) });
+    items.push({ key: 'edit', label: '编辑…', hint: '详情 / 属性 / 字段 / 外观', onSelect: () => setEditorNode({ id, tab: 'details' }) });
     items.push({
       key: 'rename',
       label: '重命名',

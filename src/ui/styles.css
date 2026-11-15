@@ -2904,6 +2904,17 @@ select.dd-input {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  animation: dd-pane-in 0.18s ease;
+}
+@keyframes dd-pane-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 .dd-modal-fields {
   display: flex;
@@ -4144,13 +4155,21 @@ select.dd-input {
   background: var(--warning);
   box-shadow: 0 0 0 2px var(--warning-soft);
 }
-/* 详情 tab：与外观共用左侧实时预览，右栏是带内边距、可滚动的表单。 */
-.dd-nodeeditor-details {
+/* 详情 / 属性 / 字段子页面：与外观共用左侧实时预览，右栏是带内边距、可滚动的表单。 */
+.dd-nodeeditor-pane {
   padding: 4px 18px 16px;
   overflow-y: auto;
 }
-.dd-nodeeditor-details .dd-drawer-section:first-child {
+.dd-nodeeditor-pane .dd-drawer-section:first-child {
   padding-top: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dd-modal-form {
+    animation: none;
+  }
+  .dd-modal-tabs-ink {
+    transition: none;
+  }
 }
 /* 添加连线：类型定宽 + 终点自适应 + 连接按钮收在行内，不再是一整条禁用横 bar。 */
 .dd-connect-row select.dd-input {

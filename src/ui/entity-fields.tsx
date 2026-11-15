@@ -361,19 +361,44 @@ export function AttrsEditor({
               </label>
             );
           }
+          // 关联节点：可搜索选择器，避免手填裸 id。
+          if (key === 'about') {
+            return (
+              <div key={key} className="dd-attr-wide">
+                <label className="dd-field-label">{label}</label>
+                <NodePicker
+                  model={model}
+                  nodes={Object.entries(model.nodes).filter(([id]) => id !== nodeId)}
+                  value={typeof v === 'string' ? v : ''}
+                  onChange={(id) => updateNode(nodeId, { about: id })}
+                  placeholder="选择关联实体…"
+                />
+              </div>
+            );
+          }
           return (
             <div key={key} className={WIDE_ATTRS.has(key) ? 'dd-attr-wide' : undefined}>
               <label className="dd-field-label">{label}</label>
-              <input
-                className="dd-input"
-                type={NUM_ATTRS.has(key) ? 'number' : 'text'}
-                min={NUM_ATTRS.has(key) ? 0 : undefined}
-                placeholder="未设置"
-                value={typeof v === 'string' || typeof v === 'number' ? v : ''}
-                onChange={(e) =>
-                  updateNode(nodeId, { [key]: NUM_ATTRS.has(key) && e.target.value !== '' ? Number(e.target.value) : e.target.value })
-                }
-              />
+              {key === 'detail' ? (
+                <textarea
+                  className="dd-input dd-textarea"
+                  rows={3}
+                  placeholder="未设置"
+                  value={typeof v === 'string' ? v : ''}
+                  onChange={(e) => updateNode(nodeId, { detail: e.target.value })}
+                />
+              ) : (
+                <input
+                  className="dd-input"
+                  type={NUM_ATTRS.has(key) ? 'number' : 'text'}
+                  min={NUM_ATTRS.has(key) ? 0 : undefined}
+                  placeholder="未设置"
+                  value={typeof v === 'string' || typeof v === 'number' ? v : ''}
+                  onChange={(e) =>
+                    updateNode(nodeId, { [key]: NUM_ATTRS.has(key) && e.target.value !== '' ? Number(e.target.value) : e.target.value })
+                  }
+                />
+              )}
             </div>
           );
         })}

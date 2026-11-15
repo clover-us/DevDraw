@@ -1,9 +1,13 @@
 /**
  * NodeEditor —— 右键「编辑…」打开的统一编辑弹窗。
- * 读 / 写分离：抽屉只读详情，所有写操作收进这一个入口，弹窗内用 tab 划分
- * 「详情」（名称 / 字段 / 连线 / 删除）与「外观」（组件身份 / 图标）。
- * 外观 tab 仅对可换身份的架构实体出现；其余类型只有详情。
+ * 读 / 写分离：抽屉只读详情，所有写操作收进这一个入口。弹窗内按节点类型
+ * 动态拆成多个子页面（tab）：
+ *   详情 —— 名称 / 笔记内容 / 添加连线 / 删除；
+ *   属性 —— 实体级属性（注册表软 schema 驱动），字段节点则为字段属性编辑器；
+ *   字段 —— 仅表：字段列表 + 内联字段编辑；
+ *   外观 —— 仅可换身份的架构实体：组件身份 / 图标。
  * 外观是本地草稿：预览实时看草稿，「应用外观」才落模型；未应用时 tab 上亮小黄点。
+ * 其余子页面实时写模型；footer 随子页面切换（删除/完成 vs 还原/取消/应用外观）。
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -20,8 +24,8 @@ import { CloseIcon, EntitiesIcon, PaletteIcon, SearchIcon } from './icons';
 
 const APPEARANCE_TYPES = new Set(['Service', 'Database', 'Queue', 'Endpoint', 'ExternalSystem', 'Actor']);
 
-type TabId = 'details' | 'appearance';
-const TAB_ORDER: TabId[] = ['details', 'appearance'];
+type TabId = 'details' | 'attrs' | 'fields' | 'appearance';
+const TAB_LABEL: Record<TabId, string> = { details: '详情', attrs: '属性', fields: '字段', appearance: '外观' };
 
 interface Props {
   model: Model;
@@ -32,12 +36,20 @@ interface Props {
   onChange: (m: Model) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
-  initialTab?: TabId;
+  initialTab?: 'details' | 'appearance';
 }
 
 export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelete, onClose, initialTab = 'details' }: Props) {
   const hasAppearance = APPEARANCE_TYPES.has(node.type);
-  const [tab, setTab] = useState<TabId>(hasAppearance ? initialTab : 'details');
+  // 子页面按类型动态组合：有属性 schema（或字段编辑器）才有「属性」，表才有「字段」。
+  const hasAttrs = node.type === 'Field' || Boolean(NODE_TYPES[node.type].attrs);
+  const hasFields = node.type === 'Table';
+  const tabs: TabId[] = ['details'];
+  if (hasAttrs) tabs.push('attrs');
+  if (hasFields) tabs.push('fields');
+  if (hasAppearance) tabs.push('appearance');
+  const tabsKey = tabs.join('|');
+  const [tab, setTab] = useState<TabId>(tabs.includes(initialTab) ? initialTab : 'details');
   const [error, setError] = useState<string | null>(null);
   const [connectTarget, setConnectTarget] = useState('');
   const [connectType, setConnectType] = useState<EdgeType>(connectableEdgeTypes(lens.id)[0]?.id ?? 'calls');
@@ -52,7 +64,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
   const nameRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const tablistRef = useRef<HTMLDivElement>(null);
-  const tabRefs = useRef<Record<TabId, HTMLButtonElement | null>>({ details: null, appearance: null });
+  const tabRefs = useRef<Record<TabId, HTMLButtonElement | null>>({ details: null, attrs: null, fields: null, appearance: null });
 
   // tab 下划线滑条：量活跃 tab 的位置，切换 / 尺寸变化时滑动。
   const [ink, setInk] = useState({ left: 0, width: 0 });
@@ -65,7 +77,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
     const ro = new ResizeObserver(measure);
     if (tablistRef.current) ro.observe(tablistRef.current);
     return () => ro.disconnect();
-  }, [tab, hasAppearance]);
+  }, [tab, tabsKey]);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -74,7 +86,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
       document.body.style.overflow = prev;
     };
   }, []);
-  // 打开即聚焦：详情落在名称输入框，外观落在活跃 tab（键盘可直接操作）。
+  // 打开即聚焦：详情落在名称输入框，其余子页面落在活跃 tab（键盘可直接操作）。
   useEffect(() => {
     const t = window.setTimeout(() => {
       if (tab === 'details') nameRef.current?.focus();
@@ -126,7 +138,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
   const options = componentCatalog(model).filter((c) => c.baseType === node.type);
   const selected = options.find((c) => c.id === componentId);
   const previewGlyph = icon || selected?.icon || DEFAULT_NODE_ICON[node.type];
-  // 左侧预览两个 tab 共用：详情看「已落模型」的样子，外观看「草稿」的样子。
+  // 左侧预览所有子页面共用：详情/属性/字段看「已落模型」的样子，外观看「草稿」的样子。
   const displayGlyph = tab === 'appearance' ? previewGlyph : nodeGlyph(model, node);
   const identity = tab === 'appearance' ? selected : nodeComponent(model, node);
   // 草稿与已落模型的差异：驱动「应用外观」可用性、tab 黄点、预览草稿徽标。
@@ -156,12 +168,12 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
 
   // tab 键盘：左右 / Home / End 切换并跟随焦点（roving tabindex）。
   const onTabKeyDown = (e: React.KeyboardEvent) => {
-    const idx = TAB_ORDER.indexOf(tab);
+    const idx = tabs.indexOf(tab);
     let next: TabId | null = null;
-    if (e.key === 'ArrowRight') next = TAB_ORDER[(idx + 1) % TAB_ORDER.length];
-    else if (e.key === 'ArrowLeft') next = TAB_ORDER[(idx - 1 + TAB_ORDER.length) % TAB_ORDER.length];
-    else if (e.key === 'Home') next = TAB_ORDER[0];
-    else if (e.key === 'End') next = TAB_ORDER[TAB_ORDER.length - 1];
+    if (e.key === 'ArrowRight') next = tabs[(idx + 1) % tabs.length];
+    else if (e.key === 'ArrowLeft') next = tabs[(idx - 1 + tabs.length) % tabs.length];
+    else if (e.key === 'Home') next = tabs[0];
+    else if (e.key === 'End') next = tabs[tabs.length - 1];
     if (next) {
       e.preventDefault();
       setTab(next);
@@ -218,7 +230,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
         }
       }}
     >
-      <div className={`dd-modal${hasAppearance ? ' dd-modal-tall' : ''}`} role="dialog" aria-modal="true" aria-label={`编辑 ${node.name}`} ref={modalRef}>
+      <div className={`dd-modal${tabs.length > 1 ? ' dd-modal-tall' : ''}`} role="dialog" aria-modal="true" aria-label={`编辑 ${node.name}`} ref={modalRef}>
         <div className="dd-modal-head">
           <span className="dd-modal-head-glyph">
             <Glyph id={displayGlyph} size={26} />
@@ -234,40 +246,31 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
           </button>
         </div>
 
-        {hasAppearance && (
+        {tabs.length > 1 && (
           <div className="dd-modal-tabs" role="tablist" aria-label="编辑内容" ref={tablistRef} onKeyDown={onTabKeyDown}>
-            <button
-              id="dd-node-tab-details"
-              role="tab"
-              aria-selected={tab === 'details'}
-              aria-controls="dd-node-panel-details"
-              tabIndex={tab === 'details' ? 0 : -1}
-              className={tab === 'details' ? 'active' : ''}
-              ref={(el) => {
-                tabRefs.current.details = el;
-              }}
-              onClick={() => setTab('details')}
-            >
-              <EntitiesIcon size={14} />
-              详情
-            </button>
-            <button
-              id="dd-node-tab-appearance"
-              role="tab"
-              aria-selected={tab === 'appearance'}
-              aria-controls="dd-node-panel-appearance"
-              tabIndex={tab === 'appearance' ? 0 : -1}
-              className={tab === 'appearance' ? 'active' : ''}
-              title={dirty ? '有未应用的外观改动' : undefined}
-              ref={(el) => {
-                tabRefs.current.appearance = el;
-              }}
-              onClick={() => setTab('appearance')}
-            >
-              <PaletteIcon size={14} />
-              外观
-              {dirty && <span className="dd-tab-dot" aria-label="有未应用的外观改动" />}
-            </button>
+            {tabs.map((t) => (
+              <button
+                key={t}
+                id={`dd-node-tab-${t}`}
+                role="tab"
+                aria-selected={tab === t}
+                aria-controls={`dd-node-panel-${t}`}
+                tabIndex={tab === t ? 0 : -1}
+                className={tab === t ? 'active' : ''}
+                title={t === 'appearance' && dirty ? '有未应用的外观改动' : undefined}
+                ref={(el) => {
+                  tabRefs.current[t] = el;
+                }}
+                onClick={() => setTab(t)}
+              >
+                {t === 'details' && <EntitiesIcon size={14} />}
+                {t === 'attrs' && <Glyph id="config" size={14} />}
+                {t === 'fields' && <Glyph id="table" size={14} />}
+                {t === 'appearance' && <PaletteIcon size={14} />}
+                {TAB_LABEL[t]}
+                {t === 'appearance' && dirty && <span className="dd-tab-dot" aria-label="有未应用的外观改动" />}
+              </button>
+            ))}
             <span className="dd-modal-tabs-ink" style={{ left: ink.left, width: ink.width }} aria-hidden="true" />
           </div>
         )}
@@ -335,52 +338,13 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
             </p>
           </div>
 
-          {tab === 'details' ? (
-            <div className="dd-modal-form dd-nodeeditor-details" role="tabpanel" id="dd-node-panel-details" aria-labelledby="dd-node-tab-details">
+          {tab === 'details' && (
+            <div className="dd-modal-form dd-nodeeditor-pane" role="tabpanel" id="dd-node-panel-details" aria-labelledby="dd-node-tab-details">
               <Section title="名称">
                 <input ref={nameRef} className="dd-input" value={node.name} onChange={(e) => renameNode(e.target.value)} />
               </Section>
 
-              {(node.type === 'Service' || node.type === 'Database' || node.type === 'Table') && (
-                <AttrsEditor model={model} nodeId={nodeId} updateNode={updateNode} />
-              )}
-
-              {node.type === 'Table' && (
-                <>
-                  <TableFieldsEditor
-                    model={model}
-                    tableId={nodeId}
-                    onSelectField={(id) => setFieldId((prev) => (prev === id ? null : id))}
-                    onAdd={addField}
-                    selectedFieldId={fieldId}
-                  />
-                  {fieldId && model.nodes[fieldId] && (
-                    <div className="dd-field-inline">
-                      <FieldEditor
-                        model={model}
-                        fieldId={fieldId}
-                        onSelectNode={() => setFieldId(null)}
-                        updateNode={updateNode}
-                        onDelete={deleteField}
-                      />
-                    </div>
-                  )}
-                </>
-              )}
-              {node.type === 'Field' && <FieldEditor model={model} fieldId={nodeId} onSelectNode={() => {}} updateNode={updateNode} />}
-              {node.type === 'State' && (
-                <Section title="初始状态">
-                  <label className="dd-toggle">
-                    <input
-                      type="checkbox"
-                      checked={node.attrs?.initial === true}
-                      onChange={(e) => updateNode(nodeId, { initial: e.target.checked })}
-                    />
-                    作为状态机的起点
-                  </label>
-                </Section>
-              )}
-              {(node.type === 'Decision' || node.type === 'Assumption' || node.type === 'Note') && (
+              {node.type === 'Note' && (
                 <Section title="内容">
                   <textarea
                     className="dd-input dd-textarea"
@@ -409,7 +373,44 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
 
               {error && <p className="dd-error">{error}</p>}
             </div>
-          ) : (
+          )}
+
+          {tab === 'attrs' && (
+            <div className="dd-modal-form dd-nodeeditor-pane" role="tabpanel" id="dd-node-panel-attrs" aria-labelledby="dd-node-tab-attrs">
+              {node.type === 'Field' ? (
+                <FieldEditor model={model} fieldId={nodeId} onSelectNode={() => {}} updateNode={updateNode} />
+              ) : (
+                <AttrsEditor model={model} nodeId={nodeId} updateNode={updateNode} />
+              )}
+              {error && <p className="dd-error">{error}</p>}
+            </div>
+          )}
+
+          {tab === 'fields' && (
+            <div className="dd-modal-form dd-nodeeditor-pane" role="tabpanel" id="dd-node-panel-fields" aria-labelledby="dd-node-tab-fields">
+              <TableFieldsEditor
+                model={model}
+                tableId={nodeId}
+                onSelectField={(id) => setFieldId((prev) => (prev === id ? null : id))}
+                onAdd={addField}
+                selectedFieldId={fieldId}
+              />
+              {fieldId && model.nodes[fieldId] && (
+                <div className="dd-field-inline">
+                  <FieldEditor
+                    model={model}
+                    fieldId={fieldId}
+                    onSelectNode={() => setFieldId(null)}
+                    updateNode={updateNode}
+                    onDelete={deleteField}
+                  />
+                </div>
+              )}
+              {error && <p className="dd-error">{error}</p>}
+            </div>
+          )}
+
+          {tab === 'appearance' && (
             <div className="dd-modal-form" role="tabpanel" id="dd-node-panel-appearance" aria-labelledby="dd-node-tab-appearance">
               <div className="dd-modal-fields">
                 <div className="dd-modal-field">
@@ -489,20 +490,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
         </div>
 
         <div className="dd-modal-foot">
-          {tab === 'details' ? (
-            <>
-              <button
-                className={`dd-danger${deleteArmed ? ' armed' : ''}`}
-                onClick={() => (deleteArmed ? onDelete(nodeId) : setDeleteArmed(true))}
-              >
-                {deleteArmed ? '确认删除？再点一次' : '删除实体'}
-              </button>
-              <span className="dd-modal-foot-spacer" />
-              <button className="dd-primary" onClick={onClose}>
-                完成
-              </button>
-            </>
-          ) : (
+          {tab === 'appearance' ? (
             <>
               <span className="dd-modal-foot-hint">外观只改身份与图标，语义底座不变，推演照算。</span>
               <span className="dd-modal-foot-spacer" />
@@ -522,6 +510,23 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
               >
                 <PaletteIcon size={16} />
                 应用外观
+              </button>
+            </>
+          ) : (
+            <>
+              {tab === 'details' ? (
+                <button
+                  className={`dd-danger${deleteArmed ? ' armed' : ''}`}
+                  onClick={() => (deleteArmed ? onDelete(nodeId) : setDeleteArmed(true))}
+                >
+                  {deleteArmed ? '确认删除？再点一次' : '删除实体'}
+                </button>
+              ) : (
+                <span className="dd-modal-foot-hint">改动实时写入模型，画布、预览与推演即时同步。</span>
+              )}
+              <span className="dd-modal-foot-spacer" />
+              <button className="dd-primary" onClick={onClose}>
+                完成
               </button>
             </>
           )}
