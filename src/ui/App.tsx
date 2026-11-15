@@ -156,6 +156,9 @@ function syncNodes(
   });
 }
 
+/** 抽屉的一次「视图」：选中某节点或某边（二者互斥）。用于 back/forward 导航历史。 */
+type DrawerView = { node: string | null; edge: string | null };
+
 export function App() {
   const project = useProject();
   const { model, setModel, setViews } = project;
@@ -175,6 +178,12 @@ export function App() {
   });
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  // 抽屉导航历史：从节点→相关边→边另一端层层钻入时能原路返回（浏览器式 back/forward）。
+  const [backStack, setBackStack] = useState<DrawerView[]>([]);
+  const [fwdStack, setFwdStack] = useState<DrawerView[]>([]);
+  // 渲染期同步当前选择，供 navigate/goBack 在事件回调里读到「此刻停在哪」。
+  const selRef = useRef<DrawerView>({ node: null, edge: null });
+  selRef.current = { node: selectedNode, edge: selectedEdge };
   const [activeFinding, setActiveFinding] = useState<string | null>(null);
   const [baseline, setBaseline] = useState<SimulationResult | null>(null);
   // 每个镜片各存一份自动布局结果：共用一份的话，切镜片时新镜片会发现"这些 id 我都有坐标了"，
@@ -442,26 +451,65 @@ export function App() {
     [model, setViews, lens, foldedTables, projection, positionFor],
   );
 
-  const selectNode = useCallback((id: string | null) => {
-    setSelectedNode(id);
-    setSelectedEdge(null);
+  // 只改选择、不动历史（back/forward 与关闭抽屉用）。
+  const applyView = useCallback((v: DrawerView) => {
+    setSelectedNode(v.node);
+    setSelectedEdge(v.edge);
     setCreateMode(false);
   }, []);
-  const selectEdge = useCallback((id: string | null) => {
-    setSelectedEdge(id);
-    setSelectedNode(null);
-    setCreateMode(false);
-  }, []);
-  const closeDrawer = useCallback(() => {
-    setSelectedNode(null);
-    setSelectedEdge(null);
-    setCreateMode(false);
-  }, []);
+  // 导航到某节点/边：把当前视图压入回退栈、清空前进栈（浏览器式）。
+  // null（关闭）与「点同一个」不入栈，避免历史里全是噪声。
+  const navigate = useCallback(
+    (v: DrawerView) => {
+      const cur = selRef.current;
+      const same = cur.node === v.node && cur.edge === v.edge;
+      if ((v.node || v.edge) && !same) {
+        if (cur.node || cur.edge) setBackStack((s) => [...s.slice(-49), cur]);
+        setFwdStack([]);
+      }
+      applyView(v);
+    },
+    [applyView],
+  );
+  const selectNode = useCallback((id: string | null) => navigate({ node: id, edge: null }), [navigate]);
+  const selectEdge = useCallback((id: string | null) => navigate({ node: null, edge: id }), [navigate]);
+  const closeDrawer = useCallback(() => applyView({ node: null, edge: null }), [applyView]);
   const startCreate = useCallback(() => {
     setCreateMode(true);
     setSelectedNode(null);
     setSelectedEdge(null);
   }, []);
+  // 回退/前进：跳过已被删除的视图（撤销/删除后历史里可能留着悬空 id）。
+  const goBack = useCallback(() => {
+    const stack = [...backStack];
+    let prev: DrawerView | undefined;
+    while (stack.length) {
+      const v = stack.pop()!;
+      if ((v.node && model.nodes[v.node]) || (v.edge && model.edges[v.edge])) {
+        prev = v;
+        break;
+      }
+    }
+    if (!prev) return;
+    setBackStack(stack);
+    setFwdStack((f) => [...f, selRef.current]);
+    applyView(prev);
+  }, [backStack, model, applyView]);
+  const goForward = useCallback(() => {
+    const stack = [...fwdStack];
+    let next: DrawerView | undefined;
+    while (stack.length) {
+      const v = stack.pop()!;
+      if ((v.node && model.nodes[v.node]) || (v.edge && model.edges[v.edge])) {
+        next = v;
+        break;
+      }
+    }
+    if (!next) return;
+    setFwdStack(stack);
+    setBackStack((b) => [...b, selRef.current]);
+    applyView(next);
+  }, [fwdStack, model, applyView]);
 
   // 左导航分区：点当前已展开分区 → 收起；否则切到该分区并展开。
   const onSection = useCallback(
@@ -889,6 +937,9 @@ export function App() {
       setCreateMode(false);
       setRenamingId(null);
       setRenamingFieldId(null);
+      // 换镜片等于换了一个世界，旧镜片的钻取历史不再有意义。
+      setBackStack([]);
+      setFwdStack([]);
       // 每个镜片有自己的场景：切过去就该看见那个镜片上次在推演的东西。
       setSeeds(project.views[id]?.seeds ?? []);
       setTrace(project.views[id]?.trace ?? null);
@@ -1184,7 +1235,13 @@ export function App() {
     setNavExpanded(true);
   }, [lens, seeds, model, findings, result, trace, project]);
 
-  const openSession = useCallback(
+  // 「看一份存档」和「把存档恢复成当前场景」是两件事：
+  // 点列表只是选中它、看当时→现在的对账（viewSession），不该悄悄改掉你正在推演的场景；
+  // 只有明确点「恢复这个场景」才真的把 seeds/trace 应用回来（restoreSession）。
+  const viewSession = useCallback((session: ReasoningSession) => {
+    setActiveSessionId(session.id);
+  }, []);
+  const restoreSession = useCallback(
     (session: ReasoningSession) => {
       if (session.lens !== lens) switchLens(session.lens);
       applySeeds(session.seeds, session.lens);
@@ -1213,6 +1270,8 @@ export function App() {
     setActiveFinding(null);
     setCreateMode(false);
     setActiveSessionId(null);
+    setBackStack([]);
+    setFwdStack([]);
   }, [project]);
 
   // 重置示例会丢掉当前模型，是破坏性操作——两步确认：先点一下「上膛」，3 秒内再点才真的重置。
@@ -1302,21 +1361,40 @@ export function App() {
     section !== 'trace' &&
     Object.keys(model.nodes).length > 0;
 
-  // 撤销/重做快捷键：Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做；输入框内不拦截。
+  // 键盘：Ctrl/Cmd+Z 撤销、Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做；Esc 关抽屉；Alt+←/→ 抽屉回退/前进。
+  // 输入框内一律不拦截（让输入框自己处理 Esc/方向键）。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const inField = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+      if (inField) return;
+      if (e.key === 'Escape') {
+        if (drawerOpen) {
+          e.preventDefault();
+          closeDrawer();
+        }
+        return;
+      }
+      if (e.altKey && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        goBack();
+        return;
+      }
+      if (e.altKey && e.key === 'ArrowRight') {
+        e.preventDefault();
+        goForward();
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey)) return;
       const key = e.key.toLowerCase();
       if (key !== 'z' && key !== 'y') return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
       e.preventDefault();
       if (key === 'y' || e.shiftKey) project.redo();
       else project.undo();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [project.redo, project.undo]);
+  }, [project.redo, project.undo, drawerOpen, closeDrawer, goBack, goForward]);
 
   // 撤销/重做或删除可能让选中实体/边消失 → 清掉悬空选择，避免抽屉读到不存在的节点。
   useEffect(() => {
@@ -1449,7 +1527,8 @@ export function App() {
               sessions={project.sessions}
               activeId={activeSessionId}
               onArchive={archiveSession}
-              onOpen={openSession}
+              onView={viewSession}
+              onOpen={restoreSession}
               onDelete={removeSession}
               onClose={collapseNav}
             />
@@ -1665,6 +1744,10 @@ export function App() {
             seeds={seeds}
             onToggleSeed={toggleSeed}
             onStartTrace={startTraceFrom}
+            canBack={backStack.length > 0}
+            canForward={fwdStack.length > 0}
+            onBack={goBack}
+            onForward={goForward}
             onClose={closeDrawer}
           />
         )}

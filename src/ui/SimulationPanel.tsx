@@ -54,7 +54,7 @@ export function SimulationPanel({
       </div>
 
       {lens.id !== 'architecture' && (
-        <p className="dd-note">失效推演在<strong>架构镜片</strong>上进行：切到架构，右键节点设失效源，或直接点下方失效源。</p>
+        <p className="dd-note">失效推演在<strong>架构镜片</strong>上进行：切到架构，选中节点点「模拟失效」，或直接点下方失效源。</p>
       )}
 
       <div className="dd-drawer-section">
@@ -130,7 +130,7 @@ export function SimulationPanel({
         <div className="dd-sim-empty">
           <SimulationIcon size={30} />
           <p>选一个失效源，模型立刻告诉你<strong>谁会跟着倒下、为什么</strong>。</p>
-          <p className="dd-muted">也可以直接在架构画布上右键节点。改边的依赖模式（hard→soft）后，爆炸半径会收缩给你看。</p>
+          <p className="dd-muted">也可以选中节点点「模拟失效」。改边的依赖模式（hard→soft）后，爆炸半径会收缩给你看。</p>
         </div>
       )}
 

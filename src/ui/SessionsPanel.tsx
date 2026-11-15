@@ -18,6 +18,9 @@ interface SessionsPanelProps {
   activeId: string | null;
   /** 存档当前推演（当前镜片 + 当前场景 + 此刻结论）。 */
   onArchive: () => void;
+  /** 点列表＝选中这份存档、看当时→现在的对账，不改当前场景。 */
+  onView: (session: ReasoningSession) => void;
+  /** 「恢复这个场景」＝真的把存档的 seeds/trace 应用回当前推演。 */
   onOpen: (session: ReasoningSession) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
@@ -48,7 +51,7 @@ function currentOf(model: Model, session: ReasoningSession) {
   return { findings, blast, trace };
 }
 
-export function SessionsPanel({ model, sessions, activeId, onArchive, onOpen, onDelete, onClose }: SessionsPanelProps) {
+export function SessionsPanel({ model, sessions, activeId, onArchive, onView, onOpen, onDelete, onClose }: SessionsPanelProps) {
   const active = sessions.find((s) => s.id === activeId) ?? null;
   const lensLabel = (id: ReasoningSession['lens']) => getLens(id).label;
 
@@ -96,8 +99,9 @@ export function SessionsPanel({ model, sessions, activeId, onArchive, onOpen, on
                 <li key={s.id}>
                   <button
                     className={`dd-session-item${s.id === activeId ? ' active' : ''}`}
-                    onClick={() => onOpen(s)}
+                    onClick={() => onView(s)}
                     aria-pressed={s.id === activeId}
+                    title="查看这份存档的对账（不会改动当前场景）"
                   >
                     <span className="dd-session-name">{s.name}</span>
                     <span className="dd-session-meta">

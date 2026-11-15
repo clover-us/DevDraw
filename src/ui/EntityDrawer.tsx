@@ -14,7 +14,7 @@ import { edgeDependency, type SimulationResult } from '../core/simulate';
 import type { ComponentDef, DependencyMode, EdgeType, Model, ModelNode, NodeType } from '../core/types';
 import { GLYPH_LIST, Glyph } from './glyphs';
 import { FindingCard, MODE_INFO, MODES, nodeName } from './inspect';
-import { ArrowRightIcon, CloseIcon, LinkIcon, PlusIcon, SimulationIcon, TraceIcon, TrashIcon } from './icons';
+import { ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, LinkIcon, PlusIcon, SimulationIcon, TraceIcon, TrashIcon } from './icons';
 
 interface EntityDrawerProps {
   model: Model;
@@ -37,6 +37,11 @@ interface EntityDrawerProps {
   /** 推演入口可见化：不再只藏右键，选中节点就能直接模拟失效 / 追踪请求。 */
   onToggleSeed: (id: string) => void;
   onStartTrace: (id: string) => void;
+  /** 抽屉钻取历史（浏览器式 back/forward）：从节点→相关边→另一端层层深入后能原路返回。 */
+  canBack: boolean;
+  canForward: boolean;
+  onBack: () => void;
+  onForward: () => void;
   onClose: () => void;
 }
 
@@ -71,6 +76,8 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
 
 export function EntityDrawer(props: EntityDrawerProps) {
   const { model, lens, projection, selectedNode, selectedEdge, createMode, findings, activeFinding, result } = props;
+  // 钻取历史按钮：三种视图（创建/边/实体）共用，从任何一层都能原路返回。
+  const nav = { canBack: props.canBack, canForward: props.canForward, onBack: props.onBack, onForward: props.onForward };
   const [error, setError] = useState<string | null>(null);
   const [createType, setCreateType] = useState<NodeType>(lens.nodeTypes[0] ?? 'Service');
   const [createName, setCreateName] = useState('');
@@ -78,6 +85,14 @@ export function EntityDrawer(props: EntityDrawerProps) {
   const [connectType, setConnectType] = useState<EdgeType>('calls');
   const [fieldName, setFieldName] = useState('');
   const [fieldType, setFieldType] = useState('varchar');
+  // 删除是破坏性操作（删节点还会级联删边）——两步确认：先点一下「上膛」，3 秒内再点才真删。
+  // 与 header「重置示例」同一套心智，不弹模态打断心流。
+  const [deleteArmed, setDeleteArmed] = useState(false);
+  useEffect(() => {
+    if (!deleteArmed) return;
+    const t = window.setTimeout(() => setDeleteArmed(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [deleteArmed]);
 
   // 选择切换时重置表单与错误。
   useEffect(() => {
@@ -86,6 +101,7 @@ export function EntityDrawer(props: EntityDrawerProps) {
     setFieldName('');
     setFieldType('varchar');
     setCreateName('');
+    setDeleteArmed(false);
     setCreateType(lens.nodeTypes[0] ?? 'Service');
     setConnectType(lens.id === 'er' ? 'fk' : lens.id === 'state-machine' ? 'transition' : 'calls');
   }, [selectedNode, selectedEdge, createMode, lens]);
@@ -122,7 +138,7 @@ export function EntityDrawer(props: EntityDrawerProps) {
       props.onSelectNode(id);
     };
     return (
-      <DrawerShell title="新建实体" subtitle={`${lens.label}镜片`} onClose={props.onClose}>
+      <DrawerShell title="新建实体" subtitle={`${lens.label}镜片`} onClose={props.onClose} {...nav}>
         <Section title="类型与名称">
           <label className="dd-field-label">实体类型</label>
           <select className="dd-input" value={createType} onChange={(e) => setCreateType(e.target.value as NodeType)}>
@@ -163,6 +179,7 @@ export function EntityDrawer(props: EntityDrawerProps) {
         title="关系详情"
         subtitle={`${nodeName(model, edge.from)} → ${nodeName(model, edge.to)}`}
         onClose={props.onClose}
+        {...nav}
       >
         <Section title={`${EDGE_TYPES[edge.type].label}（${edge.type}）`}>
           <div className="dd-edge-endpoints">
@@ -200,13 +217,17 @@ export function EntityDrawer(props: EntityDrawerProps) {
                 </span>
               </label>
             ))}
-            <label className="dd-field-label">兜底说明（soft 时为何能降级）</label>
-            <input
-              className="dd-input"
-              placeholder="如：事后人工审核 / outbox 重试"
-              value={edge.attrs?.fallback ?? ''}
-              onChange={(e) => updateEdge(selectedEdge, { fallback: e.target.value })}
-            />
+            {edgeDependency(edge) === 'soft' && (
+              <>
+                <label className="dd-field-label">兜底说明（为何能降级）</label>
+                <input
+                  className="dd-input"
+                  placeholder="如：事后人工审核 / outbox 重试"
+                  value={edge.attrs?.fallback ?? ''}
+                  onChange={(e) => updateEdge(selectedEdge, { fallback: e.target.value })}
+                />
+              </>
+            )}
             {result && <p className="dd-hint-text">改动立即重演，并与首次改动前的基线对比（见画布推演面板）。</p>}
           </Section>
         )}
@@ -266,8 +287,11 @@ export function EntityDrawer(props: EntityDrawerProps) {
           </Section>
         )}
 
-        <button className="dd-danger dd-block" onClick={removeEdge}>
-          <TrashIcon size={16} /> 删除关系
+        <button
+          className={`dd-danger dd-block${deleteArmed ? ' armed' : ''}`}
+          onClick={() => (deleteArmed ? removeEdge() : setDeleteArmed(true))}
+        >
+          <TrashIcon size={16} /> {deleteArmed ? '确认删除？再点一次' : '删除关系'}
         </button>
         {error && <p className="dd-model-error">{error}</p>}
       </DrawerShell>
@@ -295,7 +319,7 @@ export function EntityDrawer(props: EntityDrawerProps) {
     };
 
     return (
-      <DrawerShell title={node.name} subtitle={`${NODE_TYPES[node.type].label} · ${id}`} onClose={props.onClose}>
+      <DrawerShell title={node.name} subtitle={NODE_TYPES[node.type].label} onClose={props.onClose} {...nav}>
         <Section title="名称">
           <input className="dd-input" value={node.name} onChange={(e) => renameNode(id, e.target.value)} />
         </Section>
@@ -400,16 +424,13 @@ export function EntityDrawer(props: EntityDrawerProps) {
               ))}
             </select>
             <ArrowRightIcon size={16} />
-            <select className="dd-input" value={connectTarget} onChange={(e) => setConnectTarget(e.target.value)}>
-              <option value="">终点…</option>
-              {Object.entries(projection.nodes)
-                .filter(([nid]) => nid !== id)
-                .map(([nid, n]) => (
-                  <option key={nid} value={nid}>
-                    {n.name}
-                  </option>
-                ))}
-            </select>
+            <NodePicker
+              model={model}
+              nodes={Object.entries(projection.nodes).filter(([nid]) => nid !== id)}
+              value={connectTarget}
+              onChange={setConnectTarget}
+              placeholder="搜索终点实体…"
+            />
           </div>
           <button className="dd-block" onClick={addConnection}>
             <PlusIcon size={16} /> 连接
@@ -452,8 +473,11 @@ export function EntityDrawer(props: EntityDrawerProps) {
           </Section>
         )}
 
-        <button className="dd-danger dd-block" onClick={removeNode}>
-          <TrashIcon size={16} /> 删除实体
+        <button
+          className={`dd-danger dd-block${deleteArmed ? ' armed' : ''}`}
+          onClick={() => (deleteArmed ? removeNode() : setDeleteArmed(true))}
+        >
+          <TrashIcon size={16} /> {deleteArmed ? '确认删除？连同连线一起，再点一次' : '删除实体'}
         </button>
         {error && <p className="dd-model-error">{error}</p>}
       </DrawerShell>
@@ -467,26 +491,113 @@ function DrawerShell({
   title,
   subtitle,
   onClose,
+  canBack,
+  canForward,
+  onBack,
+  onForward,
   children,
 }: {
   title: string;
   subtitle: string;
   onClose: () => void;
+  canBack?: boolean;
+  canForward?: boolean;
+  onBack?: () => void;
+  onForward?: () => void;
   children: ReactNode;
 }) {
   return (
     <aside className="dd-drawer" aria-label="实体详情抽屉">
       <div className="dd-drawer-head">
+        {(onBack || onForward) && (
+          <div className="dd-drawer-nav" role="group" aria-label="抽屉导航">
+            <button className="dd-icon-btn" onClick={onBack} disabled={!canBack} title="返回上一个（Alt+←）" aria-label="返回上一个">
+              <ChevronLeftIcon size={16} />
+            </button>
+            <button className="dd-icon-btn" onClick={onForward} disabled={!canForward} title="前进（Alt+→）" aria-label="前进">
+              <ChevronRightIcon size={16} />
+            </button>
+          </div>
+        )}
         <div className="dd-drawer-titles">
           <h2>{title}</h2>
           <span className="dd-drawer-sub">{subtitle}</span>
         </div>
-        <button className="dd-icon-btn" onClick={onClose} title="关闭抽屉" aria-label="关闭抽屉">
+        <button className="dd-icon-btn" onClick={onClose} title="关闭抽屉（Esc）" aria-label="关闭抽屉">
           <CloseIcon size={16} />
         </button>
       </div>
       <div className="dd-drawer-body">{children}</div>
     </aside>
+  );
+}
+
+/**
+ * 可搜索的终点选择器：取代扁平 <select>。实体一多，纯名字下拉既难找又可能重名歧义；
+ * 这里带类型图标 + 类型标签 + 即时过滤，选中前就能确认「连到的是哪一个」。
+ */
+function NodePicker({
+  model,
+  nodes,
+  value,
+  onChange,
+  placeholder,
+}: {
+  model: Model;
+  nodes: Array<[string, ModelNode]>;
+  value: string;
+  onChange: (id: string) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const selectedName = value ? model.nodes[value]?.name ?? '' : '';
+  const q = query.trim().toLowerCase();
+  const matches = q ? nodes.filter(([, n]) => n.name.toLowerCase().includes(q)) : nodes;
+  return (
+    <div className="dd-nodepicker">
+      <input
+        className="dd-input"
+        placeholder={placeholder}
+        value={open ? query : selectedName}
+        onFocus={() => {
+          setOpen(true);
+          setQuery('');
+        }}
+        onChange={(e) => {
+          setOpen(true);
+          setQuery(e.target.value);
+        }}
+        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+        role="combobox"
+        aria-expanded={open}
+        aria-label={placeholder}
+      />
+      {open && (
+        <div className="dd-nodepicker-list" role="listbox">
+          {matches.length === 0 && <div className="dd-nodepicker-empty">没有匹配的实体</div>}
+          {matches.map(([nid, n]) => (
+            <button
+              key={nid}
+              type="button"
+              role="option"
+              aria-selected={nid === value}
+              className={`dd-nodepicker-item${nid === value ? ' selected' : ''}`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange(nid);
+                setOpen(false);
+                setQuery('');
+              }}
+            >
+              <Glyph id={nodeGlyph(model, n)} size={16} />
+              <span className="dd-nodepicker-name">{n.name}</span>
+              <span className="dd-nodepicker-type">{NODE_TYPES[n.type].label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

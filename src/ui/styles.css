@@ -978,6 +978,87 @@ select.dd-input {
   margin-top: 3px;
   word-break: break-all;
 }
+/* 抽屉钻取历史：back/forward 一组，靠标题左侧，和关闭按钮分居两端。 */
+.dd-drawer-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-top: 1px;
+}
+.dd-drawer-nav .dd-icon-btn:disabled {
+  opacity: 0.3;
+}
+
+/* 可搜索终点选择器：输入框 + 悬浮候选列表（类型图标 + 名字 + 类型标签）。 */
+.dd-nodepicker {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.dd-connect-row .dd-nodepicker .dd-input {
+  width: 100%;
+}
+.dd-nodepicker-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--overlay);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px var(--shadow);
+  padding: 4px;
+}
+.dd-nodepicker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.dd-nodepicker-item:hover {
+  background: var(--panel-2);
+}
+.dd-nodepicker-item.selected {
+  background: var(--accent-soft);
+}
+.dd-nodepicker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dd-nodepicker-type {
+  flex: none;
+  font-size: 10px;
+  color: var(--muted);
+}
+.dd-nodepicker-empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* 删除两步确认的「上膛」态：与 header 重置同一套呼吸提示。 */
+.dd-danger.armed {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  animation: dd-reset-pulse 1s ease-in-out infinite;
+}
+
 .dd-drawer-body {
   flex: 1;
   min-height: 0;
