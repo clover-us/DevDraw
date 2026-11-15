@@ -152,7 +152,9 @@ export function App() {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [activeFinding, setActiveFinding] = useState<string | null>(null);
   const [baseline, setBaseline] = useState<SimulationResult | null>(null);
-  const [autoPos, setAutoPos] = useState<Positions>({});
+  // 每个镜片各存一份自动布局结果：共用一份的话，切镜片时新镜片会发现"这些 id 我都有坐标了"，
+  // 于是原样沿用上一个镜片的摆法——架构和 ER 的图层完全不是一回事，看上去就是"刚排好的又回去了"。
+  const [autoPos, setAutoPos] = useState<Partial<Record<LensId, Positions>>>({});
   const [relayoutNonce, setRelayoutNonce] = useState(0);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamingFieldId, setRenamingFieldId] = useState<string | null>(null);
@@ -224,17 +226,22 @@ export function App() {
         if (cancelled) return;
         // 折叠改变的是卡片高度，等于整列都要重新码一遍 —— 这时候必须整体覆盖，
         // 只补空缺会让折起来的卡片下面继续留着旧空洞。
+        const settled = (next: Positions) => (prev: Partial<Record<LensId, Positions>>) => ({ ...prev, [lens]: next });
         if (forceLayoutRef.current) {
           forceLayoutRef.current = false;
-          setAutoPos(pos);
+          setAutoPos(settled(pos));
+          // 「重新布局」是用户明确的一次决定：把它落进 views.json，刷新/切镜片回来还是这副样子。
+          // 代价是这一镜片的自动布局从此被钉住 —— 再加表时旧卡不会自己让位，得再按一次「重新布局」。
+          setViews((v) => ({ ...v, [lens]: { ...v[lens], positions: pos } }));
           return;
         }
         // 其余情况只采纳"还没有位置"的节点的坐标：新增一个节点不该把整张画布重新洗牌，
         // 否则你刚双击落下的位置、刚看清的关系，全都会被下一帧挪走。
         setAutoPos((prev) => {
-          const next = { ...prev };
+          const cur = prev[lens] ?? {};
+          const next = { ...cur };
           for (const [id, p] of Object.entries(pos)) if (!next[id]) next[id] = p;
-          return next;
+          return { ...prev, [lens]: next };
         });
       })
       .finally(() => {
@@ -294,7 +301,7 @@ export function App() {
       // 优先级：用户拖拽持久化坐标 > ELK 自动布局 > sample 手写坐标 > 知识节点偏移 > 默认位。
       const saved = project.views[lens]?.positions[id];
       if (saved) return saved;
-      const auto = autoPos[id];
+      const auto = autoPos[lens]?.[id];
       if (auto) return auto;
       const known = threeLensPositions[id];
       if (known) return known;
@@ -343,36 +350,38 @@ export function App() {
     (id: string) => {
       const all = erFieldRows(model, id);
       const next = !(foldedTables[id] ?? shouldAutoFold(all));
-      // 折叠状态跟着 views.json 走：刷新、导出 zip、在别人机器上打开，折过的表都还是折着的。
-      setViews((v) => {
-        const view = v[lens] ?? { positions: {} };
-        const prev = view.folded ?? {};
-        return { ...v, [lens]: { ...view, folded: { ...prev, [id]: next } } };
-      });
       // 折叠只改卡片高度：列还是那几列、顺序也没变，所以本地按新高度重码一遍就够了，
       // 不必等 ELK 再来一次异步重排（那中间的几十毫秒正是"闪一下"的来源）。
       // 重码只发生在被点的那一列：锚点顶边不动、同列下方补位，其他列一个像素都不碰。
-      setAutoPos((cur) => {
-        const positions: Positions = {};
-        const heights: Record<string, number> = {};
-        for (const nid of Object.keys(projection.nodes)) {
-          if (model.nodes[nid]?.type !== 'Table') continue;
-          const rows = erFieldRows(model, nid);
-          const folded = nid === id ? next : (foldedTables[nid] ?? shouldAutoFold(rows));
-          const visible = foldRows(rows, folded);
-          heights[nid] = Math.max(74, foldedCardHeight(visible.rows.length));
-          positions[nid] = cur[nid] ?? positionFor(nid);
-        }
-        const anchor = positions[id] ?? positionFor(id);
-        const key = Math.round(anchor.x);
-        const entries = Object.keys(positions)
-          .filter((nid) => Math.round(positions[nid].x) === key)
-          .map((nid) => ({ id: nid, y: positions[nid].y, height: heights[nid] }));
-        const ys = packAround(entries, 44, id, anchor.y);
-        const out: Positions = { ...cur };
-        for (const [nid, y] of Object.entries(ys)) out[nid] = { x: positions[nid].x, y };
-        return out;
+      const positions: Positions = {};
+      const heights: Record<string, number> = {};
+      for (const nid of Object.keys(projection.nodes)) {
+        if (model.nodes[nid]?.type !== 'Table') continue;
+        const rows = erFieldRows(model, nid);
+        const folded = nid === id ? next : (foldedTables[nid] ?? shouldAutoFold(rows));
+        const visible = foldRows(rows, folded);
+        heights[nid] = Math.max(74, foldedCardHeight(visible.rows.length));
+        positions[nid] = positionFor(nid);
+      }
+      const anchor = positions[id] ?? positionFor(id);
+      const key = Math.round(anchor.x);
+      const entries = Object.keys(positions)
+        .filter((nid) => Math.round(positions[nid].x) === key)
+        .map((nid) => ({ id: nid, y: positions[nid].y, height: heights[nid] }));
+      const ys = packAround(entries, 44, id, anchor.y);
+      const out: Positions = {};
+      for (const [nid, y] of Object.entries(ys)) out[nid] = { x: positions[nid].x, y };
+      // 折叠状态 + 这一列的新 y 一起落进 views.json：坐标一旦被「重新布局」写进去就是权威值，
+      // 只写 autoPos 会被它盖住，观感就成了"点了没反应"。
+      setViews((v) => {
+        const view = v[lens] ?? { positions: {} };
+        const prevFolded = view.folded ?? {};
+        return {
+          ...v,
+          [lens]: { ...view, folded: { ...prevFolded, [id]: next }, positions: { ...view.positions, ...out } },
+        };
       });
+      setAutoPos((prevAll) => ({ ...prevAll, [lens]: { ...(prevAll[lens] ?? {}), ...out } }));
     },
     [model, setViews, lens, foldedTables, projection, positionFor],
   );
@@ -477,14 +486,17 @@ export function App() {
         44,
         { id: node.id, y: node.position.y },
       );
-      setAutoPos((prev) => {
-        const next = { ...prev };
-        for (const [id, y] of Object.entries(moved)) {
-          if (id === node.id) continue;
-          next[id] = { x: positionFor(id).x, y };
-        }
-        return next;
+      const shifted: Record<string, { x: number; y: number }> = {};
+      for (const [id, y] of Object.entries(moved)) {
+        if (id === node.id) continue;
+        shifted[id] = { x: positionFor(id).x, y };
+      }
+      // 让位后的纵坐标也要落进 views.json，否则「重新布局」写过的权威坐标会把它们盖回去。
+      setViews((v) => {
+        const view = v[lens] ?? { positions: {} };
+        return { ...v, [lens]: { ...view, positions: { ...view.positions, ...shifted } } };
       });
+      setAutoPos((prevAll) => ({ ...prevAll, [lens]: { ...(prevAll[lens] ?? {}), ...shifted } }));
     },
     [persistPosition, lens, model, projection, positionFor, tableFolds],
   );
