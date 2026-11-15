@@ -3973,9 +3973,22 @@ select.dd-input {
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
-/* 详情 tab 没有左侧预览，表单独占整行。 */
+/* 详情 tab：与外观共用左侧实时预览，右栏是带内边距、可滚动的表单。 */
 .dd-nodeeditor-details {
-  grid-column: 1 / -1;
+  padding: 4px 18px 16px;
+  overflow-y: auto;
+}
+.dd-nodeeditor-details .dd-drawer-section:first-child {
+  padding-top: 12px;
+}
+/* 添加连线：类型定宽 + 终点自适应 + 连接按钮收在行内，不再是一整条禁用横 bar。 */
+.dd-connect-row select.dd-input {
+  flex: 0 0 112px;
+}
+.dd-connect-btn {
+  flex: none;
+  margin: 0;
+  padding: 7px 16px;
 }
 /* 关系编辑弹窗：窄、单列。 */
 .dd-modal-narrow {

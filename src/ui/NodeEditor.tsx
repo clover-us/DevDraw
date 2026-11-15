@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { applyPatchChecked } from '../core/patch';
-import { componentCatalog, DEFAULT_NODE_ICON, nodeGlyph } from '../core/components';
+import { componentCatalog, DEFAULT_NODE_ICON, nodeComponent, nodeGlyph } from '../core/components';
 import { newEdgeId, newNodeId } from '../core/id';
 import { connectableEdgeTypes, NODE_TYPES, type LensDef } from '../core/registry';
 import { GLYPH_LIST } from './glyphs';
@@ -87,6 +87,9 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
   const options = componentCatalog(model).filter((c) => c.baseType === node.type);
   const selected = options.find((c) => c.id === componentId);
   const previewGlyph = icon || selected?.icon || DEFAULT_NODE_ICON[node.type];
+  // 左侧预览两个 tab 共用：详情看「已落模型」的样子，外观看「草稿」的样子。
+  const displayGlyph = tab === 'appearance' ? previewGlyph : nodeGlyph(model, node);
+  const identity = tab === 'appearance' ? selected : nodeComponent(model, node);
   const q = iconQuery.trim().toLowerCase();
   const glyphs = q ? GLYPH_LIST.filter((g) => g.id.toLowerCase().includes(q) || g.label.toLowerCase().includes(q)) : GLYPH_LIST;
   const pickComponent = (comp?: { id: string; icon: string }) => {
@@ -130,7 +133,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
       <div className="dd-modal" role="dialog" aria-modal="true" aria-label={`编辑 ${node.name}`} ref={modalRef}>
         <div className="dd-modal-head">
           <span className="dd-modal-head-glyph">
-            <Glyph id={previewGlyph} size={26} />
+            <Glyph id={displayGlyph} size={26} />
           </span>
           <div className="dd-modal-titles">
             <h2>编辑实体</h2>
@@ -155,6 +158,31 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
         )}
 
         <div className="dd-modal-body">
+          <div className="dd-modal-preview">
+            <div className="dd-modal-preview-label">预览</div>
+            <div className="dd-modal-canvas">
+              <div className="dd-modal-preview-card">
+                <span className="dd-node-glyph">
+                  <Glyph id={displayGlyph} size={22} />
+                </span>
+                <span className="dd-node-arch-text">
+                  <span className="dd-node-kind">{NODE_TYPES[node.type].label}</span>
+                  <span className="dd-node-name">{node.name}</span>
+                </span>
+              </div>
+            </div>
+            <div className="dd-modal-meta">
+              <span className="dd-modal-badge">{NODE_TYPES[node.type].label}</span>
+              {identity && <span className="dd-modal-badge alt">{identity.name}</span>}
+            </div>
+            <p className="dd-modal-desc">{identity?.description ?? '按类型默认外观。'}</p>
+            <p className="dd-modal-note">
+              {tab === 'appearance'
+                ? '外观是组件身份的快照：换身份会同步图标，也可单独直挑图标。'
+                : '左侧为实时预览，编辑会即时反映在这里。'}
+            </p>
+          </div>
+
           {tab === 'details' ? (
             <div className="dd-modal-form dd-nodeeditor-details">
               <Section title="名称">
@@ -198,82 +226,60 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                     ))}
                   </select>
                   <NodePicker model={model} nodes={targets} value={connectTarget} onChange={setConnectTarget} placeholder="选择终点实体…" />
+                  <button className="dd-primary dd-connect-btn" onClick={addConnection} disabled={!connectTarget}>
+                    连接
+                  </button>
                 </div>
-                <button className="dd-primary dd-block" onClick={addConnection} disabled={!connectTarget}>
-                  连接
-                </button>
               </Section>
 
               {error && <p className="dd-error">{error}</p>}
             </div>
           ) : (
-            <>
-              <div className="dd-modal-preview">
-                <div className="dd-modal-preview-label">预览</div>
-                <div className="dd-modal-canvas">
-                  <div className="dd-modal-preview-card">
-                    <span className="dd-node-glyph">
-                      <Glyph id={previewGlyph} size={22} />
-                    </span>
-                    <span className="dd-node-arch-text">
-                      <span className="dd-node-kind">{NODE_TYPES[node.type].label}</span>
-                      <span className="dd-node-name">{node.name}</span>
-                    </span>
+            <div className="dd-modal-form">
+              <div className="dd-modal-fields">
+                <div className="dd-modal-field">
+                  <label className="dd-field-label">组件身份</label>
+                  <select
+                    className="dd-input"
+                    value={componentId}
+                    onChange={(e) => pickComponent(options.find((c) => c.id === e.target.value))}
+                  >
+                    <option value="">按类型默认</option>
+                    {options.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="dd-modal-icons">
+                <div className="dd-modal-icons-head">
+                  <label className="dd-field-label">图标</label>
+                  <div className="dd-modal-icon-search">
+                    <SearchIcon size={14} />
+                    <input placeholder="搜索图标…" value={iconQuery} onChange={(e) => setIconQuery(e.target.value)} />
                   </div>
                 </div>
-                <div className="dd-modal-meta">
-                  <span className="dd-modal-badge">{NODE_TYPES[node.type].label}</span>
-                  {selected && <span className="dd-modal-badge alt">{selected.name}</span>}
-                </div>
-                <p className="dd-modal-desc">{selected?.description ?? '按类型默认外观。'}</p>
-                <p className="dd-modal-note">外观是组件身份的快照：换身份会同步图标，也可单独直挑图标。</p>
-              </div>
-              <div className="dd-modal-form">
-                <div className="dd-modal-fields">
-                  <div className="dd-modal-field">
-                    <label className="dd-field-label">组件身份</label>
-                    <select
-                      className="dd-input"
-                      value={componentId}
-                      onChange={(e) => pickComponent(options.find((c) => c.id === e.target.value))}
+                <div className="dd-modal-icon-grid" role="listbox" aria-label="图标">
+                  {glyphs.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      role="option"
+                      aria-selected={icon === g.id}
+                      className={`dd-glyph-cell${icon === g.id ? ' selected' : ''}`}
+                      onClick={() => setIcon(g.id)}
+                      title={g.label}
                     >
-                      <option value="">按类型默认</option>
-                      {options.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="dd-modal-icons">
-                    <div className="dd-modal-icons-head">
-                      <label className="dd-field-label">图标</label>
-                      <div className="dd-modal-icon-search">
-                        <SearchIcon size={14} />
-                        <input placeholder="搜索图标…" value={iconQuery} onChange={(e) => setIconQuery(e.target.value)} />
-                      </div>
-                    </div>
-                    <div className="dd-modal-icon-grid" role="listbox" aria-label="图标">
-                      {glyphs.map((g) => (
-                        <button
-                          key={g.id}
-                          type="button"
-                          role="option"
-                          aria-selected={icon === g.id}
-                          className={`dd-glyph-cell${icon === g.id ? ' selected' : ''}`}
-                          onClick={() => setIcon(g.id)}
-                          title={g.label}
-                        >
-                          <Glyph id={g.id} size={20} />
-                          <span className="dd-glyph-label">{g.label}</span>
-                        </button>
-                      ))}
-                      {glyphs.length === 0 && <div className="dd-modal-icon-empty">没有匹配的图标</div>}
-                    </div>
-                  </div>
+                      <Glyph id={g.id} size={20} />
+                      <span className="dd-glyph-label">{g.label}</span>
+                    </button>
+                  ))}
+                  {glyphs.length === 0 && <div className="dd-modal-icon-empty">没有匹配的图标</div>}
                 </div>
               </div>
-            </>
+            </div>
           )}
         </div>
 
