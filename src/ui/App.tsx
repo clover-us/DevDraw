@@ -1069,14 +1069,41 @@ export function App() {
     setContextMenu({ x: event.clientX, y: event.clientY, edgeId: edge.id });
   }, []);
 
+  // 新建发生在一个具体 scope 里时，实体要顺手挂进这个 scope（Database/Lifecycle --contains--> 实体）。
+  // 不挂的话：卡片立刻从当前视图消失、掉进「未归属」，看起来就像"没建成"。
+  const scopeParentFor = useCallback(
+    (type: NodeType): string | null => {
+      if (lens === 'er' && isErStructure(type) && activeErScope !== 'all' && activeErScope !== 'unassigned') return activeErScope;
+      if (lens === 'state-machine' && type === 'State' && activeSmScope !== 'all' && activeSmScope !== 'unassigned') return activeSmScope;
+      return null;
+    },
+    [lens, activeErScope, activeSmScope],
+  );
+
+  // 建节点 + 挂 scope 合成一次模型变更：撤销是一步，不会留下"有了节点没连线"的中间态。
+  const addNodeInScope = useCallback(
+    (type: NodeType, name: string, node: Model['nodes'][string], at?: { x: number; y: number }) => {
+      const id = newNodeId(type);
+      const parent = scopeParentFor(type);
+      const edgeId = parent ? newEdgeId('contains') : null;
+      setModel((m) => {
+        let next = applyPatchChecked(m, { op: 'add-node', id, node: { ...node, type, name } });
+        if (parent && edgeId) next = applyPatchChecked(next, { op: 'add-edge', id: edgeId, edge: { type: 'contains', from: parent, to: id } });
+        return next;
+      });
+      if (at) persistPosition(id, at);
+      return id;
+    },
+    [setModel, scopeParentFor, persistPosition],
+  );
+
   // 抽屉创建态：建节点并选中（选中即退出 createMode，落到只读详情）。
   const createNode = useCallback(
     (type: NodeType, name: string) => {
-      const id = newNodeId(type);
-      setModel((m) => applyPatchChecked(m, { op: 'add-node', id, node: { type, name, provenance: { by: 'human' } } }));
+      const id = addNodeInScope(type, name, { type, name, provenance: { by: 'human' } });
       selectNode(id);
     },
-    [setModel, selectNode],
+    [addNodeInScope, selectNode],
   );
 
   const menuItems = useMemo<MenuItem[]>(() => {
@@ -1164,14 +1191,12 @@ export function App() {
       const spot = quickCreate;
       setQuickCreate(null);
       if (!spot) return;
-      const id = newNodeId(comp.baseType);
-      setModel((m) => applyPatchChecked(m, { op: 'add-node', id, node: nodeFromComponent(comp) }));
-      persistPosition(id, centerAt(comp.baseType, comp.name, spot.flow));
+      const id = addNodeInScope(comp.baseType, comp.name, nodeFromComponent(comp), centerAt(comp.baseType, comp.name, spot.flow));
       setSelectedNode(id);
       setSelectedEdge(null);
       setCreateMode(false);
     },
-    [quickCreate, setModel, persistPosition, centerAt],
+    [quickCreate, addNodeInScope, centerAt],
   );
 
   const quickPlaceType = useCallback(
@@ -1179,10 +1204,8 @@ export function App() {
       const spot = quickCreate;
       setQuickCreate(null);
       if (!spot) return;
-      const id = newNodeId(type);
       const name = NODE_TYPES[type].label;
-      setModel((m) => applyPatchChecked(m, { op: 'add-node', id, node: { type, name, provenance: { by: 'human' } } }));
-      persistPosition(id, centerAt(type, name, spot.flow));
+      const id = addNodeInScope(type, name, { type, name, provenance: { by: 'human' } }, centerAt(type, name, spot.flow));
       setSelectedNode(id);
       setSelectedEdge(null);
       setCreateMode(false);
@@ -1191,24 +1214,22 @@ export function App() {
       if (lensDef.nodeTypes.includes(type)) setRenamingId(id);
       else setEditorNode({ id, tab: 'attrs' });
     },
-    [quickCreate, setModel, persistPosition, centerAt, lensDef],
+    [quickCreate, addNodeInScope, centerAt, lensDef],
   );
 
   // 空scope引导的「新建」：不依赖双击落点，直接放在当前视口中心。
   const placeCentered = useCallback(
     (type: NodeType) => {
       const flow = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-      const id = newNodeId(type);
       const name = NODE_TYPES[type].label;
-      setModel((m) => applyPatchChecked(m, { op: 'add-node', id, node: { type, name, provenance: { by: 'human' } } }));
-      persistPosition(id, centerAt(type, name, flow));
+      const id = addNodeInScope(type, name, { type, name, provenance: { by: 'human' } }, centerAt(type, name, flow));
       setSelectedNode(id);
       setSelectedEdge(null);
       setCreateMode(false);
       if (lensDef.nodeTypes.includes(type)) setRenamingId(id);
       else setEditorNode({ id, tab: 'attrs' });
     },
-    [screenToFlowPosition, setModel, persistPosition, centerAt, lensDef],
+    [screenToFlowPosition, addNodeInScope, centerAt, lensDef],
   );
 
   const changeEdgeMode = useCallback(
@@ -1395,15 +1416,12 @@ export function App() {
   // ── 组件库：点添加 / 拖入画布 / 自定义组件 CRUD（语义底座稳定，图标是表现层）──
   const addComponent = useCallback(
     (comp: ComponentDef, position?: { x: number; y: number }) => {
-      const id = newNodeId(comp.baseType);
-      const node = nodeFromComponent(comp);
-      setModel((m) => applyPatchChecked(m, { op: 'add-node', id, node }));
-      if (position) persistPosition(id, position);
+      const id = addNodeInScope(comp.baseType, comp.name, nodeFromComponent(comp), position);
       setSelectedNode(id);
       setSelectedEdge(null);
       setCreateMode(false);
     },
-    [setModel, persistPosition],
+    [addNodeInScope],
   );
 
   const onDragOver = useCallback((e: DragEvent) => {

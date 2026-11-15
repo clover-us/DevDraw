@@ -13,6 +13,7 @@ const NODE_PREFIX: Record<string, string> = {
   Service: 'svc',
   Database: 'db',
   Table: 'tbl',
+  RedisKey: 'k',
   Field: 'fld',
   Queue: 'q',
   Endpoint: 'ep',
