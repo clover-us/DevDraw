@@ -1260,7 +1260,7 @@ select.dd-input {
 .dd-field-item {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
   width: 100%;
   text-align: left;
   padding: 6px 9px;
@@ -1768,7 +1768,7 @@ select.dd-input {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 12px;
   padding: 5px 12px;
   cursor: pointer;
   border-left: 2px solid transparent;
@@ -1859,7 +1859,7 @@ select.dd-input {
   .dd-table-fields {
     display: grid;
     grid-template-columns: minmax(0, max-content) 22px minmax(0, 1fr) max-content;
-    column-gap: 7px;
+    column-gap: 12px;
   }
   .dd-table-empty {
     grid-column: 1 / -1;
@@ -1868,7 +1868,9 @@ select.dd-input {
     display: grid;
     grid-template-columns: subgrid;
     grid-column: 1 / -1;
-    gap: 0;
+    /* subgrid 行必须自带与父网格相同的列距：gap:0 会把父级 gutter 在行内塌掉，
+       名称和徽标会贴在一起。行距保持 0。 */
+    gap: 0 12px;
   }
   .dd-field-row > .dd-field-name {
     grid-column: 1;
