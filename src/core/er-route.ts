@@ -45,11 +45,6 @@ const LANE_STEP = 10;
 const BAND_GAP = 22;
 /** 卡片之间至少要留这么宽才开车道。 */
 const MIN_LANE = 26;
-/**
- * 横穿空当的最小宽度：小于这个值的缝不算"能穿"。
- * 0 = 只要有缝就穿（默认）；32 = 窄缝视为堵死，逼长边绕卡片边缘。
- */
-const MIN_PASSABLE_GAP = 32;
 
 export function routeFkPath(route: FkRoute): Pt[] {
   const { sx, sy, tx, ty, laneCount } = route;
@@ -102,19 +97,13 @@ export function routeFkPath(route: FkRoute): Pt[] {
   // 候选要保证在 [laneX, inX] 这段横穿范围内不碰到任何卡片（源列、目标列的卡不在此区间内）。
   const blockers = between.filter((c) => c.right > laneX && c.left < inX);
   const isFree = (y: number) => !blockers.some((c) => y > c.top - 2 && y < c.bottom + 2);
-  // 这条横带上下两侧的卡片各在哪：缝隙宽度 = 下面那张的上沿 − 上面那张的下沿。
-  const gapAt = (y: number) => {
-    const above = blockers.filter((c) => c.bottom <= y + 2).reduce((m, c) => Math.max(m, c.bottom), -Infinity);
-    const below = blockers.filter((c) => c.top >= y - 2).reduce((m, c) => Math.min(m, c.top), Infinity);
-    return below - above;
-  };
   const candidates: number[] = [];
   for (const c of between) candidates.push(c.top - BAND_GAP, c.bottom + BAND_GAP);
   candidates.push(
     Math.min(...between.map((c) => c.top)) - BAND_GAP,
     Math.max(...between.map((c) => c.bottom)) + BAND_GAP,
   );
-  const free = candidates.filter((y) => isFree(y) && gapAt(y) >= MIN_PASSABLE_GAP);
+  const free = candidates.filter(isFree);
   const cost = (y: number) => Math.abs(sy - y) + Math.abs(ty - y);
   const bestBand = free.length > 0 ? free.reduce((best, y) => (cost(y) < cost(best) ? y : best)) : undefined;
   // 同源字段的多条线叠在一条横带上会糊成一根，所以在空当里上下错开一点；
