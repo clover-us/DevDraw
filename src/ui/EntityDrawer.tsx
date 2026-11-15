@@ -14,7 +14,7 @@ import { edgeDependency, type SimulationResult } from '../core/simulate';
 import type { ComponentDef, DependencyMode, EdgeType, Model, ModelNode, NodeType } from '../core/types';
 import { GLYPH_LIST, Glyph } from './glyphs';
 import { FindingCard, MODE_INFO, MODES, nodeName } from './inspect';
-import { ArrowRightIcon, CloseIcon, LinkIcon, PlusIcon, TrashIcon } from './icons';
+import { ArrowRightIcon, CloseIcon, LinkIcon, PlusIcon, SimulationIcon, TraceIcon, TrashIcon } from './icons';
 
 interface EntityDrawerProps {
   model: Model;
@@ -32,6 +32,11 @@ interface EntityDrawerProps {
   onAnswer: (option: QuestionOption) => void;
   onChange: (next: Model) => void;
   onChangeMode: (edgeId: string, mode: DependencyMode) => void;
+  /** 当前失效源（架构镜片）：让抽屉里的「模拟失效」按钮显示选中态。 */
+  seeds: string[];
+  /** 推演入口可见化：不再只藏右键，选中节点就能直接模拟失效 / 追踪请求。 */
+  onToggleSeed: (id: string) => void;
+  onStartTrace: (id: string) => void;
   onClose: () => void;
 }
 
@@ -40,6 +45,9 @@ const EDGE_TYPE_LIST = Object.values(EDGE_TYPES);
 
 /** 这些架构实体可在抽屉里换组件身份 / 图标（语义底座不变）。 */
 const APPEARANCE_TYPES = new Set<NodeType>(['Service', 'Database', 'Queue', 'Endpoint', 'ExternalSystem', 'Actor']);
+
+/** 可作失效源的架构实体（与 App 的 SEEDABLE 一致）：抽屉里给它们可见的推演入口。 */
+const SIM_TYPES = new Set<NodeType>(['Service', 'Database', 'Queue', 'Endpoint', 'ExternalSystem', 'Actor']);
 
 function fieldsOf(model: Model, tableId: string): Array<[string, string]> {
   const out: Array<[string, string]> = [];
@@ -291,6 +299,28 @@ export function EntityDrawer(props: EntityDrawerProps) {
         <Section title="名称">
           <input className="dd-input" value={node.name} onChange={(e) => renameNode(id, e.target.value)} />
         </Section>
+
+        {lens.id === 'architecture' && SIM_TYPES.has(node.type) && (
+          <Section title="推演一下">
+            <div className="dd-drawer-reason">
+              <button
+                className={`dd-reason-btn${props.seeds.includes(id) ? ' on' : ''}`}
+                onClick={() => props.onToggleSeed(id)}
+                title="把它设为失效源，看谁跟着挂"
+              >
+                <SimulationIcon size={14} />
+                {props.seeds.includes(id) ? '已设为失效源' : '模拟失效'}
+              </button>
+              {(node.type === 'Actor' || node.type === 'Endpoint') && (
+                <button className="dd-reason-btn" onClick={() => props.onStartTrace(id)} title="从它出发，一步步走一遍请求">
+                  <TraceIcon size={14} />
+                  追踪请求
+                </button>
+              )}
+            </div>
+            <p className="dd-hint-text">思考是建模的质检：点死它看爆炸半径，或走一遍请求看分支与延迟。</p>
+          </Section>
+        )}
 
         {APPEARANCE_TYPES.has(node.type) && (
           <ComponentAppearance model={model} node={node} nodeId={id} updateNode={updateNode} />

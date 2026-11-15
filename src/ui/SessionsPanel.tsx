@@ -8,6 +8,7 @@ import type { Model } from '../core/types';
 import { getLens, projectLens } from '../core/registry';
 import { simulate } from '../core/simulate';
 import { diffSession, type ReasoningSession, type SessionBlast } from '../core/session';
+import { replayTrace, type TraceReplay } from '../core/trace';
 import { Metric } from './inspect';
 import { CloseIcon, SessionsIcon, TrashIcon } from './icons';
 
@@ -43,7 +44,8 @@ function currentOf(model: Model, session: ReasoningSession) {
       affectedEntries: result.blastRadius.affectedEntries,
     };
   }
-  return { findings, blast };
+  const trace: TraceReplay | undefined = session.trace ? replayTrace(model, session.trace) : undefined;
+  return { findings, blast, trace };
 }
 
 export function SessionsPanel({ model, sessions, activeId, onArchive, onOpen, onDelete, onClose }: SessionsPanelProps) {
@@ -101,6 +103,7 @@ export function SessionsPanel({ model, sessions, activeId, onArchive, onOpen, on
                     <span className="dd-session-meta">
                       {lensLabel(s.lens)} · {formatTime(s.createdAt)}
                       {s.blast ? ` · 当时 ${s.blast.failed} 失效 / ${s.blast.degraded} 降级` : ''}
+                      {s.trace ? ` · ${s.trace.hops.length} 跳追踪` : ''}
                       {errs > 0 ? ` · ${errs} 错误` : ''}
                       {qs > 0 ? ` · ${qs} 反问` : ''}
                     </span>
@@ -128,6 +131,20 @@ export function SessionsPanel({ model, sessions, activeId, onArchive, onOpen, on
                   <Metric label="当时的发现" value={active.findings.length} delta={diff.added.length - diff.resolved.length} />
                   <Metric label="现在新增" value={diff.added.length} delta={null} />
                   <Metric label="已修掉" value={diff.resolved.length} delta={null} />
+                </div>
+              )}
+
+              {diff.trace && active.trace && (
+                <div className="dd-drift-list">
+                  <div className="dd-drift-head">请求追踪对账</div>
+                  <div className={`dd-drift-row${diff.trace.broken > 0 || diff.trace.entryMissing ? ' sev-warning' : ' resolved'}`}>
+                    {diff.trace.entryMissing
+                      ? '入口节点已不在模型里——这条请求无从发起。'
+                      : diff.trace.broken > 0
+                        ? `${active.trace.hops.length} 跳里有 ${diff.trace.broken} 跳断了（边没了或两端变了）。`
+                        : `${active.trace.hops.length} 跳今天仍走得通。`}
+                    {diff.trace.latencyDelta !== 0 && ` 累计延迟 ${diff.trace.latencyDelta > 0 ? '+' : ''}${diff.trace.latencyDelta}ms。`}
+                  </div>
                 </div>
               )}
 
@@ -186,7 +203,8 @@ type Diff = NonNullable<ReturnType<typeof diffSession>>;
 /** 结论变得更糟（多了错误 / 爆炸半径变大）还是变好。 */
 function driftScore(d: Diff): number {
   const blast = d.blast ? Math.max(0, d.blast.failed) + Math.max(0, d.blast.degraded) : 0;
-  return d.added.length + d.changed.length + blast;
+  const trace = d.trace ? d.trace.broken + (d.trace.entryMissing ? 1 : 0) : 0;
+  return d.added.length + d.changed.length + blast + trace;
 }
 
 function driftTone(d: Diff): string {

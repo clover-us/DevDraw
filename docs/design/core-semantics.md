@@ -19,6 +19,7 @@
     "n_payment":   { "type": "Service", "name": "支付服务", "attrs": { "replicas": 3 } },
     "n_risk":      { "type": "Service", "name": "风控服务" },
     "n_order_db":  { "type": "Database", "name": "订单库" },
+    "n_cache":     { "type": "Database", "name": "订单缓存", "attrs": { "tech": "Redis" } },
     "n_events":    { "type": "Queue", "name": "订单事件队列" },
     "n_notify":    { "type": "Service", "name": "通知服务" }
   },
@@ -27,6 +28,8 @@
     "e_order_pay":   { "type": "calls", "from": "n_order", "to": "n_payment", "attrs": { "dependency": "hard", "latencyMs": 120 } },
     "e_order_risk":  { "type": "calls", "from": "n_order", "to": "n_risk", "attrs": { "dependency": "soft", "fallback": "降级为事后人工审核" } },
     "e_order_db":    { "type": "writes", "from": "n_order", "to": "n_order_db" },
+    "e_order_cache": { "type": "reads", "from": "n_order", "to": "n_cache", "label": "查缓存", "attrs": { "when": "缓存命中", "dependency": "soft", "fallback": "缓存失效直接读库", "latencyMs": 2 } },
+    "e_order_db_read": { "type": "reads", "from": "n_order", "to": "n_order_db", "label": "读订单", "attrs": { "when": "缓存未命中", "latencyMs": 15 } },
     "e_order_evt":   { "type": "publishes", "from": "n_order", "to": "n_events", "attrs": { "dependency": "soft", "fallback": "本地 outbox 暂存" } },
     "e_evt_notify":  { "type": "subscribes", "from": "n_notify", "to": "n_events" }
   },
@@ -51,10 +54,11 @@
 
 ### 1.3 视图、场景与推演会话
 
-- `views.json`：每个视图 = `{ positions: {nodeId: {x,y}}, seeds?: string[], filter?, styleOverrides? }`。视图是模型的投影，删视图不丢语义。
+- `views.json`：每个视图 = `{ positions: {nodeId: {x,y}}, seeds?: string[], trace?: TraceScenario, filter?, styleOverrides? }`。视图是模型的投影，删视图不丢语义。
 - `seeds` = **当前镜片上的失效场景**（"谁挂了"的 what-if 假设）。
   - 它属于**视图**而不是模型：假设不是语义事实，所以永不写进 `model.json`——否则假设会污染模型、让 git diff 里出现"幽灵节点状态"。
   - 但它在切换镜片、刷新页面后仍在：同一个模型可以同时挂两个不同假设（架构镜片"支付服务挂了"、ER 镜片"orders 表没了"），互不干扰。
+- `trace` = **当前镜片上的请求追踪场景**（`{ entry, hops: [{edgeId, from, to, note?}] }`），与 `seeds` 同理：是 what-if 推演而非语义事实，归视图、不进 `model.json`，切镜片 / 刷新后仍在。会话存档时一并记下当时的累计延迟（见 §2.3、§2.6）。
 - `reasoning/<id>.json`：一次推演会话 = **场景 + 当时的结论**，不存模型快照：
 
 ```jsonc
@@ -104,6 +108,8 @@
 - **手动步进为主**（这才是推演）：每一跳由用户在出边中选择，边上的 latency/failureMode 标注 + 节点笔记辅助判断；自动枚举简单路径作为建议。
 - 分支 = 边的 `when` 条件（如「缓存未命中」），步进时选择。
 - 追踪可加注解（「这里是瓶颈」），保存为 ReasoningSession；注解可一键转为 `Assumption`/`Decision` 节点。
+
+> **已落地（v0.2.0）**：`src/core/trace.ts` 纯函数实现上述语义——`stepTrace` 手动步进、`traceOptions` 列出带 `when`/`latencyMs`/依赖模式的候选、`enumerateTracePaths` 枚举极大简单路径作建议、`traceLatency`/`traceBottleneck` 算延迟与瓶颈、`replayTrace` 在今天的模型上逐跳对账（ok/missing/moved）。严格沿出边：`subscribes` 方向是订阅方→队列，队列→消费者的续走不在 v1。UI 见 `src/ui/TracePanel.tsx`，画布高亮是 overlay（§2.2），注解沉淀复用推演器的 `recordPatch`。
 
 ### 2.4 核心价值循环：编辑 → 重演 → 对比
 
@@ -198,5 +204,54 @@
 
 - Obsidian 插件形态（点击跳转 DevDraw 视图）是否列入 v2——知识卡片机制已覆盖大部分价值。
 - 自定义类型注册表的 UI 深度（v1 只做「名称+颜色」级自定义？）。
+- **单发真实探测**：主动打一次真实调用、回读真实链路叠在模型上对账——见 §6.1 设计草案（v2+，开放）。
+
+### 6.1 设计草案：单发真实探测（v2+，开放讨论）
+
+> 状态：**草案，未确认**。源于 v0.2.0 请求追踪落地后的讨论。先记录想法，想清楚再动手；不纳入 M1/M2 范围（§8 范围纪律）。
+
+**定位**：不是被动采集 telemetry（那是 §2.5 推迟的「监控推导」），而是**主动单发探测**——打一次真实调用，看它*实际*走了哪条路，再把这条真实路径叠在你画的模型上对账。这是「活模型」最完整的形态：真实数据喂推演，而非把 DevDraw 变成监控。
+
+**与现有语义的血脉**（不是新造一套）：
+
+- **§2.3 手动步进的演进**：分支不再由人点选，真实调用揭示*它走了哪条*。面板里「建议路径」（枚举的、你以为会走的）旁摆「真实路径」（探测的、实际走的），两者对比本身就是功能。
+- **§2.6 对账的孪生**：§2.6 是设计期对账（同一模型前后两版）；这个是「**心智模型 ↔ 生产现实**」，由一发具体请求揭示。正是 §2.6 已预言的 M4 架构漂移推演器的「运行时」来源之一——同一套 diff，只是「现在」来自真实调用。
+- **§2.2 overlay**：真实数据同样是 overlay，绝不改模型本体；导入即 patch，走 `applyPatch` 单一咽喉点（撤销/重放/协同复用）。
+
+**机制**（硬前提：目标服务已接 OpenTelemetry 插桩 + 有可达的 tracing 后端）：
+
+1. DevDraw 生成一个全新的 W3C `traceparent`（内含唯一 trace-id）；
+2. 带这个 header 把请求打进入口服务；
+3. 已插桩的下游自动透传上下文、各自吐 span，全挂在同一 trace-id 下；
+4. 从 Jaeger / Tempo 按这个 id **只回读这一条 trace**——即这次调用的完整真实 span 树。
+
+DevDraw **不插桩任何东西**，只负责「发起 + 回读一条」。更轻的变体：不发请求，抓一个*刚发生*的调用的 trace-id（响应头/日志里）直接回读那一条。**硬事实**：没插桩的服务看不进去，黑盒只还一个响应，中间经过谁、各花多久无从得知——所以探测的前提是服务已插桩，否则只能看入口响应。
+
+**两个方向**（都经 `applyPatch` 落地）：
+
+- **反推**：面对不熟悉的系统，打一发，让真实 span **自动画出拓扑草稿**（span→节点/边）。这是除手绘、代码导入之外的**第三条建模来源——运行时导入**，模型从现实里长出来而非从假设里。`provenance` 已留口（复用 `code-import` 或新增 `trace-import`，待定）。
+- **对账**：已有模型，打一发，diff 真实 vs 画的，把偏差记成 `Decision`/`Assumption`。
+
+**对账摆什么**（只摆事实，不下结论——§2.6 的陷阱同样适用）：
+
+| 类别 | 含义 | 读者该问的问题 |
+|---|---|---|
+| 多出来的边 | 真实走了模型里没有的调用 | 是漏画的依赖，还是这次特有的旁路？ |
+| 没走的边 | 模型有、真实这次没走 | 是死代码，还是这次请求恰好没触发？ |
+| 分支不同 | 真实走的分支与标注 `when` 不符 | 标注的假设还成立吗？ |
+| 延迟偏差 | 实测耗时 vs 标注 `latencyMs` | 标注是估计，实测才是真的——要不要回填？ |
+
+> **陷阱（同 §2.6）**：真实没走某条边 ≠ 那条边该删——可能这次请求恰好没触发（如缓存命中分支）。对账只摆「这次调用走了/没走」，绝不替人下「模型错了」的结论。**模型顶嘴、人拍板**这条边界不变。
+
+**真正的工程量：身份映射**——模型节点 ↔ 真实服务名 ↔ endpoint URL 的对齐。组件身份机制（`ARCH_IDENTITY`）是基础。
+
+**边界（诚实，守 local-first 与 §8）**：
+
+- **前提**：服务已 OTel 插桩 + 可达后端，否则探测不了内部。
+- **形态**：浏览器直打任意请求 + 读后端会撞 CORS/鉴权，「主动」这步天然需要一个**本地小 companion**（CLI/agent）或日后的 Tauri 壳——这是它突破纯前端 local-first 的地方，需想清楚。
+- **副作用**：一次真实「下单」= 真出一个订单。探测打 **staging/测试环境**或只用只读/幂等探针，不盲打生产写接口。
+- **不做**：不变成 APM/采集器，不和 Jaeger 抢采集。价值在「真实数据落在**可推演的语义模型**上」——实测 p95 喂 what-if 模拟 + 质询 + 决策闭环，这是纯 trace 工具给不了的。
+
+**开放待定**：companion 形态（CLI/agent vs Tauri）、身份映射策略、measured `TraceScenario` 数据结构、与 M4 漂移推演器如何合并、是否新增 `provenance` 类型。
 
 已确认关闭：模拟深度（§2.5）、思路图谱取舍（§4）、开源策略（先私有，见 vision §1）。

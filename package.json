@@ -1,7 +1,7 @@
 {
   "name": "devdraw",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "description": "DevDraw · 研绘 — 面向开发者的推演画布：一个模型，多副镜片，会顶嘴的活模型",
   "scripts": {

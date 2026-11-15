@@ -131,3 +131,80 @@ describe('会话存储', () => {
     expect(deserializeViews(text)).toEqual(views);
   });
 });
+
+describe('请求追踪存档（§2.3）', () => {
+  const trace = {
+    entry: 'n_user',
+    hops: [
+      { edgeId: 'e_user_gw', from: 'n_user', to: 'n_gateway' },
+      { edgeId: 'e_gw_order', from: 'n_gateway', to: 'n_order', note: '8ms，正常' },
+      { edgeId: 'e_order_pay', from: 'n_order', to: 'n_payment', note: '这里是瓶颈' },
+    ],
+    latencyMs: 128,
+  };
+
+  it('自动命名用「谁的请求」；往返一致；trace 键在 blast 之后', () => {
+    const s = createSession({
+      ...base,
+      seeds: [],
+      seedNames: [],
+      trace,
+      traceEntryName: '用户',
+      now: new Date('2026-11-15T01:20:00'),
+    });
+    expect(s.name).toBe('用户 请求追踪 · 11-15 01:20');
+    const text = serializeSession(s);
+    const keys = Object.keys(JSON.parse(text) as Record<string, unknown>);
+    expect(keys).toEqual(['schemaVersion', 'id', 'name', 'createdAt', 'lens', 'seeds', 'findings', 'blast', 'trace']);
+    expect(deserializeSession(text)).toEqual(s);
+  });
+
+  it('失效场景优先于追踪命名（两者并存时）', () => {
+    const s = createSession({ ...base, trace, traceEntryName: '用户', now: new Date('2026-11-15T01:20:00') });
+    expect(s.name).toBe('支付服务 失效 · 11-15 01:20');
+  });
+
+  it('对账：断跳数 + 延迟差值（现在 - 当时）+ 入口是否还在', () => {
+    const s = createSession({ ...base, seeds: [], seedNames: [], trace, traceEntryName: '用户' });
+    const diff = diffSession(s, {
+      findings: [],
+      trace: {
+        entryMissing: false,
+        hops: [
+          { edgeId: 'e_user_gw', status: 'ok' },
+          { edgeId: 'e_gw_order', status: 'ok' },
+          { edgeId: 'e_order_pay', status: 'missing' },
+        ],
+        broken: 1,
+        totalLatencyMs: 8,
+      },
+    });
+    expect(diff.trace).toEqual({ broken: 1, latencyDelta: -120, entryMissing: false });
+  });
+
+  it('没有追踪时 trace 对账为 null；老存档（无 trace 字段）照常读', () => {
+    const s = createSession(base);
+    expect(diffSession(s, { findings: [] }).trace).toBeNull();
+    const legacy = serializeSession(s);
+    expect(deserializeSession(legacy).trace).toBeUndefined();
+  });
+
+  it('坏 trace 数据被过滤：缺字段的跳丢弃、空注解不存', () => {
+    const s = createSession({ ...base, trace, traceEntryName: '用户' });
+    const raw = JSON.parse(serializeSession(s));
+    raw.trace.hops = [
+      { edgeId: 'e_user_gw', from: 'n_user', to: 'n_gateway', note: '' },
+      { edgeId: 'e_bad' }, // 缺 from/to → 丢弃
+      'not-a-hop',
+    ];
+    const back = deserializeSession(JSON.stringify(raw));
+    expect(back.trace?.hops).toEqual([{ edgeId: 'e_user_gw', from: 'n_user', to: 'n_gateway' }]);
+  });
+
+  it('追踪场景随 views.json 持久化，刷新不丢', () => {
+    const views = {
+      architecture: { positions: {}, trace: { entry: 'n_user', hops: trace.hops } },
+    };
+    expect(deserializeViews(serializeViews(views))).toEqual(views);
+  });
+});

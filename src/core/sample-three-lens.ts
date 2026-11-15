@@ -18,6 +18,7 @@ const ARCH_IDENTITY: Record<string, string> = {
   n_payment: 'service',
   n_risk: 'sentinel',
   n_order_db: 'mysql',
+  n_cache: 'redis',
   n_events: 'kafka',
   n_notify: 'service',
 };

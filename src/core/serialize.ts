@@ -4,6 +4,7 @@
  * 目标：没改语义就绝不产生 diff 噪音；map 按键排序，增删不引起位移。
  */
 import type { Model, ModelEdge, ModelNode } from './types';
+import type { TraceScenario } from './trace';
 
 /** 递归把对象的键按字典序排序（数组保持顺序），保证序列化确定性。 */
 function sortKeys<T>(value: T): T {
@@ -57,6 +58,8 @@ export interface LensView {
   styleOverrides?: Record<string, unknown>;
   /** 当前失效场景（what-if 假设），刷新后不丢。 */
   seeds?: string[];
+  /** 当前请求追踪场景（架构镜片，§2.3）。与 seeds 同理：假设不是语义事实，不进 model.json。 */
+  trace?: TraceScenario;
   /** ER 里被手动折起来的表（true=折叠）。没记过的表按字段数自动判断。 */
   folded?: Record<string, boolean>;
 }

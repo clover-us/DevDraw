@@ -36,6 +36,8 @@ export interface DevDrawNodeData extends Record<string, unknown> {
   isSeed: boolean;
   highlighted: boolean;
   selected: boolean;
+  /** 请求追踪 overlay（§2.3）：入口 / 已走过 / 当前所在。与失效着色互不干扰。 */
+  traceRole?: 'entry' | 'visited' | 'current';
   dataType?: string;
   nullable?: boolean;
   keyRole?: string;
@@ -202,6 +204,7 @@ export function DevDrawNode({ id, data }: NodeProps) {
     d.isSeed ? 'seed' : '',
     d.highlighted ? 'highlighted' : '',
     d.selected ? 'selected' : '',
+    d.traceRole ? `trace-${d.traceRole}` : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -357,6 +360,8 @@ export function DevDrawNode({ id, data }: NodeProps) {
           />
         </span>
         {d.isSeed && <span className="dd-seed-badge">失效源</span>}
+        {d.traceRole === 'entry' && <span className="dd-trace-badge">入口</span>}
+        {d.traceRole === 'current' && <span className="dd-trace-badge">当前</span>}
       </div>
     );
   }
@@ -391,6 +396,9 @@ export interface DevDrawEdgeData extends Record<string, unknown> {
   label?: string;
   impacted: boolean;
   highlighted: boolean;
+  /** 请求追踪 overlay：这条边是走过的第几跳（1 起）。 */
+  traced?: boolean;
+  traceStep?: number;
   cardinality?: string;
   keyCol?: string;
   event?: string;
@@ -527,7 +535,7 @@ export function DevDrawEdge(props: EdgeProps) {
     cls = `mode-${d.mode}`;
     text = d.label || d.edgeType;
   }
-  cls += `${d.impacted ? ' impacted' : ''}${d.highlighted ? ' highlighted' : ''}${selected ? ' selected' : ''}`;
+  cls += `${d.impacted ? ' impacted' : ''}${d.highlighted ? ' highlighted' : ''}${selected ? ' selected' : ''}${d.traced ? ' traced' : ''}`;
 
   // 字段级外键：基数拆成两端的小标记，紧贴各自那根线出门/进门的拐角。
   // 同源多条线按 lane 往右错开，标记不会叠在一起。
@@ -578,6 +586,7 @@ export function DevDrawEdge(props: EdgeProps) {
               d.onSelect(id);
             }}
           >
+            {d.traced && d.traceStep !== undefined && <span className="dd-trace-step">{d.traceStep}</span>}
             {text}
           </div>
         )}

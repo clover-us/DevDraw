@@ -9,6 +9,7 @@
  */
 import type { LensId } from './registry/types';
 import type { Finding, FindingSeverity } from './reasoners/types';
+import type { TraceHop, TraceReplay } from './trace';
 import { newSessionId } from './id';
 
 export const SESSION_SCHEMA_VERSION = 1;
@@ -27,6 +28,17 @@ export interface SessionBlast {
   affectedEntries: string[];
 }
 
+/**
+ * 存档里的请求追踪（§2.3）：场景（入口 + 走过的跳 + 注解）+ 当时的结论（累计延迟）。
+ * 与 seeds/blast 同一取舍：不存模型快照，重放时逐跳核对「这一跳今天还成立吗」。
+ */
+export interface SessionTrace {
+  entry: string;
+  hops: TraceHop[];
+  /** 当时的累计延迟（结论，同 blast 的地位）。 */
+  latencyMs: number;
+}
+
 export interface ReasoningSession {
   schemaVersion: typeof SESSION_SCHEMA_VERSION;
   id: string;
@@ -40,6 +52,8 @@ export interface ReasoningSession {
   findings: SessionFinding[];
   /** 当时的爆炸半径。 */
   blast?: SessionBlast;
+  /** 当时的请求追踪（架构镜片）。 */
+  trace?: SessionTrace;
 }
 
 /** 把推演器的 Finding 压成可存档的摘要。 */
@@ -52,13 +66,18 @@ function stamp(now: Date): string {
   return `${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
-/** 自动取名：有场景就用「谁失效」，否则用镜片名，都带时间戳。 */
+/** 自动取名：有失效场景就用「谁失效」，有追踪就用「谁的请求」，否则用镜片名，都带时间戳。 */
 export function sessionName(input: {
   lensLabel: string;
   seedNames: string[];
+  traceEntryName?: string;
   now: Date;
 }): string {
-  const head = input.seedNames.length ? `${input.seedNames.join(' + ')} 失效` : `${input.lensLabel} 快照`;
+  const head = input.seedNames.length
+    ? `${input.seedNames.join(' + ')} 失效`
+    : input.traceEntryName
+      ? `${input.traceEntryName} 请求追踪`
+      : `${input.lensLabel} 快照`;
   return `${head} · ${stamp(input.now)}`;
 }
 
@@ -69,18 +88,23 @@ export function createSession(input: {
   seedNames: string[];
   findings: Finding[];
   blast?: SessionBlast;
+  trace?: SessionTrace;
+  traceEntryName?: string;
   now?: Date;
 }): ReasoningSession {
   const now = input.now ?? new Date();
   return {
     schemaVersion: SESSION_SCHEMA_VERSION,
     id: newSessionId(now.getTime()),
-    name: sessionName({ lensLabel: input.lensLabel, seedNames: input.seedNames, now }),
+    name: sessionName({ lensLabel: input.lensLabel, seedNames: input.seedNames, traceEntryName: input.traceEntryName, now }),
     createdAt: now.toISOString(),
     lens: input.lens,
     seeds: [...input.seeds],
     findings: snapshotFindings(input.findings),
     ...(input.blast ? { blast: { ...input.blast, affectedEntries: [...input.blast.affectedEntries] } } : {}),
+    ...(input.trace
+      ? { trace: { entry: input.trace.entry, hops: input.trace.hops.map((h) => ({ ...h })), latencyMs: input.trace.latencyMs } }
+      : {}),
   };
 }
 
@@ -100,6 +124,18 @@ export function serializeSession(session: ReasoningSession): string {
       failed: session.blast.failed,
       degraded: session.blast.degraded,
       affectedEntries: session.blast.affectedEntries,
+    };
+  }
+  if (session.trace) {
+    ordered.trace = {
+      entry: session.trace.entry,
+      hops: session.trace.hops.map((h) => ({
+        edgeId: h.edgeId,
+        from: h.from,
+        to: h.to,
+        ...(h.note ? { note: h.note } : {}),
+      })),
+      latencyMs: session.trace.latencyMs,
     };
   }
   return `${JSON.stringify(ordered, null, 2)}\n`;
@@ -135,6 +171,22 @@ export function deserializeSession(text: string): ReasoningSession {
           },
         }
       : {}),
+    ...(raw.trace && typeof raw.trace.entry === 'string' && Array.isArray(raw.trace.hops)
+      ? {
+          trace: {
+            entry: raw.trace.entry,
+            hops: raw.trace.hops
+              .filter((h) => typeof h?.edgeId === 'string' && typeof h?.from === 'string' && typeof h?.to === 'string')
+              .map((h) => ({
+                edgeId: h.edgeId,
+                from: h.from,
+                to: h.to,
+                ...(typeof h.note === 'string' && h.note ? { note: h.note } : {}),
+              })),
+            latencyMs: Number(raw.trace.latencyMs) || 0,
+          },
+        }
+      : {}),
   };
 }
 
@@ -147,6 +199,8 @@ export function sessionFileName(id: string): string {
 export interface SessionNow {
   findings: SessionFinding[];
   blast?: SessionBlast;
+  /** 存档含追踪时，用当前模型重放的结果（replayTrace）。 */
+  trace?: TraceReplay;
 }
 
 export interface SessionDiff {
@@ -158,6 +212,8 @@ export interface SessionDiff {
   changed: { id: string; title: string; from: FindingSeverity; to: FindingSeverity }[];
   /** 爆炸半径的变化（现在 - 当时）；任一侧没有场景就是 null。 */
   blast: { failed: number; degraded: number; entries: number } | null;
+  /** 追踪的对账：断了几跳、延迟差值（现在 - 当时）、入口是否还在。任一侧没有就是 null。 */
+  trace: { broken: number; latencyDelta: number; entryMissing: boolean } | null;
 }
 
 /** 存档 vs 现在：模型改过之后，这个判断还站得住吗。 */
@@ -187,7 +243,16 @@ export function diffSession(session: ReasoningSession, now: SessionNow): Session
         }
       : null;
 
-  return { added, resolved, changed, blast };
+  const trace =
+    session.trace && now.trace
+      ? {
+          broken: now.trace.broken,
+          latencyDelta: now.trace.totalLatencyMs - session.trace.latencyMs,
+          entryMissing: now.trace.entryMissing,
+        }
+      : null;
+
+  return { added, resolved, changed, blast, trace };
 }
 
 /** 会话列表按时间倒序（新的在上）。 */

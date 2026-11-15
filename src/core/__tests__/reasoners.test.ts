@@ -16,7 +16,7 @@ const byId = (findings: Finding[], id: string) => findings.find((f) => f.id === 
 const option = (f: Finding | undefined, id: string) => f?.question?.options.find((o) => o.id === id);
 
 describe('镜片注册表 / 投影', () => {
-  it('架构镜片投影 == spike 原模型（8 节点 7 边，跨镜片边隐藏）', () => {
+  it('架构镜片投影 == spike 原模型（9 节点 9 边，跨镜片边隐藏）', () => {
     const p = projectLens(M, getLens('architecture'));
     expect(Object.keys(p.nodes).sort()).toEqual(Object.keys(sampleModel.nodes).sort());
     expect(Object.keys(p.edges).sort()).toEqual(Object.keys(sampleModel.edges).sort());

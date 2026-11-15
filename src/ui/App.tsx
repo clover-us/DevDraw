@@ -42,10 +42,21 @@ import { newEdgeId, newNodeId } from '../core/id';
 import { layoutProjection, NODE_WIDTH, nodeHeight, type Positions } from '../core/layout';
 import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
 import type { QuestionOption } from '../core/reasoners/types';
+import { findRecord, recordPatch } from '../core/reasoners/util';
 import { connectableEdgeTypes, getLens, LENSES, NODE_TYPES, projectLens, type LensId } from '../core/registry';
 import { threeLensPositions } from '../core/sample-three-lens';
 import { createSession, type ReasoningSession } from '../core/session';
 import { edgeDependency, simulate, type SimulationResult } from '../core/simulate';
+import {
+  annotateHop,
+  currentNode,
+  startTrace,
+  stepTrace,
+  traceLatency,
+  tracePathNodes,
+  undoTrace,
+  type TraceScenario,
+} from '../core/trace';
 import type { ComponentDef, DependencyMode, EdgeType, Model, NodeType } from '../core/types';
 import { ComponentEditor } from './ComponentEditor';
 import { COMPONENT_MIME, ComponentLibrary } from './ComponentLibrary';
@@ -53,6 +64,7 @@ import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData, type FieldRow } from './components';
 import { EdgePicker } from './EdgePicker';
 import { EntityDrawer } from './EntityDrawer';
+import { ReasoningNudge } from './ReasoningNudge';
 import { FitFrameIcon, LayoutIcon, MaximizeIcon, MinimizeIcon, MinusIcon, PlusIcon, RedoIcon, UndoIcon } from './icons';
 import { NavPanel } from './NavPanel';
 import { NavRail, type NavSection } from './NavRail';
@@ -60,6 +72,7 @@ import { QuickCreate } from './QuickCreate';
 import { SessionsPanel } from './SessionsPanel';
 import { SimulationPanel } from './SimulationPanel';
 import { StorageBar } from './StorageBar';
+import { TracePanel } from './TracePanel';
 import { useTheme } from './theme';
 import { useProject } from './useProject';
 
@@ -67,7 +80,7 @@ const nodeTypes = { devdraw: DevDrawNode };
 const edgeTypes = { devdraw: DevDrawEdge };
 
 const HINTS: Record<LensId, string> = {
-  architecture: '双击空白新建 · 从圆点拖出连线再选语义 · 双击改名 · 右键更多 · 点实体/边在右侧编辑',
+  architecture: '双击空白新建 · 拖出连线选语义 · 双击改名 · 选中节点可模拟失效 / 追踪请求 · 画完推一推，模型会顶嘴',
   er: '双击空白新建表 · 拖出外键 · 双击改名 · 点表内字段看改列牵连 · 红色外键=N:M 缺中间表',
   'state-machine': '双击空白新建状态 · 从一个状态拖到另一个画迁移 · 双击改名 · 红色迁移=缺服务',
 };
@@ -148,6 +161,16 @@ export function App() {
   const { screenToFlowPosition, zoomIn, zoomOut, fitView } = useReactFlow();
   const [lens, setLens] = useState<LensId>('architecture');
   const [seeds, setSeeds] = useState<string[]>([]);
+  // 请求追踪场景（§2.3）：和 seeds 一样是 what-if 假设，住在 views.architecture.trace，不进 model.json。
+  const [trace, setTrace] = useState<TraceScenario | null>(null);
+  // 推演邀请（质检条）是否被用户关掉：记在 localStorage，关掉不再打扰（推演入口别处一直都在）。
+  const [nudgeDismissed, setNudgeDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('devdraw-nudge-off') === '1';
+    } catch {
+      return false;
+    }
+  });
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [activeFinding, setActiveFinding] = useState<string | null>(null);
@@ -198,6 +221,7 @@ export function App() {
   // 项目加载完：把架构镜片存的场景恢复回来 —— what-if 假设不该因为刷新就消失。
   useEffect(() => {
     setSeeds(project.views['architecture']?.seeds ?? []);
+    setTrace(project.views['architecture']?.trace ?? null);
     setBaseline(null);
     setActiveSessionId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -288,6 +312,25 @@ export function App() {
     return set;
   }, [result]);
 
+  // 请求追踪 overlay（§2.3）：入口 / 已走过 / 当前。和失效推演一样只是画布上的高亮，绝不改模型。
+  const traceRoles = useMemo(() => {
+    const out: Record<string, 'entry' | 'visited' | 'current'> = {};
+    if (lens !== 'architecture' || !trace) return out;
+    for (const id of tracePathNodes(trace)) out[id] = 'visited';
+    out[trace.entry] = 'entry';
+    out[currentNode(trace)] = 'current';
+    return out;
+  }, [lens, trace]);
+  // 每条走过的边标第几跳（成环时同一条边可能出现多次，取首次）。
+  const traceSteps = useMemo(() => {
+    const out: Record<string, number> = {};
+    if (lens !== 'architecture' || !trace) return out;
+    trace.hops.forEach((h, i) => {
+      if (out[h.edgeId] === undefined) out[h.edgeId] = i + 1;
+    });
+    return out;
+  }, [lens, trace]);
+
   // 每副镜片的错误/反问计数（顶部标签小红点，引导用户去看"顶嘴"）
   const lensBadges = useMemo(() => {
     const out: Record<string, number> = {};
@@ -295,6 +338,11 @@ export function App() {
     return out;
   }, [model]);
   const findingsBadge = findings.filter((f) => f.severity === 'error' || f.severity === 'question').length;
+
+  // 质检条用的「体检结果」：架构推演器的单点发现（spof:*）。第一个单点拿来做一键演示。
+  const spofFindings = useMemo(() => findings.filter((f) => f.id.startsWith('spof:')), [findings]);
+  const demoNodeId = spofFindings[0]?.nodeIds?.[0] ?? null;
+  const demoNodeName = demoNodeId ? (model.nodes[demoNodeId]?.name ?? null) : null;
 
   const positionFor = useCallback(
     (id: string): { x: number; y: number } => {
@@ -615,6 +663,7 @@ export function App() {
           componentLabel: nodeComponent(model, n)?.name,
           state: result?.states[id] ?? 'ok',
           isSeed: seeds.includes(id),
+          traceRole: traceRoles[id],
           highlighted: highlightNodes.has(id),
           selected: selectedNode === id,
           dataType: typeof n.attrs?.dataType === 'string' ? n.attrs.dataType : undefined,
@@ -642,7 +691,7 @@ export function App() {
         },
         draggable: true,
       })),
-    [projection, positionFor, result, seeds, highlightNodes, selectedNode, fieldCount, selectNode, renamingId, renamingFieldId, commitRename, cancelRename, startFieldRename, commitFieldRename, cancelFieldRename, model, tableFolds, toggleFold],
+    [projection, positionFor, result, seeds, traceRoles, highlightNodes, selectedNode, fieldCount, selectNode, renamingId, renamingFieldId, commitRename, cancelRename, startFieldRename, commitFieldRename, cancelFieldRename, model, tableFolds, toggleFold],
   );
 
   // 外键边 → 具体字段：父表键列在哪一行、子表外键列在哪一行。渲染（handle）与拖线都读这份。
@@ -759,6 +808,8 @@ export function App() {
             mode: edgeDependency(e),
             label: e.label,
             impacted: impactedEdges.has(id),
+            traced: traceSteps[id] !== undefined,
+            traceStep: traceSteps[id],
             highlighted: highlightEdges.has(id),
             cardinality: e.attrs?.cardinality,
             keyCol: e.attrs?.key,
@@ -775,7 +826,7 @@ export function App() {
           },
         };
       }),
-    [projection, model, fkAnchors, edgeRouting, impactedEdges, highlightEdges, selectEdge, selectedEdge, lens, cardRects],
+    [projection, model, fkAnchors, edgeRouting, impactedEdges, traceSteps, highlightEdges, selectEdge, selectedEdge, lens, cardRects],
   );
 
   // 受控画布：onNodesChange/onEdgesChange 实时应用拖拽/选择变更（修复"拖动落地才动"）。
@@ -810,6 +861,70 @@ export function App() {
     [seeds, lens, applySeeds],
   );
 
+  const switchLens = useCallback(
+    (id: LensId) => {
+      setLens(id);
+      setSelectedEdge(null);
+      setSelectedNode(null);
+      setActiveFinding(null);
+      setCreateMode(false);
+      setRenamingId(null);
+      setRenamingFieldId(null);
+      // 每个镜片有自己的场景：切过去就该看见那个镜片上次在推演的东西。
+      setSeeds(project.views[id]?.seeds ?? []);
+      setTrace(project.views[id]?.trace ?? null);
+      setBaseline(null);
+    },
+    [project.views],
+  );
+
+  // ── 请求追踪（§2.3）：场景和 seeds 一样是 what-if 假设，写进 views 而非 model ──
+  const applyTrace = useCallback(
+    (next: TraceScenario | null, forLens: LensId) => {
+      setTrace(next);
+      setViews((v) => ({ ...v, [forLens]: { ...(v[forLens] ?? { positions: {} }), trace: next ?? undefined } }));
+    },
+    [setViews],
+  );
+
+  // 从 Actor/Endpoint 起一条追踪：永远落在架构镜片（请求路径只在那副镜片里有意义）。
+  const startTraceFrom = useCallback(
+    (entry: string) => {
+      const target: LensId = 'architecture';
+      if (lens !== target) switchLens(target);
+      const scenario = startTrace(model, entry);
+      if (scenario) applyTrace(scenario, target);
+      setSection('trace');
+      setNavExpanded(true);
+    },
+    [lens, model, switchLens, applyTrace],
+  );
+
+  // ── 推演邀请（质检条）：把「思考是建模的质检」落到第一屏 ──
+  // 一键演示：把体检出的第一个单点设为失效源，直接看爆炸半径（此时 seeds 必为空，toggle 即添加）。
+  const nudgeDemo = useCallback(() => {
+    if (!demoNodeId) return;
+    toggleSeed(demoNodeId);
+    setSection('simulation');
+    setNavExpanded(true);
+  }, [demoNodeId, toggleSeed]);
+  const nudgeSimulate = useCallback(() => {
+    setSection('simulation');
+    setNavExpanded(true);
+  }, []);
+  const nudgeTrace = useCallback(() => {
+    setSection('trace');
+    setNavExpanded(true);
+  }, []);
+  const dismissNudge = useCallback(() => {
+    setNudgeDismissed(true);
+    try {
+      localStorage.setItem('devdraw-nudge-off', '1');
+    } catch {
+      /* 隐私模式等写不进就算了，本次会话内仍然生效 */
+    }
+  }, []);
+
   // 右键：恢复它该有的样子——列出能对**这个节点**做的事（设为失效源只是其中一项）。
   const onNodeContextMenu: NodeMouseHandler = useCallback((event, node) => {
     event.preventDefault();
@@ -843,6 +958,14 @@ export function App() {
         },
       });
     }
+    if (lens === 'architecture' && (node.type === 'Actor' || node.type === 'Endpoint')) {
+      items.push({
+        key: 'trace',
+        label: '追踪请求',
+        hint: '一步步走',
+        onSelect: () => startTraceFrom(id),
+      });
+    }
     items.push({ key: 'edit', label: '编辑详情', hint: '右侧', onSelect: () => selectNode(id) });
     items.push({
       key: 'rename',
@@ -855,7 +978,7 @@ export function App() {
     });
     items.push({ key: 'delete', label: '删除', tone: 'danger', onSelect: () => deleteNode(id) });
     return items;
-  }, [contextMenu, model, lens, seeds, toggleSeed, selectNode, deleteNode]);
+  }, [contextMenu, model, lens, seeds, toggleSeed, startTraceFrom, selectNode, deleteNode]);
 
   // 双击空白：就地新建（组件或空白类型），落在鼠标处。
   const openQuickCreate = useCallback(
@@ -929,22 +1052,6 @@ export function App() {
     setModel((m) => applyPatches(m, option.patches));
   }, []);
 
-  const switchLens = useCallback(
-    (id: LensId) => {
-      setLens(id);
-      setSelectedEdge(null);
-      setSelectedNode(null);
-      setActiveFinding(null);
-      setCreateMode(false);
-      setRenamingId(null);
-      setRenamingFieldId(null);
-      // 每个镜片有自己的场景：切过去就该看见那个镜片上次在推演的东西。
-      setSeeds(project.views[id]?.seeds ?? []);
-      setBaseline(null);
-    },
-    [project.views],
-  );
-
   // 推演面板里点失效源：若不在架构镜片，先跳过去，让控制永远有可见反馈。
   const toggleSeedFromPanel = useCallback(
     (id: string) => {
@@ -962,6 +1069,75 @@ export function App() {
     setBaseline(null);
   }, [applySeeds, lens]);
 
+  // 追踪的其余操作（步进/退跳/注解/建议路径/沉淀知识节点）都建立在上面的 applyTrace 之上。
+  const stepTraceEdge = useCallback(
+    (edgeId: string) => {
+      if (!trace) return;
+      const next = stepTrace(model, trace, edgeId);
+      if (next) applyTrace(next, lens);
+    },
+    [trace, model, lens, applyTrace],
+  );
+
+  const undoTraceHop = useCallback(() => {
+    if (!trace) return;
+    applyTrace(undoTrace(trace), lens);
+  }, [trace, lens, applyTrace]);
+
+  const clearTrace = useCallback(() => applyTrace(null, lens), [applyTrace, lens]);
+
+  const annotateTraceHop = useCallback(
+    (index: number, note: string) => {
+      if (!trace) return;
+      applyTrace(annotateHop(trace, index, note), lens);
+    },
+    [trace, lens, applyTrace],
+  );
+
+  // 点建议路径：若当前已走的是它的前缀，就接着走（保住已有注解）；否则从入口重走。
+  const walkTracePath = useCallback(
+    (edgeIds: string[]) => {
+      if (!trace) return;
+      const isPrefix = trace.hops.length <= edgeIds.length && trace.hops.every((h, i) => edgeIds[i] === h.edgeId);
+      let scenario: TraceScenario = isPrefix ? trace : startTrace(model, trace.entry) ?? trace;
+      for (const id of edgeIds.slice(isPrefix ? trace.hops.length : 0)) {
+        const next = stepTrace(model, scenario, id);
+        if (!next) break;
+        scenario = next;
+      }
+      applyTrace(scenario, lens);
+    },
+    [trace, model, lens, applyTrace],
+  );
+
+  // 注解一键沉淀为知识节点：复用推演器的 recordPatch 机制（靠 attrs.about 定位，无需连边）。
+  // topic 带上 kind，决策与假设各自幂等——先记决策再记假设不会互相覆盖。
+  const recordTraceHop = useCallback(
+    (index: number, kind: 'Decision' | 'Assumption') => {
+      if (!trace) return;
+      const hop = trace.hops[index];
+      if (!hop) return;
+      const fromName = model.nodes[hop.from]?.name ?? hop.from;
+      const toName = model.nodes[hop.to]?.name ?? hop.to;
+      const edge = model.edges[hop.edgeId];
+      const latency = typeof edge?.attrs?.latencyMs === 'number' ? edge.attrs.latencyMs : undefined;
+      const when = typeof edge?.attrs?.when === 'string' ? edge.attrs.when : undefined;
+      const name = hop.note?.trim() || `第 ${index + 1} 跳：${fromName} → ${toName}`;
+      const detail =
+        `请求追踪 第 ${index + 1} 跳：${fromName} → ${toName}` +
+        (latency !== undefined ? ` · ${latency}ms` : '') +
+        (when ? ` · 当 ${when}` : '') +
+        (hop.note ? `。注解：${hop.note}` : '');
+      const topic = `trace:${hop.edgeId}:${kind}`;
+      const existing = findRecord(model, hop.to, topic);
+      const patch = existing
+        ? { op: 'update-node' as const, id: existing[0], name, attrs: { detail } }
+        : recordPatch(kind, newNodeId(kind), name, hop.to, topic, detail);
+      setModel((m) => applyPatchChecked(m, patch));
+    },
+    [trace, model, setModel],
+  );
+
   // ── 推演会话：把「场景 + 此刻的结论」存进 reasoning/<id>.json ──
   const archiveSession = useCallback(() => {
     const session = createSession({
@@ -977,21 +1153,27 @@ export function App() {
             affectedEntries: [...result.blastRadius.affectedEntries],
           }
         : undefined,
+      trace:
+        lens === 'architecture' && trace && trace.hops.length > 0
+          ? { entry: trace.entry, hops: trace.hops, latencyMs: traceLatency(model, trace) }
+          : undefined,
+      traceEntryName: trace ? model.nodes[trace.entry]?.name : undefined,
     });
     void project.saveSession(session);
     setActiveSessionId(session.id);
     setSection('sessions');
     setNavExpanded(true);
-  }, [lens, seeds, model, findings, result, project]);
+  }, [lens, seeds, model, findings, result, trace, project]);
 
   const openSession = useCallback(
     (session: ReasoningSession) => {
       if (session.lens !== lens) switchLens(session.lens);
       applySeeds(session.seeds, session.lens);
+      applyTrace(session.trace ? { entry: session.trace.entry, hops: session.trace.hops } : null, session.lens);
       setBaseline(null);
       setActiveSessionId(session.id);
     },
-    [lens, switchLens, applySeeds],
+    [lens, switchLens, applySeeds, applyTrace],
   );
 
   const removeSession = useCallback(
@@ -1005,6 +1187,7 @@ export function App() {
   const resetAll = useCallback(() => {
     project.loadSample();
     setSeeds([]);
+    setTrace(null);
     setBaseline(null);
     setSelectedEdge(null);
     setSelectedNode(null);
@@ -1071,6 +1254,17 @@ export function App() {
 
   const onModelChange = useCallback((next: Model) => setModel(next), [setModel]);
   const drawerOpen = createMode || selectedNode !== null || selectedEdge !== null;
+  // 质检条只在架构镜片的「建模态」出现：没在模拟/追踪、模型非空、且用户没关掉。
+  // 一旦开始推演（seeds 或 trace 非空）或已打开推演面板就让位，不挡正在进行的思考——
+  // 这样点横幅自己的「模拟失效 / 追踪请求」按钮时，横幅会 visibly 退场，给出明确反馈。
+  const showNudge =
+    lens === 'architecture' &&
+    !nudgeDismissed &&
+    seeds.length === 0 &&
+    !trace &&
+    section !== 'simulation' &&
+    section !== 'trace' &&
+    Object.keys(model.nodes).length > 0;
 
   // 撤销/重做快捷键：Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做；输入框内不拦截。
   useEffect(() => {
@@ -1147,6 +1341,7 @@ export function App() {
           expanded={navExpanded}
           findingsBadge={findingsBadge}
           simulationBadge={seeds.length}
+          traceBadge={trace?.hops.length ?? 0}
           sessionsBadge={project.sessions.length}
           theme={theme.theme}
           onSection={onSection}
@@ -1173,6 +1368,22 @@ export function App() {
               baseline={baseline}
               onToggleSeed={toggleSeedFromPanel}
               onClearScenario={clearScenario}
+              onSelectNode={selectNode}
+              onClose={collapseNav}
+            />
+          ) : section === 'trace' ? (
+            <TracePanel
+              model={model}
+              lens={lensDef}
+              trace={lens === 'architecture' ? trace : null}
+              onStart={startTraceFrom}
+              onStep={stepTraceEdge}
+              onWalkPath={walkTracePath}
+              onUndo={undoTraceHop}
+              onClear={clearTrace}
+              onAnnotate={annotateTraceHop}
+              onRecord={recordTraceHop}
+              onArchive={archiveSession}
               onSelectNode={selectNode}
               onClose={collapseNav}
             />
@@ -1276,11 +1487,23 @@ export function App() {
               zoomable
               style={{ width: 176, height: 116 }}
               nodeColor={(n) => {
-                const state = (n.data as DevDrawNodeData).state;
+                const data = n.data as DevDrawNodeData;
+                if (data.traceRole === 'current') return 'var(--info)';
+                const state = data.state;
                 return state === 'failed' ? 'var(--danger)' : state === 'degraded' ? 'var(--warning)' : 'var(--minimap-node)';
               }}
             />
           </ReactFlow>
+          {showNudge && (
+            <ReasoningNudge
+              spofCount={spofFindings.length}
+              demoNodeName={demoNodeName}
+              onDemo={nudgeDemo}
+              onSimulate={nudgeSimulate}
+              onTrace={nudgeTrace}
+              onDismiss={dismissNudge}
+            />
+          )}
           <div className="dd-canvas-status">
             {/* 还没落到磁盘上时，"打开文件夹"和"未持久化"是同一件事的两面，放一起看更顺：
                 左边给你解决办法，右边是当前状态。 */}
@@ -1380,6 +1603,9 @@ export function App() {
             onAnswer={answer}
             onChange={onModelChange}
             onChangeMode={changeEdgeMode}
+            seeds={seeds}
+            onToggleSeed={toggleSeed}
+            onStartTrace={startTraceFrom}
             onClose={closeDrawer}
           />
         )}

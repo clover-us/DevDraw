@@ -93,6 +93,17 @@ export function SimulationIcon(p: IconProps) {
   );
 }
 
+/** 请求追踪：一条带起点与箭头的路径（"一个请求沿调用链走一遍"）。 */
+export function TraceIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <circle cx="4.5" cy="17.5" r="2" />
+      <path d="M6.5 17.5H10a4 4 0 0 0 4-4v-3a4 4 0 0 1 4-4h1.5" />
+      <path d="M17 3.5l3 3-3 3" />
+    </svg>
+  );
+}
+
 /** 会话 / 存档：带回溯箭头的时钟（"昨天的判断今天还成立吗"）。 */
 export function SessionsIcon(p: IconProps) {
   return (

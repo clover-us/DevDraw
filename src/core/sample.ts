@@ -1,4 +1,9 @@
-/** 订单系统示例模型 —— 与 docs/design/core-semantics.md §1.1 的 running example 一致。 */
+/**
+ * 订单系统示例模型 —— 与 docs/design/core-semantics.md §1.1 的 running example 一致。
+ * 缓存分支（n_cache + 两条 when 标注的 reads 边）是 M1 请求追踪的验收演示素材：
+ * 在订单服务处步进时，「缓存命中 / 缓存未命中」是两条可选分支（§2.3）。
+ * 缓存边刻意 soft+兜底：缓存挂了应降级读库，而不是把整条下单链拖死（也不构成 SPOF）。
+ */
 import type { Model } from './types';
 
 export const sampleModel: Model = {
@@ -11,6 +16,7 @@ export const sampleModel: Model = {
     n_payment: { type: 'Service', name: '支付服务', attrs: { replicas: 3 } },
     n_risk: { type: 'Service', name: '风控服务' },
     n_order_db: { type: 'Database', name: '订单库' },
+    n_cache: { type: 'Database', name: '订单缓存', attrs: { tech: 'Redis' } },
     n_events: { type: 'Queue', name: '订单事件队列' },
     n_notify: { type: 'Service', name: '通知服务' },
   },
@@ -25,6 +31,20 @@ export const sampleModel: Model = {
       attrs: { dependency: 'soft', fallback: '降级为事后人工审核' },
     },
     e_order_db: { type: 'writes', from: 'n_order', to: 'n_order_db' },
+    e_order_cache: {
+      type: 'reads',
+      from: 'n_order',
+      to: 'n_cache',
+      label: '查缓存',
+      attrs: { when: '缓存命中', dependency: 'soft', fallback: '缓存失效直接读库', latencyMs: 2 },
+    },
+    e_order_db_read: {
+      type: 'reads',
+      from: 'n_order',
+      to: 'n_order_db',
+      label: '读订单',
+      attrs: { when: '缓存未命中', latencyMs: 15 },
+    },
     e_order_evt: {
       type: 'publishes',
       from: 'n_order',
@@ -46,6 +66,7 @@ export const samplePositions: Record<string, { x: number; y: number }> = {
   n_payment: { x: 750, y: 30 },
   n_risk: { x: 750, y: 170 },
   n_order_db: { x: 750, y: 310 },
+  n_cache: { x: 1010, y: 310 },
   n_events: { x: 450, y: 430 },
   n_notify: { x: 150, y: 430 },
 };

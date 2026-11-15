@@ -3113,3 +3113,411 @@ select.dd-input {
   color: var(--danger);
   opacity: 0.7;
 }
+
+/* ---------- 请求追踪（§2.3）：画布 overlay + 追踪面板 ---------- */
+/* 追踪用青色（--info），和失效推演的红、普通选中的蓝区分开：
+   一眼能看出"这是在走一条请求"，而不是"这里坏了"。 */
+.dd-node.trace-visited {
+  border-color: color-mix(in srgb, var(--info) 55%, var(--border));
+}
+.dd-node.trace-entry {
+  border-color: var(--info);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 22%, transparent);
+}
+.dd-node.trace-current {
+  border-color: var(--info);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 38%, transparent), 0 2px 10px var(--shadow-soft);
+}
+.dd-trace-badge {
+  position: absolute;
+  top: -10px;
+  left: -8px;
+  background: var(--info);
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 8px;
+  box-shadow: 0 2px 6px var(--shadow-soft);
+}
+.dd-edge.traced {
+  stroke: var(--info);
+  stroke-width: 2.6;
+}
+.dd-edge-label.traced {
+  color: var(--info);
+}
+/* 第几跳的小圆牌：既用在画布边标签里，也用在面板"已走的路"列表里。 */
+.dd-trace-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-right: 4px;
+  border-radius: 999px;
+  background: var(--info);
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* 面板：当前节点 */
+.dd-trace-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--info) 45%, var(--border));
+  background: color-mix(in srgb, var(--info) 10%, transparent);
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-align: left;
+}
+.dd-trace-current:hover {
+  border-color: var(--info);
+}
+.dd-trace-current b {
+  color: var(--text);
+}
+.dd-trace-current-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--info);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 25%, transparent);
+  flex: none;
+}
+
+/* 面板：下一跳候选 */
+.dd-trace-options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dd-trace-option {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  text-align: left;
+}
+.dd-trace-option:hover {
+  border-color: var(--info);
+  background: color-mix(in srgb, var(--info) 8%, transparent);
+}
+.dd-trace-option-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.dd-trace-option-head b {
+  font-weight: 600;
+}
+.dd-trace-edge-type {
+  font-size: 10.5px;
+  color: var(--faint);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex: none;
+}
+.dd-trace-option-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* 小标签：分支条件 / 延迟 / 依赖模式 / 重访 */
+.dd-trace-chip {
+  font-size: 10.5px;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+.dd-trace-chip.when {
+  color: var(--info);
+  border-color: color-mix(in srgb, var(--info) 45%, var(--border));
+  background: color-mix(in srgb, var(--info) 10%, transparent);
+}
+.dd-trace-chip.lat {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+}
+.dd-trace-chip.revisit {
+  color: var(--faint);
+  font-style: italic;
+}
+.dd-trace-chip.mode-hard {
+  color: var(--danger);
+}
+.dd-trace-chip.mode-soft {
+  color: var(--warning);
+}
+.dd-trace-chip.mode-async {
+  color: var(--accent);
+}
+
+/* 面板：已走的路 */
+.dd-trace-hops {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dd-trace-hop {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dd-trace-hop-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dd-trace-hop-route {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+}
+.dd-trace-hop-route:hover {
+  color: var(--info);
+}
+.dd-trace-hop-route b {
+  color: var(--text);
+}
+.dd-trace-note-input {
+  width: 100%;
+  font-size: 11.5px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+.dd-trace-note-input:focus {
+  outline: none;
+  border-color: var(--info);
+}
+.dd-trace-note-input::placeholder {
+  color: var(--faint);
+}
+.dd-trace-hop-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* 面板：建议路径 */
+.dd-trace-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dd-trace-path {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px dashed var(--border-strong);
+  background: var(--bg);
+  text-align: left;
+}
+.dd-trace-path:hover {
+  border-color: var(--info);
+  border-style: solid;
+  background: color-mix(in srgb, var(--info) 7%, transparent);
+}
+.dd-trace-path-chain {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+.dd-trace-path-meta {
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+/* ============================================================
+   质检 + 推演邀请（「思考是建模的质检」）
+   画布左上角的浮动卡片：把推演从藏起来的右键菜单里请出来。
+   用主色电蓝做左缘渐变条，区别于失效的红、追踪的青。
+   ============================================================ */
+.dd-nudge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  width: 272px;
+  padding: 12px 14px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  box-shadow: 0 8px 28px var(--shadow-soft);
+  animation: dd-nudge-in 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes dd-nudge-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.dd-nudge-x {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+.dd-nudge-x:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.dd-nudge-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-right: 20px;
+}
+.dd-nudge-ico {
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+.dd-nudge-head strong {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+.dd-nudge-check {
+  margin: 7px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.dd-nudge-warn {
+  color: var(--warning);
+  font-weight: 650;
+}
+.dd-nudge-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 11px;
+}
+.dd-nudge-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+.dd-nudge-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.dd-nudge-btn:active {
+  transform: scale(0.985);
+}
+.dd-nudge-btn.is-demo {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--accent-soft);
+  font-weight: 600;
+  animation: dd-nudge-pulse 2.4s ease-in-out infinite;
+}
+@keyframes dd-nudge-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+}
+
+/* 抽屉里的可见推演入口：选中节点即可模拟失效 / 追踪请求，不必再翻右键。 */
+.dd-drawer-reason {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dd-reason-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.dd-reason-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.dd-reason-btn.on {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dd-nudge {
+    animation: none;
+  }
+  .dd-nudge-btn.is-demo {
+    animation: none;
+  }
+}
