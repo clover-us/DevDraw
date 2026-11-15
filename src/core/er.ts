@@ -20,9 +20,10 @@ export interface ErField {
 
 /** 表卡片行几何（px）：与 .dd-table-head / .dd-field-row / .dd-table-fields 的 CSS 尺寸同步。 */
 export const TABLE_HEAD_H = 36;
-export const TABLE_ROW_H = 24.5;
-/** .dd-table-fields 的上下内边距之和。 */
-export const TABLE_BODY_PAD = 8;
+/** 实测：4 列卡渲染 145.9、24 列卡 645.9，行高正好 25；旧值 24.5 会让高卡比估算矮，缝隙被吃掉。 */
+export const TABLE_ROW_H = 25;
+/** .dd-table-fields 的上下内边距 + 卡片上下边框。 */
+export const TABLE_BODY_PAD = 10;
 
 /** 第 index 行（0 起）的竖直中心相对卡片顶边的偏移。 */
 export function fieldRowOffset(index: number): number {

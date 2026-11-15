@@ -4,6 +4,7 @@ import {
   erFieldPort,
   erFieldRows,
   fieldIdFromHandle,
+  fieldRowOffset,
   planFkConnection,
   resolveFkLink,
   resolveFkLinks,
@@ -42,6 +43,14 @@ describe('ER 字段行与字段级端口', () => {
   it('卡片高度随字段行数增长，空表也留出表头', () => {
     expect(tableCardHeight(0)).toBeGreaterThan(0);
     expect(tableCardHeight(4)).toBeGreaterThan(tableCardHeight(2));
+  });
+
+  it('行高与渲染一致：每多一行正好 25px，首行中心在 53.5', () => {
+    // 对不上会让高卡比估算矮，卡片之间 44px 的空当被吃掉，长外键就只能贴着卡片挤过去。
+    expect(tableCardHeight(3) - tableCardHeight(2)).toBe(25);
+    expect(tableCardHeight(24) - tableCardHeight(12)).toBe(300);
+    expect(fieldRowOffset(0)).toBe(53.5);
+    expect(fieldRowOffset(1) - fieldRowOffset(0)).toBe(25);
   });
 
   it('字段端口 id 可逆，卡片级兜底锚点不会被误认成字段', () => {
