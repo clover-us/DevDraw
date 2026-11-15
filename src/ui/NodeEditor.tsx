@@ -9,11 +9,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { applyPatchChecked } from '../core/patch';
 import { componentCatalog, DEFAULT_NODE_ICON, nodeComponent, nodeGlyph } from '../core/components';
+import { erFieldRows } from '../core/er';
 import { newEdgeId, newNodeId } from '../core/id';
 import { connectableEdgeTypes, NODE_TYPES, type LensDef } from '../core/registry';
 import { GLYPH_LIST } from './glyphs';
 import type { EdgeType, Model, ModelNode } from '../core/types';
-import { FieldEditor, NodePicker, Section, TableFieldsEditor } from './entity-fields';
+import { AttrsEditor, FieldEditor, NodePicker, Section, TableFieldsEditor } from './entity-fields';
 import { Glyph } from './glyphs';
 import { CloseIcon, EntitiesIcon, PaletteIcon, SearchIcon } from './icons';
 
@@ -41,6 +42,8 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
   const [connectTarget, setConnectTarget] = useState('');
   const [connectType, setConnectType] = useState<EdgeType>(connectableEdgeTypes(lens.id)[0]?.id ?? 'calls');
   const [deleteArmed, setDeleteArmed] = useState(false);
+  // 表内联选中的字段：点字段行展开其属性编辑，再点收起。
+  const [fieldId, setFieldId] = useState<string | null>(null);
   // 外观（本地草稿，应用才落模型）
   const [componentId, setComponentId] = useState(typeof node.attrs?.component === 'string' ? node.attrs.component : '');
   const [icon, setIcon] = useState(nodeGlyph(model, node));
@@ -103,6 +106,12 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
       let m = applyPatchChecked(model, { op: 'add-node', id: fid, node: { type: 'Field', name, attrs: { dataType } } });
       m = applyPatchChecked(m, { op: 'add-edge', id: newEdgeId('contains'), edge: { type: 'contains', from: nodeId, to: fid } });
       onChange(m);
+      return null;
+    });
+  const deleteField = (fid: string) =>
+    tryChange(() => {
+      onChange(applyPatchChecked(model, { op: 'remove-node', id: fid }));
+      setFieldId(null);
       return null;
     });
   const addConnection = () => {
@@ -179,6 +188,9 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
 
   const allowed = connectableEdgeTypes(lens.id);
   const targets = nodes.filter(([id]) => id !== nodeId);
+  // 表的实时预览行：直接读模型，编辑字段 / 备注 / 类型即时反映在左侧迷你表卡。
+  const previewRows = node.type === 'Table' ? erFieldRows(model, nodeId) : [];
+  const tableComment = typeof node.attrs?.comment === 'string' && node.attrs.comment ? node.attrs.comment : '';
 
   return createPortal(
     <div
@@ -264,22 +276,58 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
           <div className="dd-modal-preview">
             <div className="dd-modal-preview-label">预览</div>
             <div className="dd-modal-canvas">
-              <div className="dd-modal-preview-card">
-                <span className="dd-node-glyph">
-                  <Glyph id={displayGlyph} size={22} />
-                </span>
-                <span className="dd-node-arch-text">
-                  <span className="dd-node-kind">{identity?.name ?? NODE_TYPES[node.type].label}</span>
-                  <span className="dd-node-name">{node.name}</span>
-                </span>
-              </div>
+              {node.type === 'Table' ? (
+                <div className="dd-modal-preview-table" aria-label="表卡片预览">
+                  <div className="dd-table-head">
+                    <span className="dd-table-glyph">
+                      <Glyph id={displayGlyph} size={16} />
+                    </span>
+                    <span className="dd-node-name">{node.name}</span>
+                    <span className="dd-table-count">{previewRows.length} 列</span>
+                  </div>
+                  <div className="dd-table-fields">
+                    {previewRows.length === 0 && <div className="dd-table-empty">无字段 · 在右侧添加</div>}
+                    {previewRows.map((f) => (
+                      <div key={f.id} className={`dd-field-row${fieldId === f.id ? ' selected' : ''}${f.keyRole ? ' is-key' : ''}`}>
+                        {f.keyRole ? (
+                          <span className={`dd-key dd-key-${f.keyRole.toLowerCase()}`}>{f.keyRole}</span>
+                        ) : (
+                          <span className="dd-key-spacer" />
+                        )}
+                        <span className="dd-field-name">{f.name}</span>
+                        {f.comment && (
+                          <span className="dd-field-comment" title={f.comment}>
+                            {f.comment}
+                          </span>
+                        )}
+                        <span className="dd-field-type">{f.dataType}</span>
+                        {f.nullable && (
+                          <span className="dd-nullable" title="可空">
+                            ?
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="dd-modal-preview-card">
+                  <span className="dd-node-glyph">
+                    <Glyph id={displayGlyph} size={22} />
+                  </span>
+                  <span className="dd-node-arch-text">
+                    <span className="dd-node-kind">{identity?.name ?? NODE_TYPES[node.type].label}</span>
+                    <span className="dd-node-name">{node.name}</span>
+                  </span>
+                </div>
+              )}
             </div>
             <div className="dd-modal-meta">
               <span className="dd-modal-badge">{NODE_TYPES[node.type].label}</span>
               {identity && <span className="dd-modal-badge alt">{identity.name}</span>}
               {tab === 'appearance' && dirty && <span className="dd-modal-badge draft">草稿 · 未应用</span>}
             </div>
-            <p className="dd-modal-desc">{identity?.description ?? '按类型默认外观。'}</p>
+            <p className="dd-modal-desc">{tableComment || identity?.description || '按类型默认外观。'}</p>
             <p className="dd-modal-note">
               {tab === 'appearance'
                 ? '外观是组件身份的快照：换身份会同步图标，也可单独直挑图标。'
@@ -293,8 +341,31 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                 <input ref={nameRef} className="dd-input" value={node.name} onChange={(e) => renameNode(e.target.value)} />
               </Section>
 
+              {(node.type === 'Service' || node.type === 'Database' || node.type === 'Table') && (
+                <AttrsEditor model={model} nodeId={nodeId} updateNode={updateNode} />
+              )}
+
               {node.type === 'Table' && (
-                <TableFieldsEditor model={model} tableId={nodeId} onSelectField={() => {}} onAdd={addField} />
+                <>
+                  <TableFieldsEditor
+                    model={model}
+                    tableId={nodeId}
+                    onSelectField={(id) => setFieldId((prev) => (prev === id ? null : id))}
+                    onAdd={addField}
+                    selectedFieldId={fieldId}
+                  />
+                  {fieldId && model.nodes[fieldId] && (
+                    <div className="dd-field-inline">
+                      <FieldEditor
+                        model={model}
+                        fieldId={fieldId}
+                        onSelectNode={() => setFieldId(null)}
+                        updateNode={updateNode}
+                        onDelete={deleteField}
+                      />
+                    </div>
+                  )}
+                </>
               )}
               {node.type === 'Field' && <FieldEditor model={model} fieldId={nodeId} onSelectNode={() => {}} updateNode={updateNode} />}
               {node.type === 'State' && (

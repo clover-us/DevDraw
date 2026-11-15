@@ -34,7 +34,6 @@ import {
   planFkConnection,
   resolveFkLinks,
   shouldAutoFold,
-  tableFieldIds,
   type ErField,
   type FkLink,
 } from '../core/er';
@@ -123,18 +122,9 @@ function readLastEdge(): Partial<Record<LensId, EdgeType>> {
 /** 可以当失效源的物理实体（知识卡片/状态之类挂上去没有意义）。 */
 const SEEDABLE = new Set<NodeType>(['Service', 'Database', 'Queue', 'Endpoint', 'ExternalSystem', 'Actor']);
 
-/** ER 表卡片内的字段行：从全模型 contains 边折叠而来（字段不再游离）。 */
+/** ER 表卡片内的字段行：与折叠 / 外键解析共用 erFieldRows 单一来源（名称 / 类型 / 可空 / 备注 / 键）。 */
 function fieldsOf(model: Model, tableId: string): FieldRow[] {
-  return tableFieldIds(model, tableId).map((fieldId) => {
-    const f = model.nodes[fieldId];
-    return {
-      id: fieldId,
-      name: f?.name ?? fieldId,
-      dataType: typeof f?.attrs?.dataType === 'string' ? f.attrs.dataType : undefined,
-      nullable: f?.attrs?.nullable === true,
-      keyRole: typeof f?.attrs?.key === 'string' ? f.attrs.key : undefined,
-    };
-  });
+  return erFieldRows(model, tableId);
 }
 
 /**
@@ -732,6 +722,7 @@ export function App() {
           dataType: typeof n.attrs?.dataType === 'string' ? n.attrs.dataType : undefined,
           nullable: n.attrs?.nullable === true,
           keyRole: typeof n.attrs?.key === 'string' ? n.attrs.key : undefined,
+          comment: typeof n.attrs?.comment === 'string' && n.attrs.comment ? n.attrs.comment : undefined,
           initial: n.attrs?.initial === true,
           fieldCount: n.type === 'Table' ? (tableFolds[id]?.all.length ?? fieldCount(id)) : undefined,
           fields: n.type === 'Table' ? (tableFolds[id]?.rows ?? fieldsOf(model, id)) : undefined,

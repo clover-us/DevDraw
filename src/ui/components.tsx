@@ -37,6 +37,8 @@ export interface FieldRow {
   dataType?: string;
   nullable?: boolean;
   keyRole?: string;
+  /** 列备注：行中列缩略显示（ellipsis），完整内容在 title。 */
+  comment?: string;
 }
 
 export interface DevDrawNodeData extends Record<string, unknown> {
@@ -51,6 +53,7 @@ export interface DevDrawNodeData extends Record<string, unknown> {
   dataType?: string;
   nullable?: boolean;
   keyRole?: string;
+  comment?: string;
   initial?: boolean;
   fieldCount?: number;
   detail?: string;
@@ -289,6 +292,11 @@ export function DevDrawNode({ id, data }: NodeProps) {
                 onRename={(name) => d.onFieldRename?.(f.id, name)}
                 onCancel={d.onFieldRenameCancel}
               />
+              {f.comment && (
+                <span className="dd-field-comment" title={f.comment}>
+                  {f.comment}
+                </span>
+              )}
               <span className="dd-field-type">{f.dataType}</span>
               {f.nullable && (
                 <span className="dd-nullable" title="可空">
@@ -313,6 +321,11 @@ export function DevDrawNode({ id, data }: NodeProps) {
           onRename={renameNode}
           onCancel={d.onRenameCancel}
         />
+        {d.comment && (
+          <span className="dd-field-comment" title={d.comment}>
+            {d.comment}
+          </span>
+        )}
         <span className="dd-field-type">{d.dataType}</span>
         {d.nullable && <span className="dd-nullable" title="可空">?</span>}
       </>

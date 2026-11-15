@@ -5,6 +5,7 @@ import {
   erFieldRows,
   fieldIdFromHandle,
   fieldRowOffset,
+  foldRows,
   planFkConnection,
   resolveFkLink,
   resolveFkLinks,
@@ -37,7 +38,25 @@ function tinyModel(): Model {
 describe('ER 字段行与字段级端口', () => {
   it('表内字段按 contains 边的出现顺序排列', () => {
     expect(tableFieldIds(sampleThreeLensModel, 't_orders')).toEqual(['f_orders_id', 'f_orders_status', 'f_orders_amount']);
-    expect(erFieldRows(sampleThreeLensModel, 't_orders')[0]).toEqual({ id: 'f_orders_id', name: 'id', keyRole: 'PK' });
+    expect(erFieldRows(sampleThreeLensModel, 't_orders')[0]).toEqual({
+      id: 'f_orders_id',
+      name: 'id',
+      keyRole: 'PK',
+      dataType: 'bigint',
+      nullable: false,
+      comment: '订单号，全局唯一',
+    });
+  });
+
+  it('字段行携带类型 / 可空 / 备注：画布三列（名称·备注·类型）与折叠共用同一来源', () => {
+    const rows = erFieldRows(sampleThreeLensModel, 't_payments');
+    expect(rows.map((r) => r.dataType)).toEqual(['bigint', 'bigint', 'decimal']);
+    expect(rows[1]).toMatchObject({ name: 'order_id', keyRole: 'FK', comment: '关联 orders.id' });
+    expect(rows[2]).toMatchObject({ name: 'amount', comment: '实付金额（元，含优惠分摊）' });
+    // 折叠只挑行，不丢列信息：折起来的键列仍带类型与备注。
+    const folded = foldRows(erFieldRows(sampleThreeLensModel, 't_audit_log'), true);
+    expect(folded.rows.every((r) => typeof r.dataType === 'string')).toBe(true);
+    expect(folded.hidden).toBeGreaterThan(0);
   });
 
   it('卡片高度随字段行数增长，空表也留出表头', () => {

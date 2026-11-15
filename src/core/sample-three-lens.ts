@@ -34,9 +34,9 @@ export const sampleThreeLensModel: Model = {
       ]),
     ),
     // ── ER：表 ──
-    t_orders: { type: 'Table', name: 'orders' },
-    t_order_items: { type: 'Table', name: 'order_items' },
-    t_payments: { type: 'Table', name: 'payments' },
+    t_orders: { type: 'Table', name: 'orders', attrs: { comment: '订单主表，状态映射订单生命周期', engine: 'InnoDB', charset: 'utf8mb4' } },
+    t_order_items: { type: 'Table', name: 'order_items', attrs: { comment: '订单明细，一单多行' } },
+    t_payments: { type: 'Table', name: 'payments', attrs: { comment: '支付流水，一单可多次支付', engine: 'InnoDB', charset: 'utf8mb4' } },
     t_refunds: { type: 'Table', name: 'refunds' },
     t_products: { type: 'Table', name: 'products' },
     // 宽表：12 列，用来演示"列多的表默认只露键列"（AUTO_FOLD_AT = 6）。
@@ -44,16 +44,16 @@ export const sampleThreeLensModel: Model = {
     // 6 列（刚好不触发自动折叠）——它把中间那一列撑高，长外键才有"绕不过去"的场合。
     t_shipments: { type: 'Table', name: 'shipments' },
     // ── ER：字段 ──
-    f_orders_id: { type: 'Field', name: 'id', attrs: { dataType: 'bigint', key: 'PK' } },
-    f_orders_status: { type: 'Field', name: 'status', attrs: { dataType: 'varchar' } },
-    f_orders_amount: { type: 'Field', name: 'amount', attrs: { dataType: 'decimal' } },
+    f_orders_id: { type: 'Field', name: 'id', attrs: { dataType: 'bigint', key: 'PK', autoIncrement: true, comment: '订单号，全局唯一' } },
+    f_orders_status: { type: 'Field', name: 'status', attrs: { dataType: 'varchar', comment: '订单状态，映射状态机', default: 'Created' } },
+    f_orders_amount: { type: 'Field', name: 'amount', attrs: { dataType: 'decimal', comment: '订单总额（元）', default: '0.00' } },
     f_items_id: { type: 'Field', name: 'id', attrs: { dataType: 'bigint', key: 'PK' } },
     f_items_order_id: { type: 'Field', name: 'order_id', attrs: { dataType: 'bigint', nullable: true, key: 'FK' } },
     f_items_product_id: { type: 'Field', name: 'product_id', attrs: { dataType: 'bigint', key: 'FK' } },
     f_items_qty: { type: 'Field', name: 'qty', attrs: { dataType: 'int' } },
-    f_pay_id: { type: 'Field', name: 'id', attrs: { dataType: 'bigint', key: 'PK' } },
-    f_pay_order_id: { type: 'Field', name: 'order_id', attrs: { dataType: 'bigint', key: 'FK' } },
-    f_pay_amount: { type: 'Field', name: 'amount', attrs: { dataType: 'decimal' } },
+    f_pay_id: { type: 'Field', name: 'id', attrs: { dataType: 'bigint', key: 'PK', autoIncrement: true } },
+    f_pay_order_id: { type: 'Field', name: 'order_id', attrs: { dataType: 'bigint', key: 'FK', comment: '关联 orders.id' } },
+    f_pay_amount: { type: 'Field', name: 'amount', attrs: { dataType: 'decimal', comment: '实付金额（元，含优惠分摊）', default: '0.00' } },
     f_ref_id: { type: 'Field', name: 'id', attrs: { dataType: 'bigint', key: 'PK' } },
     f_ref_pay_id: { type: 'Field', name: 'payment_id', attrs: { dataType: 'bigint', key: 'FK' } },
     f_ref_amount: { type: 'Field', name: 'amount', attrs: { dataType: 'decimal' } },
@@ -78,7 +78,7 @@ export const sampleThreeLensModel: Model = {
     f_ship_id: { type: 'Field', name: 'id', attrs: { dataType: 'bigint', key: 'PK' } },
     f_ship_order_id: { type: 'Field', name: 'order_id', attrs: { dataType: 'bigint', key: 'FK' } },
     f_ship_carrier: { type: 'Field', name: 'carrier', attrs: { dataType: 'varchar' } },
-    f_ship_tracking: { type: 'Field', name: 'tracking_no', attrs: { dataType: 'varchar' } },
+    f_ship_tracking: { type: 'Field', name: 'tracking_no', attrs: { dataType: 'varchar', unique: true, comment: '承运商运单号' } },
     f_ship_status: { type: 'Field', name: 'status', attrs: { dataType: 'varchar' } },
     f_ship_shipped: { type: 'Field', name: 'shipped_at', attrs: { dataType: 'timestamptz' } },
     // ── 状态机：生命周期 + 状态 ──
@@ -182,7 +182,7 @@ export const threeLensPositions: Record<string, { x: number; y: number }> = {
   ...samplePositions,
   // 反问"新增履约服务"后动态加入的节点，预留一个架构镜片位置
   n_fulfillment: { x: 750, y: -120 },
-  // ER 表：外键即数据流向（父表在左、子表在右），一张表一列，列宽 = 卡片 232 + 140 过道。
+  // ER 表：外键即数据流向（父表在左、子表在右），一张表一列，列宽 = 卡片 264 + 108 过道。
   // 过道要够宽：外键线要在这里挑车道、竖着走一段再进子表的那个字段行。
   t_orders: { x: 0, y: 60 },
   t_payments: { x: 372, y: 0 },

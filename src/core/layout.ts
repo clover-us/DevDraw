@@ -43,7 +43,7 @@ export const NODE_WIDTH: Record<NodeType, number> = {
   Endpoint: 190,
   ExternalSystem: 190,
   Actor: 190,
-  Table: 232,
+  Table: 264,
   Field: 200,
   Lifecycle: 180,
   State: 160,

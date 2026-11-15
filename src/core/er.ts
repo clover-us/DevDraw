@@ -16,6 +16,11 @@ export interface ErField {
   name: string;
   /** PK / FK / UK …（来自 attrs.key）。 */
   keyRole?: string;
+  /** 列类型（varchar / bigint …），画布行右列显示。 */
+  dataType?: string;
+  nullable?: boolean;
+  /** 列备注：画布行中列缩略显示，完整内容在 title / 编辑器里。 */
+  comment?: string;
 }
 
 /** 表卡片行几何（px）：与 .dd-table-head / .dd-field-row / .dd-table-fields 的 CSS 尺寸同步。 */
@@ -89,6 +94,9 @@ export function erFieldRows(model: Model, tableId: string): ErField[] {
       id,
       name: n?.name ?? id,
       keyRole: typeof n?.attrs?.key === 'string' ? n.attrs.key : undefined,
+      dataType: typeof n?.attrs?.dataType === 'string' ? n.attrs.dataType : undefined,
+      nullable: n?.attrs?.nullable === true,
+      comment: typeof n?.attrs?.comment === 'string' && n.attrs.comment ? n.attrs.comment : undefined,
     };
   });
 }

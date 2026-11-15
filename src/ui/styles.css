@@ -297,6 +297,40 @@ select.dd-input {
   width: 15px;
   height: 15px;
 }
+/* 实体 / 字段属性网格：两列紧凑排布，备注等长文本独占整行。 */
+.dd-attrs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12px;
+  align-items: start;
+}
+.dd-attrs-grid .dd-input {
+  width: 100%;
+}
+.dd-attr-wide {
+  grid-column: 1 / -1;
+}
+.dd-attr-bool {
+  grid-column: 1 / -1;
+  margin: 6px 0;
+}
+.dd-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.dd-toggle-row .dd-toggle {
+  margin: 6px 0;
+}
+.dd-field-delete {
+  margin-top: 4px;
+}
+/* 表弹窗内联展开的字段编辑区：虚线分隔，暗示「从属于上面那张表」。 */
+.dd-field-inline {
+  border-top: 1px dashed var(--border-strong);
+  margin-top: 6px;
+  padding-top: 2px;
+}
 .dd-muted {
   color: var(--muted);
   font-size: 12px;
@@ -1240,6 +1274,12 @@ select.dd-input {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
+/* 弹窗里被选中展开编辑的字段行：与画布选中行同一语义色。 */
+.dd-field-item.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--ring);
+}
 
 /* ---------- 推演面板 ---------- */
 .dd-seed-chips {
@@ -1654,9 +1694,9 @@ select.dd-input {
   box-shadow: 0 0 0 2px var(--ring), 0 2px 8px var(--shadow-soft);
 }
 
-/* 表卡片：字段折进表内 */
+/* 表卡片：字段折进表内。264 = 名称 + 备注（缩略）+ 类型三列的最小舒适宽。 */
 .dd-node.kind-table {
-  width: 232px;
+  width: 264px;
   padding: 0;
   /* 不能 overflow:hidden——字段行的连线圆点要探出卡片边缘一点点才点得到。 */
   border-color: var(--border-strong);
@@ -1763,7 +1803,8 @@ select.dd-input {
   color: #fff;
 }
 .dd-field-name {
-  flex: 1;
+  /* 只缩不涨：剩余空间让给备注列；无备注时类型仍靠 margin-left:auto 右对齐。 */
+  flex: 0 1 auto;
   min-width: 0;
   font-size: 12px;
   font-weight: 600;
@@ -1776,7 +1817,18 @@ select.dd-input {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+/* 备注列：吃掉名称与类型之间的剩余宽度，超长缩略，完整内容在 title。 */
+.dd-field-comment {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .dd-field-type {
+  flex: none;
   font-size: 11px;
   color: var(--muted);
   margin-left: auto;
@@ -2772,6 +2824,31 @@ select.dd-input {
   line-height: 1.3;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+/* 表的实时预览：与画布同一套表卡构件（head / 字段行 / 三列），编辑即时可见。 */
+.dd-modal-canvas:has(.dd-modal-preview-table) {
+  padding: 20px 10px;
+}
+.dd-modal-preview-table {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--panel);
+  box-shadow: 0 6px 18px var(--shadow-soft);
+}
+.dd-modal-preview-table .dd-table-head .dd-node-name {
+  margin-top: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dd-modal-preview-table .dd-field-row {
+  cursor: default;
+}
+.dd-modal-preview-table .dd-field-row:last-child {
+  border-radius: 0 0 8px 8px;
 }
 .dd-modal-meta {
   display: flex;
