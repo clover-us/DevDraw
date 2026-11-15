@@ -3521,3 +3521,188 @@ select.dd-input {
     animation: none;
   }
 }
+
+/* ============================================================
+   动态图例（画布左下角，工具坞上方）
+   不是死对照表，而是「当前视图的实时读数」：每项带活计数，
+   0 的类别淡出，正在发生的叠加层（传播 / 追踪）才浮现。
+   色板与线型严格对齐画布实际编码。
+   ============================================================ */
+.dd-legend-card {
+  position: absolute;
+  left: 12px;
+  bottom: 56px;
+  z-index: 6;
+  width: 238px;
+  padding: 10px 12px 11px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  box-shadow: 0 8px 28px var(--shadow-soft);
+  animation: dd-legend-in 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes dd-legend-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.dd-legend-card.is-collapsed {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: auto;
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.dd-legend-card.is-collapsed:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.dd-lg-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.dd-lg-head strong {
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+/* 「实时」呼吸点：图例是活读数，不是静态对照表。 */
+.dd-lg-live {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 45%, transparent);
+  animation: dd-lg-pulse 2.2s ease-in-out infinite;
+  flex: none;
+}
+@keyframes dd-lg-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 40%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 0%, transparent);
+  }
+}
+.dd-lg-sub {
+  flex: 1;
+  font-size: 10.5px;
+  color: var(--faint);
+}
+.dd-lg-toggle {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  flex: none;
+}
+.dd-lg-toggle:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.dd-lg-group {
+  margin-top: 9px;
+}
+.dd-lg-glabel {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  margin-bottom: 5px;
+}
+.dd-lg-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.dd-lg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  transition: opacity 0.2s;
+}
+/* 0 的类别淡出：让正在发生的编码自己跳出来。 */
+.dd-lg-item.is-zero {
+  opacity: 0.36;
+}
+.dd-lg-label {
+  color: var(--muted);
+}
+.dd-lg-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  color: var(--text);
+  min-width: 9px;
+}
+.dd-lg-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+.dd-lg-dot.is-failed {
+  background: var(--danger);
+}
+.dd-lg-dot.is-degraded {
+  background: var(--warning);
+}
+.dd-lg-dot.is-ok {
+  background: var(--success);
+}
+/* 失效源：画布上是红牌，图例里缩成一枚小红牌。 */
+.dd-lg-dot.is-seed {
+  width: 14px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--danger);
+}
+/* 线型样本：与画布边同色同虚实。 */
+.dd-lg-line {
+  width: 18px;
+  height: 0;
+  border-top: 2px solid var(--edge-hard);
+  flex: none;
+}
+.dd-lg-line.is-hard {
+  border-top-color: var(--edge-hard);
+}
+.dd-lg-line.is-soft {
+  border-top-color: var(--warning);
+}
+.dd-lg-line.is-async {
+  border-top-style: dashed;
+  border-top-color: var(--accent);
+}
+.dd-lg-line.is-impacted {
+  border-top-style: dashed;
+  border-top-color: var(--danger);
+}
+.dd-lg-line.is-traced {
+  border-top-color: var(--info);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dd-legend-card {
+    animation: none;
+  }
+  .dd-lg-live {
+    animation: none;
+  }
+}

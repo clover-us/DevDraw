@@ -57,6 +57,7 @@ import {
   undoTrace,
   type TraceScenario,
 } from '../core/trace';
+import { computeLegendStats } from '../core/legend';
 import type { ComponentDef, DependencyMode, EdgeType, Model, NodeType } from '../core/types';
 import { ComponentEditor } from './ComponentEditor';
 import { COMPONENT_MIME, ComponentLibrary } from './ComponentLibrary';
@@ -65,6 +66,7 @@ import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData, t
 import { EdgePicker } from './EdgePicker';
 import { EntityDrawer } from './EntityDrawer';
 import { ReasoningNudge } from './ReasoningNudge';
+import { DynamicLegend } from './DynamicLegend';
 import { FitFrameIcon, LayoutIcon, MaximizeIcon, MinimizeIcon, MinusIcon, PlusIcon, RedoIcon, UndoIcon } from './icons';
 import { NavPanel } from './NavPanel';
 import { NavRail, type NavSection } from './NavRail';
@@ -330,6 +332,12 @@ export function App() {
     });
     return out;
   }, [lens, trace]);
+
+  // 动态图例的实时读数（架构镜片）：计数逻辑在内核 core/legend.ts（可单测），UI 只摆数字。
+  const legendStats = useMemo(() => {
+    if (lens !== 'architecture') return null;
+    return computeLegendStats(projection.nodes, projection.edges, result, seeds, trace);
+  }, [lens, projection, result, seeds, trace]);
 
   // 每副镜片的错误/反问计数（顶部标签小红点，引导用户去看"顶嘴"）
   const lensBadges = useMemo(() => {
@@ -1504,6 +1512,7 @@ export function App() {
               onDismiss={dismissNudge}
             />
           )}
+          {legendStats && <DynamicLegend {...legendStats} />}
           <div className="dd-canvas-status">
             {/* 还没落到磁盘上时，"打开文件夹"和"未持久化"是同一件事的两面，放一起看更顺：
                 左边给你解决办法，右边是当前状态。 */}
