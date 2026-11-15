@@ -3,14 +3,13 @@
  * 读 / 写分离后：抽屉用 *View（只读），NodeEditor 弹窗用 *Editor（可写）。
  * 同一份字段列表 / 牵连分析渲染逻辑只写一遍，避免两处口径漂移。
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { nodeGlyph } from '../core/components';
 import { columnImpact } from '../core/reasoners/er';
 import { NODE_TYPES } from '../core/registry';
 import type { Model, ModelNode } from '../core/types';
 import { Glyph } from './glyphs';
 import { nodeName } from './inspect';
-import { PlusIcon } from './icons';
 
 export function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -83,52 +82,6 @@ export function TableFieldsView({ model, tableId, onSelectField }: { model: Mode
   return (
     <Section title={`字段（${fields.length}）`}>
       <FieldRows model={model} tableId={tableId} onSelectField={onSelectField} />
-    </Section>
-  );
-}
-
-/** 可写：Table 的字段清单 + 添加字段行（弹窗用）。 */
-export function TableFieldsEditor({
-  model,
-  tableId,
-  onSelectField,
-  onAdd,
-  selectedFieldId,
-}: {
-  model: Model;
-  tableId: string;
-  onSelectField: (id: string) => void;
-  onAdd: (name: string, dataType: string) => void;
-  selectedFieldId?: string | null;
-}) {
-  const [fieldName, setFieldName] = useState('');
-  const [fieldType, setFieldType] = useState('varchar');
-  const fields = fieldsOf(model, tableId);
-  const add = () => {
-    onAdd(fieldName.trim() || 'new_field', fieldType || 'varchar');
-    setFieldName('');
-  };
-  return (
-    <Section title={`字段（${fields.length}）`}>
-      <FieldRows model={model} tableId={tableId} onSelectField={onSelectField} selectedFieldId={selectedFieldId} />
-      <div className="dd-connect-row">
-        <input
-          className="dd-input"
-          placeholder="字段名"
-          value={fieldName}
-          onChange={(e) => setFieldName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && add()}
-        />
-        <input
-          className="dd-input dd-input-narrow"
-          placeholder="类型"
-          value={fieldType}
-          onChange={(e) => setFieldType(e.target.value)}
-        />
-        <button className="dd-icon-add" onClick={add} title="添加字段">
-          <PlusIcon size={16} />
-        </button>
-      </div>
     </Section>
   );
 }
@@ -212,116 +165,161 @@ export function FieldView({ model, fieldId, onSelectNode }: { model: Model; fiel
   );
 }
 
-/** 可写：Field 的属性编辑 + 牵连（弹窗用）。onDelete 可选：表内联编辑时提供「删除字段」。 */
+/** 常用 SQL 类型：数据类型输入的 datalist 建议，仍可自由输入。 */
+const SQL_TYPES = ['bigint', 'int', 'smallint', 'varchar', 'text', 'char', 'decimal', 'numeric', 'boolean', 'date', 'time', 'timestamp', 'timestamptz', 'json', 'jsonb', 'uuid', 'bytea'];
+
+/** 约束开关：整行可点、右侧滑轨反映状态，比裸 checkbox 更直观、更好点。 */
+function SwitchRow({ label, desc, checked, onChange }: { label: string; desc: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      className={`dd-switch-row${checked ? ' on' : ''}`}
+      onClick={() => onChange(!checked)}
+    >
+      <span className="dd-switch-text">
+        <span className="dd-switch-label">{label}</span>
+        <span className="dd-switch-desc">{desc}</span>
+      </span>
+      <span className="dd-switch-track" aria-hidden="true">
+        <span className="dd-switch-knob" />
+      </span>
+    </button>
+  );
+}
+
+/**
+ * 可写：字段属性表单，分组排版（标识 / 类型 / 约束 / 备注）。
+ * 表的「字段」子页面里隐藏所属表链接（本就在那张表里），改名由父级提供；
+ * 添加字段后 focusNameTick 递增 → 聚焦名称并全选，落笔即可改名。
+ */
 export function FieldEditor({
   model,
   fieldId,
   onSelectNode,
   updateNode,
-  onDelete,
+  onRename,
+  showTableLink = true,
+  focusNameTick = 0,
 }: {
   model: Model;
   fieldId: string;
   onSelectNode: (id: string) => void;
   updateNode: (id: string, attrs: Record<string, string | number | boolean>) => void;
-  onDelete?: (id: string) => void;
+  onRename?: (name: string) => void;
+  showTableLink?: boolean;
+  focusNameTick?: number;
 }) {
   const f = model.nodes[fieldId];
   const owner = Object.values(model.edges).find((e) => e.type === 'contains' && e.to === fieldId)?.from;
-  const [deleteArmed, setDeleteArmed] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (!deleteArmed) return;
-    const t = window.setTimeout(() => setDeleteArmed(false), 3000);
-    return () => window.clearTimeout(t);
-  }, [deleteArmed]);
-  // 换选另一列时解除「确认删除」武装，避免误删新选中的列。
-  useEffect(() => setDeleteArmed(false), [fieldId]);
+    if (focusNameTick > 0) {
+      nameRef.current?.focus();
+      nameRef.current?.select();
+    }
+  }, [focusNameTick]);
+  const str = (k: string) => (typeof f.attrs?.[k] === 'string' ? (f.attrs[k] as string) : '');
+  const key = str('key');
   return (
     <>
-      <Section title="字段属性">
-        {owner && (
-          <p className="dd-hint-text">
+      <div className="dd-fedit">
+        {showTableLink && owner && (
+          <p className="dd-hint-text dd-fedit-owner">
             所属表：
             <button className="dd-inline-link" onClick={() => onSelectNode(owner)}>
               {nodeName(model, owner)}
             </button>
           </p>
         )}
-        <div className="dd-attrs-grid">
-          <div>
-            <label className="dd-field-label">数据类型</label>
-            <input
-              className="dd-input"
-              value={typeof f.attrs?.dataType === 'string' ? f.attrs.dataType : ''}
-              onChange={(e) => updateNode(fieldId, { dataType: e.target.value })}
-            />
+        <section className="dd-fedit-group">
+          <h4>标识</h4>
+          <div className="dd-fedit-grid">
+            <div>
+              <label className="dd-field-label" htmlFor={`dd-fname-${fieldId}`}>
+                字段名
+              </label>
+              <input
+                id={`dd-fname-${fieldId}`}
+                ref={nameRef}
+                className="dd-input"
+                value={f.name}
+                onChange={(e) => onRename?.(e.target.value)}
+              />
+            </div>
+            <div>
+              <span className="dd-field-label">键角色</span>
+              <div className="dd-seg" role="group" aria-label="键角色">
+                {(['', 'PK', 'FK'] as const).map((k) => (
+                  <button
+                    key={k || 'plain'}
+                    type="button"
+                    aria-pressed={key === k}
+                    className={`dd-seg-btn${key === k ? ' on' : ''}${k ? ` seg-${k.toLowerCase()}` : ''}`}
+                    onClick={() => updateNode(fieldId, { key: k })}
+                  >
+                    {k === '' ? '普通列' : k}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-          <div>
-            <label className="dd-field-label">键角色</label>
-            <select
-              className="dd-input"
-              value={typeof f.attrs?.key === 'string' ? f.attrs.key : ''}
-              onChange={(e) => updateNode(fieldId, { key: e.target.value })}
-            >
-              <option value="">普通列</option>
-              <option value="PK">PK（主键）</option>
-              <option value="FK">FK（外键）</option>
-            </select>
+        </section>
+        <section className="dd-fedit-group">
+          <h4>类型</h4>
+          <div className="dd-fedit-grid">
+            <div>
+              <label className="dd-field-label" htmlFor={`dd-ftype-${fieldId}`}>
+                数据类型
+              </label>
+              <input
+                id={`dd-ftype-${fieldId}`}
+                className="dd-input"
+                list="dd-sql-types"
+                placeholder="varchar"
+                value={str('dataType')}
+                onChange={(e) => updateNode(fieldId, { dataType: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="dd-field-label" htmlFor={`dd-fdef-${fieldId}`}>
+                默认值
+              </label>
+              <input
+                id={`dd-fdef-${fieldId}`}
+                className="dd-input"
+                placeholder="如 0 / NOW()"
+                value={str('default')}
+                onChange={(e) => updateNode(fieldId, { default: e.target.value })}
+              />
+            </div>
           </div>
-          <div>
-            <label className="dd-field-label">默认值</label>
-            <input
-              className="dd-input"
-              placeholder="如 0 / NOW()"
-              value={typeof f.attrs?.default === 'string' ? f.attrs.default : ''}
-              onChange={(e) => updateNode(fieldId, { default: e.target.value })}
-            />
+          <datalist id="dd-sql-types">
+            {SQL_TYPES.map((t) => (
+              <option key={t} value={t} />
+            ))}
+          </datalist>
+        </section>
+        <section className="dd-fedit-group">
+          <h4>约束</h4>
+          <div className="dd-switches">
+            <SwitchRow label="可空" desc="允许 NULL 值" checked={f.attrs?.nullable === true} onChange={(v) => updateNode(fieldId, { nullable: v })} />
+            <SwitchRow label="唯一" desc="UNIQUE · 不允许重复" checked={f.attrs?.unique === true} onChange={(v) => updateNode(fieldId, { unique: v })} />
+            <SwitchRow label="自增" desc="写入时自动递增" checked={f.attrs?.autoIncrement === true} onChange={(v) => updateNode(fieldId, { autoIncrement: v })} />
           </div>
-          <div className="dd-attr-wide">
-            <label className="dd-field-label">备注</label>
-            <input
-              className="dd-input"
-              placeholder="这一列是干什么的（画布上缩略显示）"
-              value={typeof f.attrs?.comment === 'string' ? f.attrs.comment : ''}
-              onChange={(e) => updateNode(fieldId, { comment: e.target.value })}
-            />
-          </div>
-        </div>
-        <div className="dd-toggle-row">
-          <label className="dd-toggle">
-            <input
-              type="checkbox"
-              checked={f.attrs?.nullable === true}
-              onChange={(e) => updateNode(fieldId, { nullable: e.target.checked })}
-            />
-            可空（NULL）
-          </label>
-          <label className="dd-toggle">
-            <input
-              type="checkbox"
-              checked={f.attrs?.unique === true}
-              onChange={(e) => updateNode(fieldId, { unique: e.target.checked })}
-            />
-            唯一（UNIQUE）
-          </label>
-          <label className="dd-toggle">
-            <input
-              type="checkbox"
-              checked={f.attrs?.autoIncrement === true}
-              onChange={(e) => updateNode(fieldId, { autoIncrement: e.target.checked })}
-            />
-            自增
-          </label>
-        </div>
-        {onDelete && (
-          <button
-            className={`dd-danger dd-field-delete${deleteArmed ? ' armed' : ''}`}
-            onClick={() => (deleteArmed ? onDelete(fieldId) : setDeleteArmed(true))}
-          >
-            {deleteArmed ? '确认删除？再点一次' : '删除字段'}
-          </button>
-        )}
-      </Section>
+        </section>
+        <section className="dd-fedit-group">
+          <h4>备注</h4>
+          <textarea
+            className="dd-input dd-textarea dd-fedit-comment"
+            rows={2}
+            placeholder="这一列是干什么的（画布上缩略显示）"
+            value={str('comment')}
+            onChange={(e) => updateNode(fieldId, { comment: e.target.value })}
+          />
+        </section>
+      </div>
       <ColumnImpactView model={model} fieldId={fieldId} />
     </>
   );

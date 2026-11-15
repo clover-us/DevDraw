@@ -4,7 +4,7 @@
  * 动态拆成多个子页面（tab）：
  *   详情 —— 名称 / 笔记内容 / 添加连线 / 删除；
  *   属性 —— 实体级属性（注册表软 schema 驱动），字段节点则为字段属性编辑器；
- *   字段 —— 仅表：字段列表 + 内联字段编辑；
+ *   字段 —— 仅表：左侧预览行即字段导航（点行切换），右栏直接是分组字段属性表单；
  *   外观 —— 仅可换身份的架构实体：组件身份 / 图标。
  * 外观是本地草稿：预览实时看草稿，「应用外观」才落模型；未应用时 tab 上亮小黄点。
  * 其余子页面实时写模型；footer 随子页面切换（删除/完成 vs 还原/取消/应用外观）。
@@ -18,9 +18,9 @@ import { newEdgeId, newNodeId } from '../core/id';
 import { connectableEdgeTypes, NODE_TYPES, type LensDef } from '../core/registry';
 import { GLYPH_LIST } from './glyphs';
 import type { EdgeType, Model, ModelNode } from '../core/types';
-import { AttrsEditor, FieldEditor, NodePicker, Section, TableFieldsEditor } from './entity-fields';
+import { AttrsEditor, FieldEditor, NodePicker, Section } from './entity-fields';
 import { Glyph } from './glyphs';
-import { CloseIcon, EntitiesIcon, PaletteIcon, SearchIcon } from './icons';
+import { CloseIcon, EntitiesIcon, PaletteIcon, PlusIcon, SearchIcon } from './icons';
 
 const APPEARANCE_TYPES = new Set(['Service', 'Database', 'Queue', 'Endpoint', 'ExternalSystem', 'Actor']);
 
@@ -54,8 +54,10 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
   const [connectTarget, setConnectTarget] = useState('');
   const [connectType, setConnectType] = useState<EdgeType>(connectableEdgeTypes(lens.id)[0]?.id ?? 'calls');
   const [deleteArmed, setDeleteArmed] = useState(false);
-  // 表内联选中的字段：点字段行展开其属性编辑，再点收起。
+  // 表当前选中的字段：左侧预览行点选切换，右栏直接编辑其属性。
   const [fieldId, setFieldId] = useState<string | null>(null);
+  const [focusNameTick, setFocusNameTick] = useState(0);
+  const [fieldDeleteArmed, setFieldDeleteArmed] = useState(false);
   // 外观（本地草稿，应用才落模型）
   const [componentId, setComponentId] = useState(typeof node.attrs?.component === 'string' ? node.attrs.component : '');
   const [icon, setIcon] = useState(nodeGlyph(model, node));
@@ -100,6 +102,20 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
     const t = window.setTimeout(() => setDeleteArmed(false), 3000);
     return () => window.clearTimeout(t);
   }, [deleteArmed]);
+  // 字段子页面：右栏直接是属性表单，进入即选中第一列；选中列失效时自动落回第一列。
+  useEffect(() => {
+    if (tab !== 'fields') return;
+    if (fieldId && model.nodes[fieldId]) return;
+    const rows = erFieldRows(model, nodeId);
+    setFieldId(rows[0]?.id ?? null);
+  }, [tab, fieldId, model, nodeId]);
+  useEffect(() => {
+    if (!fieldDeleteArmed) return;
+    const t = window.setTimeout(() => setFieldDeleteArmed(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [fieldDeleteArmed]);
+  // 换选另一列时解除「确认删除」武装，避免误删新选中的列。
+  useEffect(() => setFieldDeleteArmed(false), [fieldId]);
 
   const tryChange = (fn: () => string | null) => setError(fn());
   const updateNode = (id: string, attrs: Record<string, string | number | boolean>) =>
@@ -112,18 +128,34 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
       onChange(applyPatchChecked(model, { op: 'update-node', id: nodeId, name }));
       return null;
     });
-  const addField = (name: string, dataType: string) =>
+  // 添加字段：自动起不重名的 field_n，选中并聚焦名称，落笔即可改名。
+  const addField = () =>
     tryChange(() => {
+      const rows = erFieldRows(model, nodeId);
+      const names = new Set(rows.map((r) => r.name));
+      let n = rows.length + 1;
+      while (names.has(`field_${n}`)) n += 1;
       const fid = newNodeId('Field');
-      let m = applyPatchChecked(model, { op: 'add-node', id: fid, node: { type: 'Field', name, attrs: { dataType } } });
+      let m = applyPatchChecked(model, { op: 'add-node', id: fid, node: { type: 'Field', name: `field_${n}`, attrs: { dataType: 'varchar' } } });
       m = applyPatchChecked(m, { op: 'add-edge', id: newEdgeId('contains'), edge: { type: 'contains', from: nodeId, to: fid } });
       onChange(m);
+      setFieldId(fid);
+      setFocusNameTick((t) => t + 1);
+      return null;
+    });
+  const renameField = (fid: string, name: string) =>
+    tryChange(() => {
+      onChange(applyPatchChecked(model, { op: 'update-node', id: fid, name }));
       return null;
     });
   const deleteField = (fid: string) =>
     tryChange(() => {
+      const rows = erFieldRows(model, nodeId);
+      const idx = rows.findIndex((r) => r.id === fid);
+      const next = rows[idx + 1] ?? rows[idx - 1];
       onChange(applyPatchChecked(model, { op: 'remove-node', id: fid }));
-      setFieldId(null);
+      setFieldId(next && next.id !== fid ? next.id : null);
+      setFieldDeleteArmed(false);
       return null;
     });
   const addConnection = () => {
@@ -200,8 +232,10 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
 
   const allowed = connectableEdgeTypes(lens.id);
   const targets = nodes.filter(([id]) => id !== nodeId);
-  // 表的实时预览行：直接读模型，编辑字段 / 备注 / 类型即时反映在左侧迷你表卡。
+  // 表的实时预览行：直接读模型，编辑字段 / 备注 / 类型即时反映在左侧迷你表卡；
+  // 预览行同时是字段导航：点哪行，右栏就编辑哪列。
   const previewRows = node.type === 'Table' ? erFieldRows(model, nodeId) : [];
+  const selRow = previewRows.find((r) => r.id === fieldId);
   const tableComment = typeof node.attrs?.comment === 'string' && node.attrs.comment ? node.attrs.comment : '';
 
   return createPortal(
@@ -268,6 +302,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                 {t === 'fields' && <Glyph id="table" size={14} />}
                 {t === 'appearance' && <PaletteIcon size={14} />}
                 {TAB_LABEL[t]}
+                {t === 'fields' && <span className="dd-tab-count">{previewRows.length}</span>}
                 {t === 'appearance' && dirty && <span className="dd-tab-dot" aria-label="有未应用的外观改动" />}
               </button>
             ))}
@@ -291,7 +326,17 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                   <div className="dd-table-fields">
                     {previewRows.length === 0 && <div className="dd-table-empty">无字段 · 在右侧添加</div>}
                     {previewRows.map((f) => (
-                      <div key={f.id} className={`dd-field-row${fieldId === f.id ? ' selected' : ''}${f.keyRole ? ' is-key' : ''}`}>
+                      <button
+                        key={f.id}
+                        type="button"
+                        className={`dd-field-row dd-preview-row${fieldId === f.id ? ' selected' : ''}${f.keyRole ? ' is-key' : ''}`}
+                        onClick={() => {
+                          setFieldId(f.id);
+                          if (tab !== 'fields') setTab('fields');
+                        }}
+                        aria-pressed={fieldId === f.id}
+                        title={`编辑字段 ${f.name}`}
+                      >
                         <span className="dd-field-name">{f.name}</span>
                         {f.keyRole ? (
                           <span className={`dd-key dd-key-${f.keyRole.toLowerCase()}`}>{f.keyRole}</span>
@@ -309,7 +354,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                             </span>
                           )}
                         </span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -334,7 +379,9 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
             <p className="dd-modal-note">
               {tab === 'appearance'
                 ? '外观是组件身份的快照：换身份会同步图标，也可单独直挑图标。'
-                : '左侧为实时预览，编辑会即时反映在这里。'}
+                : node.type === 'Table' && tab === 'fields'
+                  ? '点击预览行切换字段，右侧编辑即时同步到画布。'
+                  : '左侧为实时预览，编辑会即时反映在这里。'}
             </p>
           </div>
 
@@ -388,22 +435,62 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
 
           {tab === 'fields' && (
             <div className="dd-modal-form dd-nodeeditor-pane" role="tabpanel" id="dd-node-panel-fields" aria-labelledby="dd-node-tab-fields">
-              <TableFieldsEditor
-                model={model}
-                tableId={nodeId}
-                onSelectField={(id) => setFieldId((prev) => (prev === id ? null : id))}
-                onAdd={addField}
-                selectedFieldId={fieldId}
-              />
-              {fieldId && model.nodes[fieldId] && (
-                <div className="dd-field-inline">
-                  <FieldEditor
-                    model={model}
-                    fieldId={fieldId}
-                    onSelectNode={() => setFieldId(null)}
-                    updateNode={updateNode}
-                    onDelete={deleteField}
-                  />
+              <div className="dd-fields-bar">
+                {selRow ? (
+                  <span className="dd-fields-bar-id">
+                    {selRow.keyRole && <span className={`dd-key dd-key-${selRow.keyRole.toLowerCase()}`}>{selRow.keyRole}</span>}
+                    <strong>{selRow.name}</strong>
+                    <span className="dd-fields-bar-type">{selRow.dataType}</span>
+                  </span>
+                ) : (
+                  <span className="dd-fields-bar-title">字段属性</span>
+                )}
+                <span className="dd-fields-bar-spacer" />
+                <button className="dd-mini-btn dd-fields-add" onClick={addField} title="添加字段并立即编辑">
+                  <PlusIcon size={12} />
+                  添加字段
+                </button>
+                {selRow && (
+                  <button
+                    className={`dd-mini-btn dd-danger${fieldDeleteArmed ? ' armed' : ''}`}
+                    onClick={() => (fieldDeleteArmed ? deleteField(selRow.id) : setFieldDeleteArmed(true))}
+                  >
+                    {fieldDeleteArmed ? '确认删除？' : '删除字段'}
+                  </button>
+                )}
+              </div>
+              {/* 窄屏隐藏预览时的字段切换兜底：与预览行同一份选中态。 */}
+              <select
+                className="dd-input dd-fields-switch"
+                aria-label="切换字段"
+                value={fieldId ?? ''}
+                onChange={(e) => setFieldId(e.target.value)}
+              >
+                {previewRows.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                    {r.keyRole ? `（${r.keyRole}）` : ''}
+                  </option>
+                ))}
+              </select>
+              {selRow && fieldId ? (
+                <FieldEditor
+                  model={model}
+                  fieldId={fieldId}
+                  onSelectNode={() => {}}
+                  updateNode={updateNode}
+                  onRename={(name) => renameField(fieldId, name)}
+                  showTableLink={false}
+                  focusNameTick={focusNameTick}
+                />
+              ) : (
+                <div className="dd-fields-empty">
+                  <Glyph id="table" size={24} />
+                  <p>这张表还没有字段，添加第一列开始建模。</p>
+                  <button className="dd-primary" onClick={addField}>
+                    <PlusIcon size={14} />
+                    添加第一个字段
+                  </button>
                 </div>
               )}
               {error && <p className="dd-error">{error}</p>}
