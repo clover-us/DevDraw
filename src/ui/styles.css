@@ -367,11 +367,18 @@ select.dd-input {
   gap: 7px;
   white-space: nowrap;
 }
-/* 品牌罗盘标记：推演方向的隐喻，用主色点亮，让 header 有识别锚点 */
+/* 品牌罗盘标记：推演方向的隐喻。沿用导航轨同款主色圆角方块（原导航轨 logo 移到这里，
+   全局只此一处，避免上下两个罗盘重复） */
 .dd-brand-mark {
-  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
   flex: none;
-  filter: drop-shadow(0 1px 3px var(--ring));
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 11px;
 }
 .dd-brand-name {
   letter-spacing: 0.01em;
@@ -658,17 +665,6 @@ select.dd-input {
   border-right: 1px solid var(--border);
   background: var(--panel);
   z-index: 15;
-}
-.dd-rail-logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  margin-bottom: 8px;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: 11px;
 }
 .dd-rail-group {
   display: flex;

@@ -1328,7 +1328,9 @@ export function App() {
     <div className="dd-app">
       <header className="dd-header">
         <div className="dd-brand">
-          <LogoIcon size={20} className="dd-brand-mark" />
+          <span className="dd-brand-mark" title="DevDraw · 研绘">
+            <LogoIcon size={24} />
+          </span>
           <span className="dd-brand-name">DevDraw</span>
           <span className="dd-brand-sub">研绘</span>
         </div>

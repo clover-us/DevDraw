@@ -3,7 +3,7 @@
  * 把旧右栏那堆内容拆成三个可导航分区：实体 / 发现 / 推演。
  * 镜片切换留在顶部 header（用户要求顶部不变）。底部：主题切换 + 展开/收起。
  */
-import { ChevronLeftIcon, ChevronRightIcon, EntitiesIcon, FindingsIcon, LibraryIcon, LogoIcon, MoonIcon, SessionsIcon, SimulationIcon, SunIcon, TraceIcon } from './icons';
+import { ChevronLeftIcon, ChevronRightIcon, EntitiesIcon, FindingsIcon, LibraryIcon, MoonIcon, SessionsIcon, SimulationIcon, SunIcon, TraceIcon } from './icons';
 import type { Theme } from './theme';
 
 export type NavSection = 'library' | 'entities' | 'findings' | 'simulation' | 'trace' | 'sessions';
@@ -46,10 +46,6 @@ export function NavRail({
     id === 'findings' ? findingsBadge : id === 'simulation' ? simulationBadge : id === 'trace' ? traceBadge : id === 'sessions' ? sessionsBadge : 0;
   return (
     <nav className="dd-rail" aria-label="主导航">
-      <div className="dd-rail-logo" title="DevDraw · 研绘">
-        <LogoIcon size={24} />
-      </div>
-
       <div className="dd-rail-group">
         {SECTIONS.map(({ id, label, Icon, hint }) => {
           const active = section === id && expanded;
