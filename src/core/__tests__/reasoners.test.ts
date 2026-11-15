@@ -16,10 +16,10 @@ const byId = (findings: Finding[], id: string) => findings.find((f) => f.id === 
 const option = (f: Finding | undefined, id: string) => f?.question?.options.find((o) => o.id === id);
 
 describe('镜片注册表 / 投影', () => {
-  it('架构镜片投影 == spike 原模型（9 节点 9 边，跨镜片边隐藏）', () => {
+  it('架构镜片投影 == spike 原模型 + 分析库（10 节点 10 边，跨镜片边隐藏）', () => {
     const p = projectLens(M, getLens('architecture'));
-    expect(Object.keys(p.nodes).sort()).toEqual(Object.keys(sampleModel.nodes).sort());
-    expect(Object.keys(p.edges).sort()).toEqual(Object.keys(sampleModel.edges).sort());
+    expect(Object.keys(p.nodes).sort()).toEqual([...Object.keys(sampleModel.nodes), 'n_analytics_db'].sort());
+    expect(Object.keys(p.edges).sort()).toEqual([...Object.keys(sampleModel.edges), 'e_events_writes_analytics'].sort());
   });
 
   it('ER 镜片只含表（7 表，字段折进表卡片不独立投影），跨镜片胶水边隐藏', () => {

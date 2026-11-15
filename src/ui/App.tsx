@@ -13,6 +13,7 @@ import {
   Controls,
   ControlButton,
   MiniMap,
+  Panel,
   ReactFlow,
   useEdgesState,
   useNodesState,
@@ -25,7 +26,9 @@ import {
 } from '@xyflow/react';
 import { nodeComponent, nodeFromComponent, nodeGlyph, resolveComponent } from '../core/components';
 import {
+  applyErScope,
   ER_ANCHOR_HANDLE,
+  erDatabases,
   erFieldPort,
   erFieldRows,
   fieldIdFromHandle,
@@ -34,6 +37,7 @@ import {
   planFkConnection,
   resolveFkLinks,
   shouldAutoFold,
+  unassignedTableIds,
   type ErField,
   type FkLink,
 } from '../core/er';
@@ -46,6 +50,7 @@ import { findRecord, recordPatch } from '../core/reasoners/util';
 import { connectableEdgeTypes, EDGE_TYPES, getLens, LENSES, NODE_TYPES, projectLens, type LensId } from '../core/registry';
 import { threeLensPositions } from '../core/sample-three-lens';
 import { createSession, type ReasoningSession } from '../core/session';
+import { engineLabel } from '../core/sqlTypes';
 import { edgeDependency, simulate, type SimulationResult } from '../core/simulate';
 import {
   annotateHop,
@@ -158,6 +163,8 @@ export function App() {
   const theme = useTheme();
   const { screenToFlowPosition, zoomIn, zoomOut, fitView } = useReactFlow();
   const [lens, setLens] = useState<LensId>('architecture');
+  // ER 按数据库分scope：'all' | 数据库 id | 'unassigned'。架构里有多库时，ER 各看各的内容。
+  const [erScope, setErScope] = useState<string>('all');
   const [seeds, setSeeds] = useState<string[]>([]);
   // 请求追踪场景（§2.3）：和 seeds 一样是 what-if 假设，住在 views.architecture.trace，不进 model.json。
   const [trace, setTrace] = useState<TraceScenario | null>(null);
@@ -236,7 +243,20 @@ export function App() {
   }, [project.loadedAt]);
 
   const lensDef = getLens(lens);
-  const projection = useMemo(() => projectLens(model, lensDef), [model, lensDef]);
+  const baseProjection = useMemo(() => projectLens(model, lensDef), [model, lensDef]);
+  // ER scope 条的数据源：架构里的数据库实体 + 各自表数；没挂库的表给「未归属」入口。
+  const erDbs = useMemo(() => erDatabases(model), [model]);
+  const erUnassigned = useMemo(() => unassignedTableIds(model), [model]);
+  const erTableTotal = useMemo(() => Object.values(model.nodes).filter((n) => n.type === 'Table').length, [model]);
+  // 选中的库被删 / 未归属清空时退回「全部」，不让scope条指着空气。
+  const activeErScope =
+    erScope !== 'all' && !(erScope === 'unassigned' ? erUnassigned.length > 0 : model.nodes[erScope]?.type === 'Database')
+      ? 'all'
+      : erScope;
+  const projection = useMemo(
+    () => (lens === 'er' ? applyErScope(model, baseProjection, activeErScope) : baseProjection),
+    [lens, model, baseProjection, activeErScope],
+  );
   const projectionRef = useRef(projection);
   projectionRef.current = projection;
 
@@ -298,11 +318,11 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structKey, lens, relayoutNonce]);
 
-  // 只有"整幅视角变了"（切镜片 / 手动重新布局）才 remount + fitView，而且必须等布局算完。
+  // 只有"整幅视角变了"（切镜片 / 手动重新布局 / ER 换库scope）才 remount + fitView，而且必须等布局算完。
   // 新增一个节点不该把整张画布重新缩放挪走——否则「落在鼠标处」就白说了。
   useEffect(() => {
     pendingFitRef.current = true;
-  }, [lens, relayoutNonce]);
+  }, [lens, relayoutNonce, activeErScope]);
   const findings = useMemo(() => lensDef.reasoner.run(model), [model, lensDef]);
   const result = useMemo(() => {
     if (lens !== 'architecture' || seeds.length === 0) return null;
@@ -1630,6 +1650,46 @@ export function App() {
             proOptions={{ hideAttribution: true }}
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} color="var(--canvas-dot)" />
+            {lens === 'er' && (erDbs.length > 0 || erUnassigned.length > 0) && (
+              <Panel position="top-center" className="dd-er-scope-panel">
+                <div className="dd-er-scope" role="group" aria-label="按数据库筛选 ER 内容">
+                  <button
+                    type="button"
+                    className={`dd-er-scope-chip${activeErScope === 'all' ? ' active' : ''}`}
+                    aria-pressed={activeErScope === 'all'}
+                    onClick={() => setErScope('all')}
+                  >
+                    全部
+                    <span className="dd-er-scope-count">{erTableTotal}</span>
+                  </button>
+                  {erDbs.map((d) => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      className={`dd-er-scope-chip${activeErScope === d.id ? ' active' : ''}`}
+                      aria-pressed={activeErScope === d.id}
+                      onClick={() => setErScope(d.id)}
+                      title={`${d.name} · ${engineLabel(d.engine)} · ${d.tableIds.length} 张表`}
+                    >
+                      {d.name}
+                      <span className="dd-er-scope-engine">{engineLabel(d.engine)}</span>
+                      <span className="dd-er-scope-count">{d.tableIds.length}</span>
+                    </button>
+                  ))}
+                  {erUnassigned.length > 0 && (
+                    <button
+                      type="button"
+                      className={`dd-er-scope-chip${activeErScope === 'unassigned' ? ' active' : ''}`}
+                      aria-pressed={activeErScope === 'unassigned'}
+                      onClick={() => setErScope('unassigned')}
+                    >
+                      未归属
+                      <span className="dd-er-scope-count">{erUnassigned.length}</span>
+                    </button>
+                  )}
+                </div>
+              </Panel>
+            )}
             <Controls
               showZoom={false}
               showFitView={false}

@@ -4304,6 +4304,74 @@ select.dd-input {
 .dd-fedit-grid .dd-input {
   margin: 0;
 }
+/* 类型组标题带引擎来源：建议跟着归属数据库走，不是全局混合列表。 */
+.dd-fedit-engine {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--faint);
+}
+/* ER scope 条：架构有多库时各看各的内容；跨库外键只在「全部」里出现。 */
+.dd-er-scope {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  max-width: min(720px, calc(100vw - 48px));
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px var(--shadow-soft);
+}
+.dd-er-scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.dd-er-scope-chip:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.dd-er-scope-chip.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.dd-er-scope-engine {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--faint);
+}
+.dd-er-scope-chip.active .dd-er-scope-engine {
+  color: var(--accent);
+  opacity: 0.8;
+}
+.dd-er-scope-count {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  color: var(--muted);
+}
+.dd-er-scope-chip.active .dd-er-scope-count {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
 .dd-fedit-comment {
   min-height: 56px;
   margin: 0;

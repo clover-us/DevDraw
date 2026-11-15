@@ -33,6 +33,12 @@ export const sampleThreeLensModel: Model = {
         ARCH_IDENTITY[id] ? { ...n, attrs: { ...n.attrs, component: ARCH_IDENTITY[id] } } : n,
       ]),
     ),
+    // ── 架构：第二个数据库（PostgreSQL）——ER 镜片按库分scope，各看各的表 ──
+    n_analytics_db: {
+      type: 'Database',
+      name: '分析库',
+      attrs: { component: 'postgres', engine: 'PostgreSQL', version: '16', charset: 'UTF8', comment: '审计与行为分析，只读副本' },
+    },
     // ── ER：表 ──
     t_orders: { type: 'Table', name: 'orders', attrs: { comment: '订单主表，状态映射订单生命周期', engine: 'InnoDB', charset: 'utf8mb4' } },
     t_order_items: { type: 'Table', name: 'order_items', attrs: { comment: '订单明细，一单多行' } },
@@ -149,11 +155,13 @@ export const sampleThreeLensModel: Model = {
     c_db_payments: { type: 'contains', from: 'n_order_db', to: 't_payments' },
     c_db_refunds: { type: 'contains', from: 'n_order_db', to: 't_refunds' },
     c_db_products: { type: 'contains', from: 'n_order_db', to: 't_products' },
-    c_db_audit: { type: 'contains', from: 'n_order_db', to: 't_audit_log' },
+    // audit_log 用的是 PG 类型（inet/jsonb/timestamptz）——归分析库，演示按引擎给类型建议。
+    c_db_audit: { type: 'contains', from: 'n_analytics_db', to: 't_audit_log' },
     c_db_shipments: { type: 'contains', from: 'n_order_db', to: 't_shipments' },
     e_order_reads_orders: { type: 'reads', from: 'n_order', to: 't_orders' },
     e_order_writes_orders: { type: 'writes', from: 'n_order', to: 't_orders' },
     e_pay_writes_payments: { type: 'writes', from: 'n_payment', to: 't_payments' },
+    e_events_writes_analytics: { type: 'writes', from: 'n_events', to: 'n_analytics_db' },
     // ── 跨镜片：ER ↔ 状态机 ──
     e_orders_lifecycle: { type: 'has-lifecycle', from: 't_orders', to: 'sm_order' },
     e_status_encodes: { type: 'encodes', from: 'f_orders_status', to: 'sm_order' },
@@ -182,6 +190,7 @@ export const threeLensPositions: Record<string, { x: number; y: number }> = {
   ...samplePositions,
   // 反问"新增履约服务"后动态加入的节点，预留一个架构镜片位置
   n_fulfillment: { x: 750, y: -120 },
+  n_analytics_db: { x: 750, y: 470 },
   // ER 表：外键即数据流向（父表在左、子表在右），一张表一列，列宽 = 卡片 264 + 108 过道。
   // 过道要够宽：外键线要在这里挑车道、竖着走一段再进子表的那个字段行。
   t_orders: { x: 0, y: 60 },

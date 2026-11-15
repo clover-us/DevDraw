@@ -9,7 +9,7 @@ describe('layoutProjection（ELK 自动布局）', () => {
     const projection = projectLens(sampleThreeLensModel, getLens('architecture'));
     const pos = await layoutProjection(projection, 'architecture');
     const ids = Object.keys(projection.nodes);
-    expect(ids.length).toBe(9);
+    expect(ids.length).toBe(10);
     for (const id of ids) {
       expect(pos[id]).toBeDefined();
       expect(Number.isFinite(pos[id].x)).toBe(true);

@@ -5,7 +5,9 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { nodeGlyph } from '../core/components';
+import { databaseOfTable } from '../core/er';
 import { columnImpact } from '../core/reasoners/er';
+import { engineLabel, sqlTypesForEngine } from '../core/sqlTypes';
 import { NODE_TYPES } from '../core/registry';
 import type { Model, ModelNode } from '../core/types';
 import { Glyph } from './glyphs';
@@ -165,9 +167,6 @@ export function FieldView({ model, fieldId, onSelectNode }: { model: Model; fiel
   );
 }
 
-/** 常用 SQL 类型：数据类型输入的 datalist 建议，仍可自由输入。 */
-const SQL_TYPES = ['bigint', 'int', 'smallint', 'varchar', 'text', 'char', 'decimal', 'numeric', 'boolean', 'date', 'time', 'timestamp', 'timestamptz', 'json', 'jsonb', 'uuid', 'bytea'];
-
 /** 约束开关：整行可点、右侧滑轨反映状态，比裸 checkbox 更直观、更好点。 */
 function SwitchRow({ label, desc, checked, onChange }: { label: string; desc: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -213,6 +212,10 @@ export function FieldEditor({
 }) {
   const f = model.nodes[fieldId];
   const owner = Object.values(model.edges).find((e) => e.type === 'contains' && e.to === fieldId)?.from;
+  // 类型建议跟着归属数据库的引擎走：MySQL 的 enum/datetime 与 PostgreSQL 的 jsonb/inet 不混在一份列表里。
+  const db = owner ? databaseOfTable(model, owner) : undefined;
+  const dbEngine = typeof db?.attrs?.engine === 'string' ? db.attrs.engine : undefined;
+  const typeOptions = sqlTypesForEngine(dbEngine);
   const nameRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (focusNameTick > 0) {
@@ -267,7 +270,12 @@ export function FieldEditor({
           </div>
         </section>
         <section className="dd-fedit-group">
-          <h4>类型</h4>
+          <h4>
+            类型
+            <span className="dd-fedit-engine" title="类型建议来自表所归属的数据库引擎">
+              {db ? `${engineLabel(dbEngine)} · ${db.name}` : '通用 SQL · 未关联数据库'}
+            </span>
+          </h4>
           <div className="dd-fedit-grid">
             <div>
               <label className="dd-field-label" htmlFor={`dd-ftype-${fieldId}`}>
@@ -296,7 +304,7 @@ export function FieldEditor({
             </div>
           </div>
           <datalist id="dd-sql-types">
-            {SQL_TYPES.map((t) => (
+            {typeOptions.map((t) => (
               <option key={t} value={t} />
             ))}
           </datalist>

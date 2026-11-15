@@ -16,7 +16,7 @@ export const sampleModel: Model = {
     n_payment: { type: 'Service', name: '支付服务', attrs: { replicas: 3 } },
     n_risk: { type: 'Service', name: '风控服务' },
     n_order_db: { type: 'Database', name: '订单库', attrs: { engine: 'MySQL', version: '8.0', charset: 'utf8mb4', comment: '订单域主库，一主两从' } },
-    n_cache: { type: 'Database', name: '订单缓存', attrs: { tech: 'Redis' } },
+    n_cache: { type: 'Database', name: '订单缓存', attrs: { tech: 'Redis', engine: 'Redis' } },
     n_events: { type: 'Queue', name: '订单事件队列' },
     n_notify: { type: 'Service', name: '通知服务' },
   },

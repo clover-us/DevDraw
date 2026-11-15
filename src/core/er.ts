@@ -8,7 +8,7 @@
  * 纯数据，无 UI 依赖：渲染（handle id）、布局（ELK port）、拖线（外键语义）三处共用同一份
  * 「外键列在哪张表、哪一行」的判断，避免三处各猜一套。
  */
-import type { Model, ModelEdge } from './types';
+import type { Model, ModelEdge, ModelNode } from './types';
 
 /** 表卡片里的一行（字段）。 */
 export interface ErField {
@@ -99,6 +99,79 @@ export function erFieldRows(model: Model, tableId: string): ErField[] {
       comment: typeof n?.attrs?.comment === 'string' && n.attrs.comment ? n.attrs.comment : undefined,
     };
   });
+}
+
+/** 表归属的数据库实体：Database --contains--> Table。没挂数据库的表返回 undefined。 */
+export function databaseOfTable(model: Model, tableId: string): ModelNode | undefined {
+  for (const e of Object.values(model.edges)) {
+    if (e.type === 'contains' && e.to === tableId) {
+      const n = model.nodes[e.from];
+      if (n?.type === 'Database') return n;
+    }
+  }
+  return undefined;
+}
+
+/** 一个数据库实体在 ER 镜片里的「内容」：它contains 的表（按边序）。 */
+export interface ErDatabase {
+  id: string;
+  name: string;
+  /** 数据库引擎（MySQL / PostgreSQL …），决定字段类型目录。 */
+  engine?: string;
+  tableIds: string[];
+}
+
+/** 模型里全部数据库实体 + 各自的表清单（架构里有多库时，ER 按库分scope）。 */
+export function erDatabases(model: Model): ErDatabase[] {
+  const out: ErDatabase[] = [];
+  for (const [id, n] of Object.entries(model.nodes)) {
+    if (n.type !== 'Database') continue;
+    const tableIds: string[] = [];
+    for (const e of Object.values(model.edges)) {
+      if (e.type === 'contains' && e.from === id && model.nodes[e.to]?.type === 'Table') tableIds.push(e.to);
+    }
+    out.push({ id, name: n.name, engine: typeof n.attrs?.engine === 'string' ? n.attrs.engine : undefined, tableIds });
+  }
+  return out;
+}
+
+/** 没挂任何数据库的表（ER scope 条里给它们一个「未归属」入口）。 */
+export function unassignedTableIds(model: Model): string[] {
+  const assigned = new Set(erDatabases(model).flatMap((d) => d.tableIds));
+  return Object.entries(model.nodes)
+    .filter(([id, n]) => n.type === 'Table' && !assigned.has(id))
+    .map(([id]) => id);
+}
+
+export interface ErProjection {
+  nodes: Record<string, ModelNode>;
+  edges: Record<string, ModelEdge>;
+}
+
+/**
+ * ER 按数据库分scope：'all' 原样；数据库 id 只留它的表；'unassigned' 只留没挂库的表。
+ * 注释类节点（Note/Decision/Assumption）是全模型注解，任何scope都保留；
+ * 边按「两端均在scope内」筛选——跨库外键在单库视图里自动隐藏，回到「全部」才出现。
+ */
+export function applyErScope(model: Model, proj: ErProjection, scope: string): ErProjection {
+  if (scope === 'all') return proj;
+  let tableSet: Set<string>;
+  if (scope === 'unassigned') {
+    tableSet = new Set(unassignedTableIds(model));
+  } else {
+    const db = erDatabases(model).find((d) => d.id === scope);
+    if (!db) return proj;
+    tableSet = new Set(db.tableIds);
+  }
+  const nodes: Record<string, ModelNode> = {};
+  for (const [id, n] of Object.entries(proj.nodes)) {
+    if (n.type !== 'Table' || tableSet.has(id)) nodes[id] = n;
+  }
+  const edges: Record<string, ModelEdge> = {};
+  for (const [id, e] of Object.entries(proj.edges)) {
+    if (nodes[e.from] && nodes[e.to]) edges[id] = e;
+  }
+  return { nodes, edges };
 }
 
 /** 字段级 handle id：fl:… 在行左（target，进线），fr:… 在行右（source，出线）。 */

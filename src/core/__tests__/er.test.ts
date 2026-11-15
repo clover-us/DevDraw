@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyErScope,
+  databaseOfTable,
   ER_ANCHOR_HANDLE,
+  erDatabases,
   erFieldPort,
   erFieldRows,
   fieldIdFromHandle,
@@ -11,7 +14,9 @@ import {
   resolveFkLinks,
   tableCardHeight,
   tableFieldIds,
+  unassignedTableIds,
 } from '../er';
+import { getLens, projectLens } from '../registry';
 import { sampleThreeLensModel } from '../sample-three-lens';
 import type { Model } from '../types';
 
@@ -137,5 +142,62 @@ describe('拖线 → 外键语义', () => {
   it('没有字段信息时按表级连一条 1:N', () => {
     const plan = planFkConnection(sampleThreeLensModel, 't_orders', 't_payments');
     expect(plan).toEqual({ from: 't_orders', to: 't_payments', key: undefined, cardinality: '1:N' });
+  });
+});
+
+describe('ER 按数据库分scope', () => {
+  const erProj = () => projectLens(sampleThreeLensModel, getLens('er'));
+
+  it('表归属数据库：contains 边 Database→Table', () => {
+    expect(databaseOfTable(sampleThreeLensModel, 't_payments')?.name).toBe('订单库');
+    expect(databaseOfTable(sampleThreeLensModel, 't_audit_log')?.name).toBe('分析库');
+    expect(databaseOfTable(sampleThreeLensModel, 't_orders')?.attrs?.engine).toBe('MySQL');
+    expect(databaseOfTable(sampleThreeLensModel, 't_audit_log')?.attrs?.engine).toBe('PostgreSQL');
+  });
+
+  it('erDatabases 列出全部库 + 各自表清单（Redis 缓存也是 Database，0 表）', () => {
+    const dbs = erDatabases(sampleThreeLensModel);
+    expect(dbs.map((d) => d.name)).toEqual(['订单库', '订单缓存', '分析库']);
+    const order = dbs.find((d) => d.id === 'n_order_db')!;
+    const analytics = dbs.find((d) => d.id === 'n_analytics_db')!;
+    expect(order.tableIds).toContain('t_payments');
+    expect(order.tableIds).not.toContain('t_audit_log');
+    expect(analytics.tableIds).toEqual(['t_audit_log']);
+    expect(analytics.engine).toBe('PostgreSQL');
+    expect(dbs.find((d) => d.id === 'n_cache')!.tableIds).toEqual([]);
+  });
+
+  it('scope=分析库：只留它的表，跨库外键自动隐藏', () => {
+    const scoped = applyErScope(sampleThreeLensModel, erProj(), 'n_analytics_db');
+    expect(Object.keys(scoped.nodes).filter((id) => sampleThreeLensModel.nodes[id].type === 'Table')).toEqual(['t_audit_log']);
+    // orders→audit_log 的外键一端在scope外 → 隐藏。
+    expect(scoped.edges['fk_orders_audit']).toBeUndefined();
+  });
+
+  it('scope=订单库：六张表，不含 audit_log；库内外键保留', () => {
+    const scoped = applyErScope(sampleThreeLensModel, erProj(), 'n_order_db');
+    const tables = Object.keys(scoped.nodes).filter((id) => sampleThreeLensModel.nodes[id].type === 'Table');
+    expect(tables).toHaveLength(6);
+    expect(tables).not.toContain('t_audit_log');
+    expect(scoped.edges['fk_orders_payments']).toBeDefined();
+    expect(scoped.edges['fk_orders_audit']).toBeUndefined();
+  });
+
+  it('scope=all 原样；未知scope退回原样', () => {
+    const proj = erProj();
+    expect(applyErScope(sampleThreeLensModel, proj, 'all')).toBe(proj);
+    expect(applyErScope(sampleThreeLensModel, proj, 'n_missing')).toBe(proj);
+    expect(proj.edges['fk_orders_audit']).toBeDefined();
+  });
+
+  it('未归属表：单独scope可见，all 也可见', () => {
+    const model: Model = {
+      ...sampleThreeLensModel,
+      nodes: { ...sampleThreeLensModel.nodes, t_loose: { type: 'Table', name: 'loose' } },
+    };
+    expect(unassignedTableIds(model)).toEqual(['t_loose']);
+    const scoped = applyErScope(model, projectLens(model, getLens('er')), 'unassigned');
+    expect(Object.keys(scoped.nodes)).toContain('t_loose');
+    expect(Object.keys(scoped.nodes)).not.toContain('t_orders');
   });
 });
