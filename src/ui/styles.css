@@ -2529,6 +2529,30 @@ select.dd-input {
 .dd-comp-preview .dd-comp-name {
   font-size: 14px;
 }
+/* 组件详情（只读）：语义底座 / 组件身份 / 分类 三行 meta，dt 弱、dd 实。 */
+.dd-comp-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+.dd-comp-meta > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dd-comp-meta dt {
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.dd-comp-meta dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  text-align: right;
+}
 .dd-drawer-section.dd-grow {
   flex: 1;
   min-height: 0;

@@ -60,6 +60,7 @@ import {
 import { computeLegendStats } from '../core/legend';
 import type { ComponentDef, DependencyMode, EdgeType, Model, NodeType } from '../core/types';
 import { ComponentEditor } from './ComponentEditor';
+import { AppearanceEditor } from './AppearanceEditor';
 import { COMPONENT_MIME, ComponentLibrary } from './ComponentLibrary';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DevDrawEdge, DevDrawNode, Z_SELECTED, type DevDrawEdgeData, type DevDrawNodeData, type FieldRow } from './components';
@@ -198,6 +199,8 @@ export function App() {
   const [createMode, setCreateMode] = useState(false);
   // 自定义组件编辑器：null=关闭；{editing:null}=新建；{editing:comp}=编辑。
   const [componentEditor, setComponentEditor] = useState<{ editing: ComponentDef | null } | null>(null);
+  // 节点外观编辑弹窗：右键「编辑外观…」或抽屉「组件详情」的编辑按钮打开，编辑对象是节点实例。
+  const [appearanceNode, setAppearanceNode] = useState<string | null>(null);
   // 会话分区里选中的存档（存档本身住在 reasoning/ 里，这里只是"正在看哪一份"）。
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   // ── 三个直接落在画布上的交互：就地新建 / 连线选语义 / 右键菜单 ──
@@ -1036,6 +1039,14 @@ export function App() {
         onSelect: () => startTraceFrom(id),
       });
     }
+    if (lens === 'architecture' && SEEDABLE.has(node.type)) {
+      items.push({
+        key: 'appearance',
+        label: '编辑外观…',
+        hint: '身份 / 图标',
+        onSelect: () => setAppearanceNode(id),
+      });
+    }
     items.push({ key: 'edit', label: '编辑详情', hint: '右侧', onSelect: () => selectNode(id) });
     items.push({
       key: 'rename',
@@ -1744,6 +1755,7 @@ export function App() {
             seeds={seeds}
             onToggleSeed={toggleSeed}
             onStartTrace={startTraceFrom}
+            onEditAppearance={setAppearanceNode}
             canBack={backStack.length > 0}
             canForward={fwdStack.length > 0}
             onBack={goBack}
@@ -1757,6 +1769,17 @@ export function App() {
             onSave={saveComponent}
             onDelete={deleteComponent}
             onClose={() => setComponentEditor(null)}
+          />
+        )}
+        {appearanceNode && model.nodes[appearanceNode] && (
+          <AppearanceEditor
+            model={model}
+            node={model.nodes[appearanceNode]}
+            onApply={(attrs) => {
+              setModel((m) => applyPatchChecked(m, { op: 'update-node', id: appearanceNode, attrs }));
+              setAppearanceNode(null);
+            }}
+            onClose={() => setAppearanceNode(null)}
           />
         )}
       </div>

@@ -304,3 +304,15 @@ export function ComponentIcon(p: IconProps) {
     </svg>
   );
 }
+
+/** 外观：调色盘——换组件身份 / 图标只是皮肤，语义底座不变。 */
+export function PaletteIcon(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-.9 2-1.8 0-.9-.7-1.4-.7-2.2 0-.9.7-1.5 1.6-1.5H17a4 4 0 0 0 4-4c0-4.7-4-8.5-9-8.5z" />
+      <circle cx="7.5" cy="11" r="1" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="7.5" r="1" fill="currentColor" stroke="none" />
+      <circle cx="14.5" cy="7.5" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}

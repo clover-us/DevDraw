@@ -4,17 +4,17 @@
  * 新建实体走独立创建态。所有变更经 applyPatchChecked / applyPatchesChecked 守门。
  */
 import { useEffect, useState, type ReactNode } from 'react';
-import { componentCatalog, nodeComponent, nodeGlyph } from '../core/components';
+import { categoryLabel, nodeComponent, nodeGlyph } from '../core/components';
 import { newEdgeId, newNodeId } from '../core/id';
 import { applyPatchChecked, applyPatchesChecked } from '../core/patch';
 import { columnImpact } from '../core/reasoners/er';
 import type { Finding, QuestionOption } from '../core/reasoners/types';
 import { EDGE_TYPES, NODE_TYPES, type LensDef, type Projection } from '../core/registry';
 import { edgeDependency, type SimulationResult } from '../core/simulate';
-import type { ComponentDef, DependencyMode, EdgeType, Model, ModelNode, NodeType } from '../core/types';
-import { GLYPH_LIST, Glyph } from './glyphs';
+import type { DependencyMode, EdgeType, Model, ModelNode, NodeType } from '../core/types';
+import { Glyph } from './glyphs';
 import { FindingCard, MODE_INFO, MODES, nodeName } from './inspect';
-import { ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, LinkIcon, PlusIcon, SimulationIcon, TraceIcon, TrashIcon } from './icons';
+import { ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, LinkIcon, PaletteIcon, PlusIcon, SimulationIcon, TraceIcon, TrashIcon } from './icons';
 
 interface EntityDrawerProps {
   model: Model;
@@ -37,6 +37,8 @@ interface EntityDrawerProps {
   /** 推演入口可见化：不再只藏右键，选中节点就能直接模拟失效 / 追踪请求。 */
   onToggleSeed: (id: string) => void;
   onStartTrace: (id: string) => void;
+  /** 外观编辑搬到弹窗（右键菜单 / 详情里的编辑按钮）：抽屉只留只读组件详情。 */
+  onEditAppearance: (id: string) => void;
   /** 抽屉钻取历史（浏览器式 back/forward）：从节点→相关边→另一端层层深入后能原路返回。 */
   canBack: boolean;
   canForward: boolean;
@@ -48,7 +50,7 @@ interface EntityDrawerProps {
 const NODE_TYPE_LIST = Object.values(NODE_TYPES);
 const EDGE_TYPE_LIST = Object.values(EDGE_TYPES);
 
-/** 这些架构实体可在抽屉里换组件身份 / 图标（语义底座不变）。 */
+/** 这些架构实体有组件身份 / 图标可言：抽屉里展示只读「组件详情」，编辑走弹窗。 */
 const APPEARANCE_TYPES = new Set<NodeType>(['Service', 'Database', 'Queue', 'Endpoint', 'ExternalSystem', 'Actor']);
 
 /** 可作失效源的架构实体（与 App 的 SEEDABLE 一致）：抽屉里给它们可见的推演入口。 */
@@ -347,7 +349,7 @@ export function EntityDrawer(props: EntityDrawerProps) {
         )}
 
         {APPEARANCE_TYPES.has(node.type) && (
-          <ComponentAppearance model={model} node={node} nodeId={id} updateNode={updateNode} />
+          <ComponentDetails model={model} node={node} onEdit={() => props.onEditAppearance(id)} />
         )}
 
         {node.type === 'Table' && (
@@ -738,66 +740,46 @@ function FieldEditor({
   );
 }
 
-/** 组件外观：换组件身份（语义底座不变）或直接挑图标。改动写进 node.attrs，推演照算。 */
-function ComponentAppearance({
-  model,
-  node,
-  nodeId,
-  updateNode,
-}: {
-  model: Model;
-  node: ModelNode;
-  nodeId: string;
-  updateNode: (id: string, attrs: Record<string, string | number | boolean>) => void;
-}) {
-  const current = nodeComponent(model, node);
+/**
+ * 组件详情（只读）：这个节点当前是什么组件——身份 / 语义底座 / 分类 + 预览。
+ * 编辑（换身份 / 挑图标）搬到弹窗：点「编辑外观」或右键节点，避免一大片图标网格挤占建模抽屉。
+ */
+function ComponentDetails({ model, node, onEdit }: { model: Model; node: ModelNode; onEdit: () => void }) {
+  const comp = nodeComponent(model, node);
   const glyph = nodeGlyph(model, node);
-  const options = componentCatalog(model).filter((c) => c.baseType === node.type);
-  const componentId = typeof node.attrs?.component === 'string' ? node.attrs.component : '';
-
-  const pickComponent = (comp: ComponentDef | undefined) => {
-    if (!comp) updateNode(nodeId, { component: '', icon: '' });
-    else updateNode(nodeId, { component: comp.id, icon: comp.icon });
-  };
-
   return (
-    <Section title="组件外观">
+    <Section
+      title="组件详情"
+      action={
+        <button className="dd-mini-btn" onClick={onEdit} title="换组件身份 / 图标（弹窗编辑）">
+          <PaletteIcon size={13} /> 编辑外观
+        </button>
+      }
+    >
       <div className="dd-comp-preview">
         <span className="dd-comp-glyph">
           <Glyph id={glyph} size={26} />
         </span>
         <span className="dd-comp-text">
-          <span className="dd-comp-name">{current?.name ?? NODE_TYPES[node.type].label}</span>
-          <span className="dd-comp-desc">{current?.description ?? '按语义类型显示默认图标'}</span>
+          <span className="dd-comp-name">{comp?.name ?? NODE_TYPES[node.type].label}</span>
+          <span className="dd-comp-desc">{comp?.description ?? '按语义类型显示默认图标'}</span>
         </span>
       </div>
-      <label className="dd-field-label">组件身份（不改语义底座，推演照算）</label>
-      <select
-        className="dd-input"
-        value={componentId}
-        onChange={(e) => pickComponent(options.find((c) => c.id === e.target.value))}
-      >
-        <option value="">按语义类型（默认图标）</option>
-        {options.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
-      <label className="dd-field-label">或直挑图标</label>
-      <div className="dd-glyph-grid dd-glyph-grid-sm">
-        {GLYPH_LIST.map((g) => (
-          <button
-            key={g.id}
-            className={`dd-glyph-cell${glyph === g.id ? ' selected' : ''}`}
-            onClick={() => updateNode(nodeId, { icon: g.id })}
-            title={g.label}
-            aria-pressed={glyph === g.id}
-          >
-            <Glyph id={g.id} size={18} />
-          </button>
-        ))}
-      </div>
+      <dl className="dd-comp-meta">
+        <div>
+          <dt>语义底座</dt>
+          <dd>{NODE_TYPES[node.type].label}</dd>
+        </div>
+        <div>
+          <dt>组件身份</dt>
+          <dd>{comp?.name ?? '默认（按语义类型）'}</dd>
+        </div>
+        <div>
+          <dt>分类</dt>
+          <dd>{comp ? categoryLabel(comp.category) : '—'}</dd>
+        </div>
+      </dl>
+      <p className="dd-hint-text">图标只是皮肤，语义底座不变，推演照算。右键节点或点「编辑外观」可换身份 / 图标。</p>
     </Section>
   );
 }
