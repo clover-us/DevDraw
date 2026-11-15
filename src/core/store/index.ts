@@ -1,7 +1,7 @@
 /** Store 入口：re-export + 工厂。 */
 export * from './types';
 export { MemoryStore } from './memory';
-export { FsaStore, isFsaSupported } from './fsa';
+export { FsaStore, isFsaSupported, pendingFolder, reconnectPendingFolder } from './fsa';
 export { ZipStore, packProject, unpackProject, downloadProject } from './zip';
 
 import { FsaStore, isFsaSupported } from './fsa';

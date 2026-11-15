@@ -118,6 +118,33 @@ async function readSessions(dir: FSHandle): Promise<ReasoningSession[]> {
   return sortSessions(out);
 }
 
+/** 上次用过、但这次还没拿到读写权限的文件夹句柄（等用户点一下再请求）。 */
+let pendingDir: FSHandle | null = null;
+
+/** 有没有"等着你点一下"的文件夹（刷新后的常见状态）。 */
+export function pendingFolder(): { name: string } | null {
+  return pendingDir ? { name: pendingDir.name } : null;
+}
+
+/**
+ * 用户点了「重新连接」：在这一刻（有手势）请求权限，成功后把上次的文件夹接回来。
+ * 失败返回 null，调用方据此提示"请重新打开文件夹"。
+ */
+export async function reconnectPendingFolder(): Promise<FsaStore | null> {
+  const dir = pendingDir;
+  if (!dir) return null;
+  const opts = { mode: 'readwrite' as const };
+  try {
+    const perm = (await dir.requestPermission?.(opts)) ?? 'granted';
+    if (perm !== 'granted') return null;
+  } catch {
+    return null;
+  }
+  pendingDir = null;
+  await idbSet(HANDLE_KEY, dir);
+  return new FsaStore(dir);
+}
+
 export class FsaStore implements ModelStore {
   readonly kind = 'folder' as const;
   readonly autoSave = true;
@@ -131,18 +158,29 @@ export class FsaStore implements ModelStore {
     if (!isFsaSupported() || !window.showDirectoryPicker) return null;
     const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
     await idbSet(HANDLE_KEY, dir);
+    pendingDir = null;
     return new FsaStore(dir);
   }
 
-  /** 尝试恢复上次授权的文件夹（需用户手势触发权限请求）。 */
+  /**
+   * 尝试恢复上次授权的文件夹。
+   *
+   * 这里**只查权限、不请求权限**：页面刚加载时没有用户手势，Chromium 会直接拒掉
+   * `requestPermission()`（SecurityError），于是每次刷新都悄悄退回内存里的示例项目 ——
+   * 这正是"提示已保存、刷新却被还原"的根因。权限没给定时把句柄记下来，等用户点一下
+   * 「重新连接」再由 `reconnectPendingFolder()` 补请求（那时有手势，浏览器才认）。
+   */
   static async restore(): Promise<FsaStore | null> {
     const dir = await idbGet(HANDLE_KEY);
     if (!dir) return null;
     const opts = { mode: 'readwrite' as const };
-    let perm = (await dir.queryPermission?.(opts)) ?? 'granted';
-    if (perm !== 'granted') perm = (await dir.requestPermission?.(opts)) ?? 'denied';
-    if (perm !== 'granted') return null;
-    return new FsaStore(dir);
+    const perm = (await dir.queryPermission?.(opts)) ?? 'granted';
+    if (perm === 'granted') {
+      pendingDir = null;
+      return new FsaStore(dir);
+    }
+    pendingDir = dir;
+    return null;
   }
 
   async load(): Promise<ProjectSnapshot | null> {

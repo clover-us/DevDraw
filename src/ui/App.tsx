@@ -1272,7 +1272,18 @@ export function App() {
           <div className="dd-canvas-status">
             {/* 还没落到磁盘上时，"打开文件夹"和"未持久化"是同一件事的两面，放一起看更顺：
                 左边给你解决办法，右边是当前状态。 */}
-            {project.fsaSupported && project.storeKind !== 'folder' && (
+            {/* 刷新后浏览器还压着上次那个文件夹的权限（没有用户手势不给续），这时候
+                悄悄退回示例数据是最坏的结果 —— 所以先把"接回来"摆在最显眼的位置。 */}
+            {project.pendingFolder && (
+              <button
+                className="dd-status-open is-attn"
+                onClick={() => void project.reconnectFolder()}
+                title="浏览器需要你点一下才允许继续读写这个文件夹，点了就会读回磁盘上的项目"
+              >
+                继续编辑「{project.pendingFolder}」
+              </button>
+            )}
+            {project.fsaSupported && project.storeKind !== 'folder' && !project.pendingFolder && (
               <button
                 className="dd-status-open"
                 onClick={() => void project.openFolder()}

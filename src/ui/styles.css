@@ -520,6 +520,17 @@ select.dd-input {
   background: var(--accent-soft);
   border-color: var(--accent);
 }
+/* 刷新后等着续权限：这一下是"把我的项目还给我"，比"打开文件夹"要紧，给它一点颜色。 */
+.dd-status-open.is-attn {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.dd-status-open.is-attn:hover {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
 .dd-canvas-status .dd-storage-info {
   display: none;
 }

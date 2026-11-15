@@ -16,6 +16,13 @@ describe('columnKey / groupColumns', () => {
     expect(groups.get(0)?.sort()).toEqual(['a', 'b']);
     expect(groups.get(300)).toEqual(['c']);
   });
+
+  it('x 差十几像素算同一列（ELK 同层对不齐的副作用），列键取较小的那个', () => {
+    // 实测：orders 在 360、带 reads 边的假设卡在 372 —— 差 12px，被当成两列就互相压住。
+    const groups = groupColumns({ orders: { x: 360, y: 0 }, asm: { x: 372, y: 0 } });
+    expect(groups.size).toBe(1);
+    expect(groups.get(360)?.sort()).toEqual(['asm', 'orders']);
+  });
 });
 
 describe('arrangeColumns', () => {
@@ -23,6 +30,14 @@ describe('arrangeColumns', () => {
     const pos: Positions = { a: { x: 0, y: 0 }, b: { x: 0, y: 300 }, c: { x: 300, y: 150 } };
     const out = arrangeColumns(pos, heights, [{ from: 'a', to: 'c' }], 44);
     for (const id of Object.keys(pos)) expect(out[id].x).toBe(pos[id].x);
+  });
+
+  it('同一列里 x 差十几像素的两张卡：对齐到列锚点，并且上下贴紧不重叠', () => {
+    const pos: Positions = { a: { x: 360, y: 0 }, b: { x: 372, y: 0 } };
+    const out = arrangeColumns(pos, heights, [], 44);
+    expect(out.a.x).toBe(360);
+    expect(out.b.x).toBe(360);
+    expect(out.b.y).toBeGreaterThanOrEqual(out.a.y + H + 44);
   });
 
   it('列内按 gap 贴紧，不留空洞', () => {

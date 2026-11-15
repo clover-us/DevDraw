@@ -10,6 +10,8 @@ import {
   FsaStore,
   isFsaSupported,
   MemoryStore,
+  pendingFolder,
+  reconnectPendingFolder,
   restoreStore,
   ZipStore,
   type ModelStore,
@@ -24,6 +26,9 @@ export interface ProjectState {
   sessions: ReasoningSession[];
   storeKind: StoreKind;
   storeLabel: string;
+  /** 上次用过的文件夹还在、但这次还没拿到权限（刷新后的常态）—— 记着名字好提示用户点一下。 */
+  pendingFolder: string | null;
+  reconnectFolder: () => Promise<void>;
   autoSave: boolean;
   dirty: boolean;
   saving: boolean;
@@ -54,6 +59,7 @@ export function useProject(): ProjectState {
   const [sessions, setSessions] = useState<ReasoningSession[]>([]);
   const [loadedAt, setLoadedAt] = useState(0);
   const [store, setStore] = useState<ModelStore>(() => new MemoryStore());
+  const [pending, setPending] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   // 撤销/重做：不可变模型快照栈。historyTick 仅用于驱动 canUndo/canRedo 重渲染。
@@ -81,6 +87,7 @@ export function useProject(): ProjectState {
       const snap = await s.load();
       if (cancelled) return;
       setStore(s);
+      setPending(pendingFolder()?.name ?? null);
       if (snap) {
         setModelState(snap.model);
         setViewsState(snap.views);
@@ -170,6 +177,7 @@ export function useProject(): ProjectState {
     if (!isFsaSupported()) return;
     const s = await FsaStore.pick();
     if (!s) return;
+    setPending(null);
     const snap = await s.load();
     setStore(s);
     if (snap) {
@@ -180,6 +188,29 @@ export function useProject(): ProjectState {
       // 空文件夹：把当前模型作为新项目写入。
       setSessions([]);
       await s.save(snapshotRef.current);
+    }
+    setDirty(false);
+    resetHistory();
+    setLoadedAt((v) => v + 1);
+  }, [resetHistory]);
+
+  /**
+   * 刷新后接回上次的文件夹：这一刻是用户点击（有手势），浏览器才允许 requestPermission。
+   * 接上之后立刻把磁盘上的项目读进来 —— 这正是刷新前按下「重新布局」时的样子。
+   */
+  const reconnectFolder = useCallback(async () => {
+    const s = await reconnectPendingFolder();
+    if (!s) {
+      setPending(null);
+      return;
+    }
+    const snap = await s.load();
+    setStore(s);
+    setPending(null);
+    if (snap) {
+      setModelState(snap.model);
+      setViewsState(snap.views);
+      setSessions(snap.sessions ?? []);
     }
     setDirty(false);
     resetHistory();
@@ -236,6 +267,8 @@ export function useProject(): ProjectState {
     sessions,
     storeKind: store.kind,
     storeLabel: store.label,
+    pendingFolder: pending,
+    reconnectFolder,
     autoSave: store.autoSave,
     dirty,
     saving,

@@ -23,10 +23,24 @@ export function columnKey(x: number): number {
   return Math.round(x);
 }
 
-export function groupColumns(positions: Positions): Map<number, string[]> {
+/**
+ * 列间距容差：ELK 偶尔会把同一层的两张卡排成 x 差十几像素（端口/宽度不同的副作用），
+ * 用"四舍五入相等"去分列就会把它们当成两列，各自竖排、互相压住。这里按容差聚类：
+ * 相邻列的真实间距至少是一张卡宽 + 层间距（≥ 340），48px 以内一定是同一列。
+ */
+export const COLUMN_TOLERANCE = 48;
+
+export function groupColumns(positions: Positions, tolerance = COLUMN_TOLERANCE): Map<number, string[]> {
+  const xs = [...new Set(Object.values(positions).map((p) => p.x))].sort((a, b) => a - b);
+  const anchorOf = new Map<number, number>();
+  let anchor = xs[0];
+  for (const x of xs) {
+    if (x - anchor > tolerance) anchor = x;
+    anchorOf.set(x, Math.round(anchor));
+  }
   const columns = new Map<number, string[]>();
   for (const [id, p] of Object.entries(positions)) {
-    const key = columnKey(p.x);
+    const key = anchorOf.get(p.x) ?? columnKey(p.x);
     const list = columns.get(key);
     if (list) list.push(id);
     else columns.set(key, [id]);
@@ -73,6 +87,9 @@ export function arrangeColumns(
 
   const columns = groupColumns(positions);
   const columnKeys = [...columns.keys()].sort((a, b) => a - b);
+  // 每张卡属于哪一列：聚类结果（容差内的 x 视作同一列），后面排序、贴紧、对齐都用它。
+  const colOf = new Map<string, number>();
+  for (const [key, list] of columns) for (const id of list) colOf.set(id, key);
 
   // 邻居表（无向）：排序只看"对面那一列"的邻居落在什么高度。
   const neighbors = new Map<string, string[]>();
@@ -109,7 +126,7 @@ export function arrangeColumns(
       const list = order.get(key)!;
       const desired = new Map<string, number>();
       for (const id of list) {
-        const otherCols = (neighbors.get(id) ?? []).filter((n) => columnKey(current[n].x) !== key);
+        const otherCols = (neighbors.get(id) ?? []).filter((n) => colOf.get(n) !== key);
         if (otherCols.length > 0) {
           desired.set(id, median(otherCols.map((n) => current[n].y + heightOf(n) / 2)));
         } else {
@@ -129,7 +146,8 @@ export function arrangeColumns(
   }
 
   const out: Positions = {};
-  for (const id of ids) out[id] = { x: positions[id].x, y: current[id].y };
+  // x 统一对齐到列的锚点：同层两张卡的 x 差十几像素是 ELK 的副作用，对齐后列才真的齐。
+  for (const id of ids) out[id] = { x: colOf.get(id) ?? columnKey(positions[id].x), y: current[id].y };
   return out;
 }
 
