@@ -3943,3 +3943,131 @@ select.dd-input {
     animation: none;
   }
 }
+
+/* ---------- 读 / 写分离：统一编辑弹窗 + 只读抽屉 ---------- */
+/* 弹窗内 tab：详情 / 外观。单一编辑入口，操作在弹窗内划分。 */
+.dd-modal-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 16px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.dd-modal-tabs button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 8px 14px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.dd-modal-tabs button:hover {
+  color: var(--text);
+}
+.dd-modal-tabs button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+/* 详情 tab 没有左侧预览，表单独占整行。 */
+.dd-nodeeditor-details {
+  grid-column: 1 / -1;
+}
+/* 关系编辑弹窗：窄、单列。 */
+.dd-modal-narrow {
+  width: min(460px, 100%);
+}
+.dd-modal-narrow .dd-modal-body {
+  grid-template-columns: 1fr;
+}
+.dd-edgeeditor-body {
+  overflow-y: auto;
+}
+.dd-edgeeditor-body .dd-modal-form {
+  border-right: none;
+}
+/* 依赖模式：横向分段单选（强依赖 / 可降级 / 异步）。 */
+.dd-mode-row {
+  display: flex;
+  gap: 6px;
+}
+.dd-mode {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.dd-mode input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.dd-mode:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.dd-mode.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+/* 只读抽屉里的取值展示。 */
+.dd-readonly-value {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  word-break: break-word;
+}
+.dd-readonly-pre {
+  white-space: pre-wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-elevated);
+}
+/* 抽屉「组件详情」预览右侧文字。 */
+.dd-comp-preview-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.dd-comp-preview-text strong {
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dd-comp-preview-text span {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+/* 弹窗内联错误。 */
+.dd-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--danger);
+}
+/* 右键菜单破坏性项的上膛态（两步确认）。 */
+.dd-ctx-item.armed {
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 600;
+}

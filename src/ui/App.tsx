@@ -19,6 +19,7 @@ import {
   useReactFlow,
   type Connection,
   type Edge,
+  type EdgeMouseHandler,
   type Node,
   type NodeMouseHandler,
 } from '@xyflow/react';
@@ -43,7 +44,7 @@ import { layoutProjection, NODE_WIDTH, nodeHeight, type Positions } from '../cor
 import { applyPatch, applyPatchChecked, applyPatches } from '../core/patch';
 import type { QuestionOption } from '../core/reasoners/types';
 import { findRecord, recordPatch } from '../core/reasoners/util';
-import { connectableEdgeTypes, getLens, LENSES, NODE_TYPES, projectLens, type LensId } from '../core/registry';
+import { connectableEdgeTypes, EDGE_TYPES, getLens, LENSES, NODE_TYPES, projectLens, type LensId } from '../core/registry';
 import { threeLensPositions } from '../core/sample-three-lens';
 import { createSession, type ReasoningSession } from '../core/session';
 import { edgeDependency, simulate, type SimulationResult } from '../core/simulate';
@@ -60,7 +61,8 @@ import {
 import { computeLegendStats } from '../core/legend';
 import type { ComponentDef, DependencyMode, EdgeType, Model, NodeType } from '../core/types';
 import { ComponentEditor } from './ComponentEditor';
-import { AppearanceEditor } from './AppearanceEditor';
+import { NodeEditor } from './NodeEditor';
+import { EdgeEditor } from './EdgeEditor';
 import { COMPONENT_MIME, ComponentLibrary } from './ComponentLibrary';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DevDrawEdge, DevDrawNode, Z_SELECTED, type DevDrawEdgeData, type DevDrawNodeData, type FieldRow } from './components';
@@ -199,14 +201,16 @@ export function App() {
   const [createMode, setCreateMode] = useState(false);
   // 自定义组件编辑器：null=关闭；{editing:null}=新建；{editing:comp}=编辑。
   const [componentEditor, setComponentEditor] = useState<{ editing: ComponentDef | null } | null>(null);
-  // 节点外观编辑弹窗：右键「编辑外观…」或抽屉「组件详情」的编辑按钮打开，编辑对象是节点实例。
-  const [appearanceNode, setAppearanceNode] = useState<string | null>(null);
+  // 统一编辑弹窗：右键「编辑…」打开，tab 划分详情 / 外观（读 / 写分离，抽屉只读）。
+  const [editorNode, setEditorNode] = useState<{ id: string; tab: 'details' | 'appearance' } | null>(null);
+  // 关系编辑弹窗：右键关系「编辑关系…」打开。
+  const [edgeEditor, setEdgeEditor] = useState<string | null>(null);
   // 会话分区里选中的存档（存档本身住在 reasoning/ 里，这里只是"正在看哪一份"）。
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   // ── 三个直接落在画布上的交互：就地新建 / 连线选语义 / 右键菜单 ──
   const [quickCreate, setQuickCreate] = useState<{ x: number; y: number; flow: { x: number; y: number } } | null>(null);
   const [pendingConnect, setPendingConnect] = useState<ConnectDraft | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId?: string; edgeId?: string } | null>(null);
   // 拖线松手时 onConnect 拿不到鼠标坐标，所以自己盯着指针（连线落点 = 当前指针处）。
   const pointerRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   // 切镜片 / 重新布局后要 fit 一次，但必须等 ELK 把坐标算完再 fit（否则框住的是旧坐标）。
@@ -1009,8 +1013,34 @@ export function App() {
       setModel((m) => applyPatch(m, { op: 'remove-node', id }));
       setSelectedNode((cur) => (cur === id ? null : cur));
       setRenamingId((cur) => (cur === id ? null : cur));
+      setEditorNode((cur) => (cur?.id === id ? null : cur));
     },
     [setModel],
+  );
+
+  const deleteEdge = useCallback(
+    (id: string) => {
+      setModel((m) => applyPatch(m, { op: 'remove-edge', id }));
+      setSelectedEdge((cur) => (cur === id ? null : cur));
+      setEdgeEditor((cur) => (cur === id ? null : cur));
+    },
+    [setModel],
+  );
+
+  // 右键关系：与节点同一套菜单语言，编辑收进弹窗、删除两步确认。
+  const onEdgeContextMenu: EdgeMouseHandler = useCallback((event, edge) => {
+    event.preventDefault();
+    setContextMenu({ x: event.clientX, y: event.clientY, edgeId: edge.id });
+  }, []);
+
+  // 抽屉创建态：建节点并选中（选中即退出 createMode，落到只读详情）。
+  const createNode = useCallback(
+    (type: NodeType, name: string) => {
+      const id = newNodeId(type);
+      setModel((m) => applyPatchChecked(m, { op: 'add-node', id, node: { type, name, provenance: { by: 'human' } } }));
+      selectNode(id);
+    },
+    [setModel, selectNode],
   );
 
   const menuItems = useMemo<MenuItem[]>(() => {
@@ -1039,15 +1069,8 @@ export function App() {
         onSelect: () => startTraceFrom(id),
       });
     }
-    if (lens === 'architecture' && SEEDABLE.has(node.type)) {
-      items.push({
-        key: 'appearance',
-        label: '编辑外观…',
-        hint: '身份 / 图标',
-        onSelect: () => setAppearanceNode(id),
-      });
-    }
-    items.push({ key: 'edit', label: '编辑详情', hint: '右侧', onSelect: () => selectNode(id) });
+    // 单一编辑入口：详情 / 外观在弹窗内用 tab 划分（读 / 写分离）。
+    items.push({ key: 'edit', label: '编辑…', hint: '详情 / 外观', onSelect: () => setEditorNode({ id, tab: 'details' }) });
     items.push({
       key: 'rename',
       label: '重命名',
@@ -1057,9 +1080,19 @@ export function App() {
         setRenamingId(id);
       },
     });
-    items.push({ key: 'delete', label: '删除', tone: 'danger', onSelect: () => deleteNode(id) });
+    items.push({ key: 'delete', label: '删除', tone: 'danger', confirmLabel: '确认删除？再点一次', onSelect: () => deleteNode(id) });
     return items;
-  }, [contextMenu, model, lens, seeds, toggleSeed, startTraceFrom, selectNode, deleteNode]);
+  }, [contextMenu, model, lens, seeds, toggleSeed, startTraceFrom, deleteNode]);
+
+  const edgeMenuItems = useMemo<MenuItem[]>(() => {
+    const id = contextMenu?.edgeId;
+    const edge = id ? model.edges[id] : undefined;
+    if (!id || !edge) return [];
+    return [
+      { key: 'edit', label: '编辑关系…', hint: '标签 / 依赖', onSelect: () => setEdgeEditor(id) },
+      { key: 'delete', label: '删除', tone: 'danger', confirmLabel: '确认删除？再点一次', onSelect: () => deleteEdge(id) },
+    ];
+  }, [contextMenu, model, deleteEdge]);
 
   // 双击空白：就地新建（组件或空白类型），落在鼠标处。
   const openQuickCreate = useCallback(
@@ -1579,6 +1612,7 @@ export function App() {
             onEdgesChange={onEdgesChange}
             deleteKeyCode={null}
             onNodeContextMenu={onNodeContextMenu}
+            onEdgeContextMenu={onEdgeContextMenu}
             onNodeDoubleClick={onNodeDoubleClick}
             onNodeDragStop={onNodeDragStop}
             onConnect={onConnect}
@@ -1729,8 +1763,16 @@ export function App() {
             <ContextMenu
               x={contextMenu.x}
               y={contextMenu.y}
-              title={model.nodes[contextMenu.nodeId]?.name}
-              items={menuItems}
+              title={
+                contextMenu.edgeId
+                  ? model.edges[contextMenu.edgeId]
+                    ? EDGE_TYPES[model.edges[contextMenu.edgeId].type].label
+                    : undefined
+                  : contextMenu.nodeId
+                    ? model.nodes[contextMenu.nodeId]?.name
+                    : undefined
+              }
+              items={contextMenu.edgeId ? edgeMenuItems : menuItems}
               onClose={() => setContextMenu(null)}
             />
           )}
@@ -1739,23 +1781,18 @@ export function App() {
           <EntityDrawer
             model={model}
             lens={lensDef}
-            projection={projection}
             selectedNode={selectedNode}
             selectedEdge={selectedEdge}
             createMode={createMode}
             findings={findings}
-            activeFinding={activeFinding}
-            result={result}
+            onCreate={createNode}
             onSelectNode={selectNode}
             onSelectEdge={selectEdge}
             onSelectFinding={setActiveFinding}
             onAnswer={answer}
-            onChange={onModelChange}
-            onChangeMode={changeEdgeMode}
             seeds={seeds}
             onToggleSeed={toggleSeed}
             onStartTrace={startTraceFrom}
-            onEditAppearance={setAppearanceNode}
             canBack={backStack.length > 0}
             canForward={fwdStack.length > 0}
             onBack={goBack}
@@ -1771,15 +1808,29 @@ export function App() {
             onClose={() => setComponentEditor(null)}
           />
         )}
-        {appearanceNode && model.nodes[appearanceNode] && (
-          <AppearanceEditor
+        {editorNode && model.nodes[editorNode.id] && (
+          <NodeEditor
             model={model}
-            node={model.nodes[appearanceNode]}
-            onApply={(attrs) => {
-              setModel((m) => applyPatchChecked(m, { op: 'update-node', id: appearanceNode, attrs }));
-              setAppearanceNode(null);
-            }}
-            onClose={() => setAppearanceNode(null)}
+            node={model.nodes[editorNode.id]}
+            nodeId={editorNode.id}
+            lens={lensDef}
+            nodes={Object.entries(projection.nodes)}
+            onChange={onModelChange}
+            onDelete={deleteNode}
+            onClose={() => setEditorNode(null)}
+            initialTab={editorNode.tab}
+          />
+        )}
+        {edgeEditor && model.edges[edgeEditor] && (
+          <EdgeEditor
+            model={model}
+            edge={model.edges[edgeEditor]}
+            edgeId={edgeEditor}
+            lens={lensDef}
+            onChange={onModelChange}
+            onChangeMode={changeEdgeMode}
+            onDelete={deleteEdge}
+            onClose={() => setEdgeEditor(null)}
           />
         )}
       </div>
