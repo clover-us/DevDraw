@@ -57,10 +57,10 @@ export function FieldRows({
               onClick={() => onSelectField(fid)}
               aria-pressed={selectedFieldId === fid}
             >
+              <span className="dd-field-name">{name}</span>
               {typeof f.attrs?.key === 'string' && (
                 <span className={`dd-key dd-key-${f.attrs.key.toLowerCase()}`}>{f.attrs.key}</span>
               )}
-              <span className="dd-field-name">{name}</span>
               {comment && (
                 <span className="dd-field-comment" title={comment}>
                   {comment}

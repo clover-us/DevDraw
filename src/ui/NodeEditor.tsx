@@ -292,23 +292,23 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                     {previewRows.length === 0 && <div className="dd-table-empty">无字段 · 在右侧添加</div>}
                     {previewRows.map((f) => (
                       <div key={f.id} className={`dd-field-row${fieldId === f.id ? ' selected' : ''}${f.keyRole ? ' is-key' : ''}`}>
+                        <span className="dd-field-name">{f.name}</span>
                         {f.keyRole ? (
                           <span className={`dd-key dd-key-${f.keyRole.toLowerCase()}`}>{f.keyRole}</span>
                         ) : (
-                          <span className="dd-key-spacer" />
+                          <span className="dd-key-spacer" aria-hidden="true" />
                         )}
-                        <span className="dd-field-name">{f.name}</span>
-                        {f.comment && (
-                          <span className="dd-field-comment" title={f.comment}>
-                            {f.comment}
-                          </span>
-                        )}
-                        <span className="dd-field-type">{f.dataType}</span>
-                        {f.nullable && (
-                          <span className="dd-nullable" title="可空">
-                            ?
-                          </span>
-                        )}
+                        <span className="dd-field-comment" title={f.comment || undefined}>
+                          {f.comment}
+                        </span>
+                        <span className="dd-field-type-cell">
+                          <span className="dd-field-type">{f.dataType}</span>
+                          {f.nullable && (
+                            <span className="dd-nullable" title="可空">
+                              ?
+                            </span>
+                          )}
+                        </span>
                       </div>
                     ))}
                   </div>

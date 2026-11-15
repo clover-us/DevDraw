@@ -279,11 +279,6 @@ export function DevDrawNode({ id, data }: NodeProps) {
             >
               {/* 字段级连线：每个字段行左右各一个锚点，外键线因此能落在"某一列"上。 */}
               <Handle id={erFieldPort('left', f.id)} type="target" position={Position.Left} className="dd-row-handle" />
-              {f.keyRole ? (
-                <span className={`dd-key dd-key-${f.keyRole.toLowerCase()}`}>{f.keyRole}</span>
-              ) : (
-                <span className="dd-key-spacer" />
-              )}
               <InlineName
                 className="dd-field-name"
                 name={f.name}
@@ -292,17 +287,22 @@ export function DevDrawNode({ id, data }: NodeProps) {
                 onRename={(name) => d.onFieldRename?.(f.id, name)}
                 onCancel={d.onFieldRenameCancel}
               />
-              {f.comment && (
-                <span className="dd-field-comment" title={f.comment}>
-                  {f.comment}
-                </span>
+              {f.keyRole ? (
+                <span className={`dd-key dd-key-${f.keyRole.toLowerCase()}`}>{f.keyRole}</span>
+              ) : (
+                <span className="dd-key-spacer" aria-hidden="true" />
               )}
-              <span className="dd-field-type">{f.dataType}</span>
-              {f.nullable && (
-                <span className="dd-nullable" title="可空">
-                  ?
-                </span>
-              )}
+              <span className="dd-field-comment" title={f.comment || undefined}>
+                {f.comment}
+              </span>
+              <span className="dd-field-type-cell">
+                <span className="dd-field-type">{f.dataType}</span>
+                {f.nullable && (
+                  <span className="dd-nullable" title="可空">
+                    ?
+                  </span>
+                )}
+              </span>
               <Handle id={erFieldPort('right', f.id)} type="source" position={Position.Right} className="dd-row-handle" />
             </div>
           ))}
@@ -312,7 +312,6 @@ export function DevDrawNode({ id, data }: NodeProps) {
   } else if (d.kind === 'Field') {
     body = (
       <>
-        {d.keyRole && <span className={`dd-key dd-key-${d.keyRole.toLowerCase()}`}>{d.keyRole}</span>}
         <InlineName
           className="dd-field-name"
           name={d.name}
@@ -321,6 +320,7 @@ export function DevDrawNode({ id, data }: NodeProps) {
           onRename={renameNode}
           onCancel={d.onRenameCancel}
         />
+        {d.keyRole && <span className={`dd-key dd-key-${d.keyRole.toLowerCase()}`}>{d.keyRole}</span>}
         {d.comment && (
           <span className="dd-field-comment" title={d.comment}>
             {d.comment}
