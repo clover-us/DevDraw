@@ -6,6 +6,7 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { categoryLabel, nodeComponent, nodeGlyph } from '../core/components';
+import { ER_STRUCTURE_TYPES } from '../core/er';
 import { EDGE_TYPES, NODE_TYPES, type LensDef } from '../core/registry';
 import type { Finding, QuestionOption } from '../core/reasoners/types';
 import { edgeDependency } from '../core/simulate';
@@ -14,6 +15,7 @@ import { FieldView, Section, TableFieldsView } from './entity-fields';
 import { Glyph } from './glyphs';
 import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, SimulationIcon, TraceIcon } from './icons';
 import { FindingCard, MODE_INFO, nodeName } from './inspect';
+import type { QuickTarget } from './QuickCreate';
 
 interface Props {
   model: Model;
@@ -22,7 +24,12 @@ interface Props {
   selectedNode: string | null;
   selectedEdge: string | null;
   createMode: boolean;
-  onCreate: (type: NodeType, name: string) => void;
+  /** 当前 scope 允许直接新建的结构类型：Redis 库里只给键、关系库只给表。 */
+  createStructures?: NodeType[];
+  /** scope 是「全部」时结构卡要先选归属：逐条列出「在『订单库』下新建表」。 */
+  createTargets: QuickTarget[];
+  createHint: string;
+  onCreate: (type: NodeType, name: string, parentId?: string) => void;
   onSelectNode: (id: string | null) => void;
   onSelectEdge: (id: string | null) => void;
   onSelectFinding: (id: string | null) => void;
@@ -40,31 +47,53 @@ interface Props {
 const SIM_TYPES = new Set<NodeType>(['Service', 'Database', 'Queue', 'Endpoint', 'ExternalSystem', 'Actor']);
 const APPEARANCE_TYPES = new Set<NodeType>(['Service', 'Database', 'Queue', 'Endpoint', 'ExternalSystem', 'Actor']);
 
+/** 「必须有个归属」的结构卡：表/键挂在库下，状态挂在生命周期下。 */
+const SCOPED_TYPES = new Set<NodeType>([...ER_STRUCTURE_TYPES, 'State']);
+
 export function EntityDrawer(props: Props) {
   const { model, lens, findings, selectedNode, selectedEdge, createMode } = props;
-  const [createType, setCreateType] = useState<NodeType>(lens.nodeTypes[0] ?? 'Service');
+  // 新建目标：`p:<parentId>:<type>`（在某个库/生命周期下）或 `t:<type>`（裸建，只有非结构类型才会出现）。
+  const [createKey, setCreateKey] = useState('');
   const [createName, setCreateName] = useState('');
   const nav = { canBack: props.canBack, canForward: props.canForward, onBack: props.onBack, onForward: props.onForward };
+  const createOptions: { key: string; type: NodeType; label: string; parentId?: string }[] = (() => {
+    const structures = props.createStructures;
+    const bare = lens.nodeTypes
+      .filter((t) => !SCOPED_TYPES.has(t) || structures === undefined || structures.includes(t))
+      .map((type) => ({ key: `t:${type}`, type, label: NODE_TYPES[type].label }));
+    const targeted = props.createTargets.map((t) => ({
+      key: `p:${t.parentId}:${t.type}`,
+      type: t.type,
+      parentId: t.parentId,
+      label: `在「${t.parentName}」下新建${NODE_TYPES[t.type].label}`,
+    }));
+    return [...targeted, ...bare];
+  })();
+  const picked = createOptions.find((o) => o.key === createKey) ?? createOptions[0];
 
-  // 换镜片时把创建态重置到该镜片的首个可建类型（架构=服务 / ER=表 / 状态机=状态）。
+  // 换镜片 / 换 scope 时把创建态重置到第一个可建目标（该 scope 能放什么就默认什么）。
   useEffect(() => {
-    setCreateType(lens.nodeTypes[0] ?? 'Service');
+    setCreateKey(createOptions[0]?.key ?? '');
     setCreateName('');
-  }, [lens.id, lens.nodeTypes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lens.id, props.createTargets, props.createStructures]);
 
   // ---- 创建态（新建是独立流程，保留在抽屉） ----
   if (createMode) {
-    const types = lens.nodeTypes;
     return (
       <DrawerShell title="新建实体" sub={lens.label} onClose={props.onClose} {...nav}>
-        <Section title="类型">
-          <select className="dd-input" value={createType} onChange={(e) => setCreateType(e.target.value as NodeType)}>
-            {types.map((t) => (
-              <option key={t} value={t}>
-                {NODE_TYPES[t].label}
-              </option>
-            ))}
-          </select>
+        <Section title="新建">
+          {createOptions.length > 0 ? (
+            <select className="dd-input" value={picked?.key ?? ''} onChange={(e) => setCreateKey(e.target.value)}>
+              {createOptions.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="dd-hint-text">{props.createHint}</p>
+          )}
         </Section>
         <Section title="名称">
           <input
@@ -74,14 +103,14 @@ export function EntityDrawer(props: Props) {
             placeholder="给它起个名字"
             onChange={(e) => setCreateName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && createName.trim()) props.onCreate(createType, createName.trim());
+              if (e.key === 'Enter' && createName.trim() && picked) props.onCreate(picked.type, createName.trim(), picked.parentId);
             }}
           />
         </Section>
         <button
           className="dd-primary dd-block"
-          disabled={!createName.trim()}
-          onClick={() => props.onCreate(createType, createName.trim())}
+          disabled={!createName.trim() || !picked}
+          onClick={() => picked && props.onCreate(picked.type, createName.trim(), picked.parentId)}
         >
           创建
         </button>
@@ -220,7 +249,7 @@ export function EntityDrawer(props: Props) {
                 </button>
               </li>
             ))}
-            {incident.length === 0 && <li className="dd-empty">还没有连线。右键实体可编辑、添加连线。</li>}
+            {incident.length === 0 && <li className="dd-empty">还没有连线。从卡片边上的圆点拖到另一个实体即可连上。</li>}
           </ul>
         </Section>
 

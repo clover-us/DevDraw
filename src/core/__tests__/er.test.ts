@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyErScope,
+  databaseAccepts,
   databaseEngine,
   databaseOfField,
   databaseOfTable,
+  databaseStructureType,
   ER_ANCHOR_HANDLE,
   erDatabases,
   erFieldPort,
@@ -12,9 +14,11 @@ import {
   fieldRowOffset,
   foldRows,
   isErStructure,
+  isRedisFamily,
   planFkConnection,
   resolveFkLink,
   resolveFkLinks,
+  structureTypeForEngine,
   tableCardHeight,
   tableFieldIds,
   unassignedTableIds,
@@ -255,5 +259,37 @@ describe('Redis 键空间与引擎推断', () => {
     expect(rows.map((r) => r.name)).toEqual(['user_id', 'cart', 'last_seen']);
     expect(rows.map((r) => r.dataType)).toEqual(['number', 'json', 'timestamp']);
     expect(erFieldRows(sampleThreeLensModel, 'k_order_cache')).toEqual([]);
+  });
+});
+
+describe('库只收自己引擎放得下的结构', () => {
+  it('structureTypeForEngine：Redis 家族给键，其余给表', () => {
+    expect(structureTypeForEngine('Redis')).toBe('RedisKey');
+    expect(structureTypeForEngine('redis')).toBe('RedisKey');
+    expect(structureTypeForEngine('KeyDB')).toBe('RedisKey');
+    expect(structureTypeForEngine('valkey')).toBe('RedisKey');
+    expect(structureTypeForEngine('MySQL')).toBe('Table');
+    expect(structureTypeForEngine('PostgreSQL')).toBe('Table');
+    // 引擎未知（新建的空库）按关系库处理：先给表，用户改成 Redis 后入口自动换成键。
+    expect(structureTypeForEngine(undefined)).toBe('Table');
+  });
+
+  it('isRedisFamily 认别名，但不把 generic 当 Redis', () => {
+    expect(isRedisFamily('keydb')).toBe(true);
+    expect(isRedisFamily('MEMCACHED')).toBe(false);
+    expect(isRedisFamily('')).toBe(false);
+  });
+
+  it('databaseAccepts：Redis 库只收键，关系库只收表', () => {
+    expect(databaseStructureType(sampleThreeLensModel, sampleThreeLensModel.nodes.n_cache)).toBe('RedisKey');
+    expect(databaseStructureType(sampleThreeLensModel, sampleThreeLensModel.nodes.n_order_db)).toBe('Table');
+    expect(databaseAccepts(sampleThreeLensModel, 'n_order_db', 'Table')).toBe(true);
+    expect(databaseAccepts(sampleThreeLensModel, 'n_order_db', 'RedisKey')).toBe(false);
+    expect(databaseAccepts(sampleThreeLensModel, 'n_cache', 'RedisKey')).toBe(true);
+    expect(databaseAccepts(sampleThreeLensModel, 'n_cache', 'Table')).toBe(false);
+    // 不是库、不是库 id、不是 ER 结构，一律不许挂。
+    expect(databaseAccepts(sampleThreeLensModel, 't_orders', 'Table')).toBe(false);
+    expect(databaseAccepts(sampleThreeLensModel, 'n_missing', 'Table')).toBe(false);
+    expect(databaseAccepts(sampleThreeLensModel, 'n_order_db', 'Field')).toBe(false);
   });
 });

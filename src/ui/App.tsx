@@ -27,6 +27,7 @@ import {
 import { nodeComponent, nodeFromComponent, nodeGlyph, resolveComponent } from '../core/components';
 import {
   applyErScope,
+  databaseAccepts,
   ER_ANCHOR_HANDLE,
   erDatabases,
   erFieldPort,
@@ -38,6 +39,7 @@ import {
   planFkConnection,
   resolveFkLinks,
   shouldAutoFold,
+  structureTypeForEngine,
   unassignedTableIds,
   type ErField,
   type FkLink,
@@ -79,7 +81,7 @@ import { DynamicLegend } from './DynamicLegend';
 import { FitFrameIcon, LayoutIcon, LogoIcon, MaximizeIcon, MinimizeIcon, MinusIcon, PlusIcon, RedoIcon, UndoIcon } from './icons';
 import { NavPanel } from './NavPanel';
 import { NavRail, type NavSection } from './NavRail';
-import { QuickCreate } from './QuickCreate';
+import { QuickCreate, type QuickTarget } from './QuickCreate';
 import { SessionsPanel } from './SessionsPanel';
 import { SimulationPanel } from './SimulationPanel';
 import { StorageBar } from './StorageBar';
@@ -277,6 +279,58 @@ export function App() {
   );
   const projectionRef = useRef(projection);
   projectionRef.current = projection;
+  // 当前 ER scope 若落在具体库上，这个库「只能放」一种结构：Redis 库放键、关系库放表。
+  const erScopeDb = useMemo(
+    () => (activeErScope !== 'all' && activeErScope !== 'unassigned' ? erDbs.find((d) => d.id === activeErScope) : undefined),
+    [activeErScope, erDbs],
+  );
+  const erScopeStructure = erScopeDb ? structureTypeForEngine(erScopeDb.engine) : null;
+  /**
+   * 新建规则（一处定义，四条创建路径共用）：
+   * - 具体 scope：结构类型由引擎/镜片决定，新实体自动挂进这个 scope；
+   * - 「全部」：结构卡必须先选归属，targets 逐条列出来（在「订单库」下新建表…）；
+   * - 「未归属」：不给新建——它本身就是要消灭的状态。
+   */
+  const createScope = useMemo<{ structures?: NodeType[]; targets: QuickTarget[] }>(() => {
+    if (lens === 'er') {
+      if (erScopeStructure) return { structures: [erScopeStructure], targets: [] };
+      if (activeErScope === 'all')
+        return {
+          structures: [],
+          targets: erDbs.map((d) => ({
+            parentId: d.id,
+            parentName: d.name,
+            type: structureTypeForEngine(d.engine),
+            hint: engineLabel(d.engine),
+          })),
+        };
+      return { structures: [], targets: [] };
+    }
+    if (lens === 'state-machine') {
+      if (activeSmScope !== 'all' && activeSmScope !== 'unassigned') return { structures: ['State'], targets: [] };
+      if (activeSmScope === 'all')
+        return {
+          structures: [],
+          targets: smMachines.map((m) => ({
+            parentId: m.id,
+            parentName: m.name,
+            type: 'State' as NodeType,
+            hint: `${m.stateIds.length} 个状态`,
+          })),
+        };
+      return { structures: [], targets: [] };
+    }
+    return { targets: [] };
+  }, [lens, erScopeStructure, activeErScope, erDbs, activeSmScope, smMachines]);
+  // 这个 scope 里没有归属可选的提示语（双击空白/抽屉新建都用它）。
+  const createHint =
+    lens === 'er' && !erScopeStructure && createScope.targets.length === 0
+      ? activeErScope === 'unassigned'
+        ? '这里没有归属可挂。先选一个数据库，再新建表/键。'
+        : '还没有数据库。先到「架构」里加一个数据库，再回来建表/键。'
+      : lens === 'state-machine' && createScope.targets.length === 0 && activeSmScope === 'unassigned'
+        ? '这里没有归属可挂。先选一个生命周期，再新建状态。'
+        : '这副镜片里没有匹配的组件';
   // 空scope引导：当前视图里一个结构/状态都没有时，给一句说明 + 就地新建入口，不让画布干空着。
   const erStructureInView = useMemo(() => Object.values(projection.nodes).filter((n) => isErStructure(n.type)).length, [projection]);
   const smStateInView = useMemo(() => Object.values(projection.nodes).filter((n) => n.type === 'State').length, [projection]);
@@ -1073,18 +1127,24 @@ export function App() {
   // 不挂的话：卡片立刻从当前视图消失、掉进「未归属」，看起来就像"没建成"。
   const scopeParentFor = useCallback(
     (type: NodeType): string | null => {
-      if (lens === 'er' && isErStructure(type) && activeErScope !== 'all' && activeErScope !== 'unassigned') return activeErScope;
+      if (lens === 'er' && isErStructure(type) && erScopeDb) return erScopeDb.id;
       if (lens === 'state-machine' && type === 'State' && activeSmScope !== 'all' && activeSmScope !== 'unassigned') return activeSmScope;
       return null;
     },
-    [lens, activeErScope, activeSmScope],
+    [lens, erScopeDb, activeSmScope],
   );
 
-  // 建节点 + 挂 scope 合成一次模型变更：撤销是一步，不会留下"有了节点没连线"的中间态。
+  /**
+   * 建节点 + 挂 scope 合成一次模型变更：撤销是一步，不会留下"有了节点没连线"的中间态。
+   * 结构卡必须有归属，而且得是容得下它的库（Redis 库只收键、关系库只收表）：
+   * 条件不满足就干脆不建——「未归属」是旧缺陷的残留，不该由任何创建路径再生产出来。
+   */
   const addNodeInScope = useCallback(
-    (type: NodeType, name: string, node: Model['nodes'][string], at?: { x: number; y: number }) => {
+    (type: NodeType, name: string, node: Model['nodes'][string], at?: { x: number; y: number }, parentOverride?: string | null) => {
+      const parent = parentOverride !== undefined ? parentOverride : scopeParentFor(type);
+      if (isErStructure(type) && lens === 'er' && (!parent || !databaseAccepts(model, parent, type))) return null;
+      if (type === 'State' && lens === 'state-machine' && !parent) return null;
       const id = newNodeId(type);
-      const parent = scopeParentFor(type);
       const edgeId = parent ? newEdgeId('contains') : null;
       setModel((m) => {
         let next = applyPatchChecked(m, { op: 'add-node', id, node: { ...node, type, name } });
@@ -1094,14 +1154,14 @@ export function App() {
       if (at) persistPosition(id, at);
       return id;
     },
-    [setModel, scopeParentFor, persistPosition],
+    [lens, model, setModel, scopeParentFor, persistPosition],
   );
 
   // 抽屉创建态：建节点并选中（选中即退出 createMode，落到只读详情）。
   const createNode = useCallback(
-    (type: NodeType, name: string) => {
-      const id = addNodeInScope(type, name, { type, name, provenance: { by: 'human' } });
-      selectNode(id);
+    (type: NodeType, name: string, parentId?: string) => {
+      const id = addNodeInScope(type, name, { type, name, provenance: { by: 'human' } }, undefined, parentId);
+      if (id) selectNode(id);
     },
     [addNodeInScope, selectNode],
   );
@@ -1192,6 +1252,7 @@ export function App() {
       setQuickCreate(null);
       if (!spot) return;
       const id = addNodeInScope(comp.baseType, comp.name, nodeFromComponent(comp), centerAt(comp.baseType, comp.name, spot.flow));
+      if (!id) return;
       setSelectedNode(id);
       setSelectedEdge(null);
       setCreateMode(false);
@@ -1199,13 +1260,15 @@ export function App() {
     [quickCreate, addNodeInScope, centerAt],
   );
 
+  // parentId 只在「全部」视图里显式给出（在「订单库」下新建表）；具体 scope 里由 scopeParentFor 兜住。
   const quickPlaceType = useCallback(
-    (type: NodeType) => {
+    (type: NodeType, parentId?: string) => {
       const spot = quickCreate;
       setQuickCreate(null);
       if (!spot) return;
       const name = NODE_TYPES[type].label;
-      const id = addNodeInScope(type, name, { type, name, provenance: { by: 'human' } }, centerAt(type, name, spot.flow));
+      const id = addNodeInScope(type, name, { type, name, provenance: { by: 'human' } }, centerAt(type, name, spot.flow), parentId);
+      if (!id) return;
       setSelectedNode(id);
       setSelectedEdge(null);
       setCreateMode(false);
@@ -1219,10 +1282,11 @@ export function App() {
 
   // 空scope引导的「新建」：不依赖双击落点，直接放在当前视口中心。
   const placeCentered = useCallback(
-    (type: NodeType) => {
+    (type: NodeType, parentId?: string) => {
       const flow = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
       const name = NODE_TYPES[type].label;
-      const id = addNodeInScope(type, name, { type, name, provenance: { by: 'human' } }, centerAt(type, name, flow));
+      const id = addNodeInScope(type, name, { type, name, provenance: { by: 'human' } }, centerAt(type, name, flow), parentId);
+      if (!id) return;
       setSelectedNode(id);
       setSelectedEdge(null);
       setCreateMode(false);
@@ -1417,6 +1481,7 @@ export function App() {
   const addComponent = useCallback(
     (comp: ComponentDef, position?: { x: number; y: number }) => {
       const id = addNodeInScope(comp.baseType, comp.name, nodeFromComponent(comp), position);
+      if (!id) return;
       setSelectedNode(id);
       setSelectedEdge(null);
       setCreateMode(false);
@@ -1800,18 +1865,38 @@ export function App() {
                 <div className="dd-scope-empty">
                   <p>
                     {activeErScope === 'all'
-                      ? '这个镜片还没有表或 Redis 键。'
+                      ? erDbs.length > 0
+                        ? '这个镜片还没有表或键。选一个数据库后新建。'
+                        : '这个镜片还没有数据库。先到「架构」里加一个数据库。'
                       : activeErScope === 'unassigned'
-                        ? '没有未归属的表/键。'
-                        : '这个数据库下还没有表/键。'}
+                        ? '这些卡没有归属数据库。打开「属性」重新选归属。'
+                        : erScopeStructure === 'RedisKey'
+                          ? '这个 Redis 库下还没有键。'
+                          : '这个数据库下还没有表。'}
                   </p>
                   <div className="dd-scope-empty-actions">
-                    <button type="button" className="dd-primary" onClick={() => placeCentered('Table')}>
-                      新建表
-                    </button>
-                    <button type="button" className="dd-ghost" onClick={() => placeCentered('RedisKey')}>
-                      新建 Redis 键
-                    </button>
+                    {erScopeStructure && (
+                      <button type="button" className="dd-primary" onClick={() => placeCentered(erScopeStructure)}>
+                        新建{erScopeStructure === 'RedisKey' ? '键' : '表'}
+                      </button>
+                    )}
+                    {!erScopeStructure &&
+                      activeErScope === 'all' &&
+                      erDbs.map((d) => (
+                        <button
+                          key={d.id}
+                          type="button"
+                          className="dd-primary"
+                          onClick={() => placeCentered(structureTypeForEngine(d.engine), d.id)}
+                        >
+                          {d.name} · 新建{structureTypeForEngine(d.engine) === 'RedisKey' ? '键' : '表'}
+                        </button>
+                      ))}
+                    {activeErScope === 'all' && erDbs.length === 0 && (
+                      <button type="button" className="dd-primary" onClick={() => switchLens('architecture')}>
+                        去架构加数据库
+                      </button>
+                    )}
                   </div>
                 </div>
               </Panel>
@@ -1819,11 +1904,32 @@ export function App() {
             {lens === 'state-machine' && smStateInView === 0 && (
               <Panel position="top-center" className="dd-scope-empty-panel">
                 <div className="dd-scope-empty">
-                  <p>{activeSmScope === 'all' ? '这个镜片还没有状态。' : activeSmScope === 'unassigned' ? '没有未归属的状态。' : '这个生命周期下还没有状态。'}</p>
+                  <p>
+                    {activeSmScope === 'all'
+                      ? smMachines.length > 0
+                        ? '这个镜片还没有状态。选一个生命周期后新建。'
+                        : '这个镜片还没有生命周期。'
+                      : activeSmScope === 'unassigned'
+                        ? '这些状态没有归属生命周期。打开「属性」重新选归属。'
+                        : '这个生命周期下还没有状态。'}
+                  </p>
                   <div className="dd-scope-empty-actions">
-                    <button type="button" className="dd-primary" onClick={() => placeCentered('State')}>
-                      新建状态
-                    </button>
+                    {activeSmScope !== 'all' && activeSmScope !== 'unassigned' && (
+                      <button type="button" className="dd-primary" onClick={() => placeCentered('State')}>
+                        新建状态
+                      </button>
+                    )}
+                    {activeSmScope === 'all' &&
+                      smMachines.map((m) => (
+                        <button key={m.id} type="button" className="dd-primary" onClick={() => placeCentered('State', m.id)}>
+                          {m.name} · 新建状态
+                        </button>
+                      ))}
+                    {activeSmScope === 'all' && smMachines.length === 0 && (
+                      <button type="button" className="dd-primary" onClick={() => placeCentered('Lifecycle')}>
+                        新建生命周期
+                      </button>
+                    )}
                   </div>
                 </div>
               </Panel>
@@ -1933,8 +2039,12 @@ export function App() {
               lens={lensDef}
               x={quickCreate.x}
               y={quickCreate.y}
+              allowStructures={createScope.structures}
+              targets={createScope.targets}
+              emptyHint={createHint}
               onPickComponent={quickPlaceComponent}
               onPickType={quickPlaceType}
+              onPickTarget={quickPlaceType}
               onCancel={() => setQuickCreate(null)}
             />
           )}
@@ -1973,6 +2083,9 @@ export function App() {
             selectedNode={selectedNode}
             selectedEdge={selectedEdge}
             createMode={createMode}
+            createStructures={createScope.structures}
+            createTargets={createScope.targets}
+            createHint={createHint}
             findings={findings}
             onCreate={createNode}
             onSelectNode={selectNode}

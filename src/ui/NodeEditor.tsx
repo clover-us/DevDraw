@@ -13,7 +13,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { applyPatchChecked } from '../core/patch';
 import { componentCatalog, DEFAULT_NODE_ICON, nodeComponent, nodeGlyph } from '../core/components';
-import { erFieldRows } from '../core/er';
+import { databaseAccepts, erFieldRows } from '../core/er';
 import { lifecycleOfState } from '../core/lifecycle';
 import { newEdgeId, newNodeId } from '../core/id';
 import { NODE_TYPES } from '../core/registry';
@@ -192,11 +192,15 @@ export function NodeEditor({ model, node, nodeId, onChange, onDelete, onClose, i
     });
 
   // 表/键归属数据库：Database --contains--> Table/RedisKey。换挂先拆旧 contains 边再挂新。
-  const databaseEntries = Object.entries(model.nodes).filter(([, n]) => n.type === 'Database');
   const currentDbId =
     node.type === 'Table' || isRedisKey
       ? Object.values(model.edges).find((e) => e.type === 'contains' && e.to === nodeId && model.nodes[e.from]?.type === 'Database')?.from ?? ''
       : '';
+  // 引擎决定库里能放什么：Redis 库只放键，关系库只放表。挂错的旧数据仍列在首位，方便当场改挂或解除。
+  const misplacedDb = currentDbId !== '' && !databaseAccepts(model, currentDbId, node.type);
+  const databaseEntries = Object.entries(model.nodes)
+    .filter(([, n]) => n.type === 'Database')
+    .filter(([id]) => id === currentDbId || databaseAccepts(model, id, node.type));
   const setDatabaseLink = (dbId: string) =>
     tryChange(() => {
       let m = model;
@@ -507,9 +511,15 @@ export function NodeEditor({ model, node, nodeId, onChange, onDelete, onClose, i
                       </div>
                       <p className="dd-modal-note">
                         {isRedisKey
-                          ? '挂到 Redis 库后，ER 镜片按库分scope、字段类型建议跟随 Redis。'
-                          : '挂到数据库后，ER 镜片按库分scope、字段类型建议跟随该库引擎。'}
+                          ? '只列出 Redis 引擎的库：Redis 里放键，不放表。'
+                          : '只列出关系型库：关系库里放表，不放键。'}
                       </p>
+                      {misplacedDb && (
+                        <p className="dd-modal-note dd-note-warn">
+                          {isRedisKey ? '当前挂的库不是 Redis，键会落进关系库。' : '当前挂的库是 Redis，表会落进键空间。'}
+                          换一个归属，或点「解除」。
+                        </p>
+                      )}
                     </Section>
                   )}
                   <AttrsEditor model={model} nodeId={nodeId} updateNode={updateNode} />

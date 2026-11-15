@@ -364,6 +364,11 @@ select.dd-input {
   padding: 9px 11px;
   margin: 0 14px 4px;
 }
+/* 「归属」和引擎对不上时的提醒：不拦操作，只让人当场改挂。 */
+.dd-modal-note.dd-note-warn {
+  background: var(--warning-soft);
+  border-left-color: var(--warning);
+}
 .dd-inline-link {
   background: none;
   border: none;

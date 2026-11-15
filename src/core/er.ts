@@ -10,6 +10,7 @@
  */
 import type { Model, ModelEdge, ModelNode, NodeType } from './types';
 import { nodeComponent } from './components';
+import { normalizeEngine } from './sqlTypes';
 
 /** ER 镜片里的「结构卡片」：关系表 + Redis 键。两者都折字段、都按归属库分scope。 */
 export const ER_STRUCTURE_TYPES: ReadonlySet<NodeType> = new Set<NodeType>(['Table', 'RedisKey']);
@@ -139,6 +140,33 @@ export function databaseEngine(model: Model, node: ModelNode): string | undefine
   if (comp && comp.baseType === 'Database' && comp.id !== 'database' && comp.id !== 'oss') return comp.name;
   if (typeof node.attrs?.tech === 'string' && node.attrs.tech.trim()) return node.attrs.tech;
   return undefined;
+}
+
+/** Redis 系引擎：里面是键空间，没有表。 */
+export function isRedisFamily(engine?: string): boolean {
+  return normalizeEngine(engine) === 'redis';
+}
+
+/**
+ * 引擎决定「库里能放什么」：Redis 系只放键，关系库只放表。
+ * 这不是口味问题——Redis 没有列/外键/字符集，关系库没有 TTL/键结构；
+ * 混着放，画布上就会出现"Redis 库里的表"这种自相矛盾的卡片。
+ */
+export function structureTypeForEngine(engine?: string): NodeType {
+  return isRedisFamily(engine) ? 'RedisKey' : 'Table';
+}
+
+/** 这个数据库能容纳哪种结构卡（按引擎推断，未写引擎按关系库算）。 */
+export function databaseStructureType(model: Model, db: ModelNode): NodeType {
+  return structureTypeForEngine(databaseEngine(model, db));
+}
+
+/** 这张卡能不能挂进这个库：Redis 库只收键、关系库只收表。 */
+export function databaseAccepts(model: Model, dbId: string, type: NodeType): boolean {
+  const db = model.nodes[dbId];
+  if (!db || db.type !== 'Database') return false;
+  if (!isErStructure(type)) return false;
+  return databaseStructureType(model, db) === type;
 }
 
 /** 一个数据库实体在 ER 镜片里的「内容」：它contains 的表/键（按边序）。 */
