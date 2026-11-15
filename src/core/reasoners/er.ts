@@ -119,6 +119,36 @@ export const erReasoner: Reasoner = {
         }
       }
     }
+    // 检查 4：Redis 键没设 TTL → 常驻内存只增不减，交互式反问（排行/配置类常驻键可记录决策）。
+    for (const [id, n] of Object.entries(model.nodes)) {
+      if (n.type !== 'RedisKey') continue;
+      const ttl = typeof n.attrs?.ttl === 'string' ? n.attrs.ttl.trim() : '';
+      if (ttl || hasRecord(model, id, 'no-ttl')) continue;
+      findings.push({
+        id: `erm:ttl:${id}`,
+        severity: 'question',
+        title: `缓存键未设 TTL：${n.name}`,
+        detail: `${n.name} 没有过期时间，会常驻内存只增不减。是有意设计（如常驻排行 / 配置）吗？`,
+        nodeIds: [id],
+        question: {
+          prompt: `${n.name} 需要过期时间吗？`,
+          options: [
+            {
+              id: 'ttl',
+              label: '设 TTL 300s',
+              description: '5 分钟过期，缓存未命中时回源重建。',
+              patches: [{ op: 'update-node', id, attrs: { ttl: '300s' } }],
+            },
+            {
+              id: 'keep',
+              label: '常驻键（记录决策）',
+              description: '记录为有意决策，模型不再追问。',
+              patches: [recordPatch('Decision', `dec_ttl_${id}`, `${n.name} 常驻（有意）`, id, 'no-ttl', '排行 / 配置类常驻键，允许无 TTL。')],
+            },
+          ],
+        },
+      });
+    }
     return findings.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
   },
 };

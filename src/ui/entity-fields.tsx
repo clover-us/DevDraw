@@ -5,9 +5,9 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { nodeGlyph } from '../core/components';
-import { databaseOfTable } from '../core/er';
+import { databaseEngine, databaseOfField } from '../core/er';
 import { columnImpact } from '../core/reasoners/er';
-import { engineLabel, sqlTypesForEngine } from '../core/sqlTypes';
+import { ENGINE_SUGGESTIONS, engineLabel, normalizeEngine, sqlTypesForEngine } from '../core/sqlTypes';
 import { NODE_TYPES } from '../core/registry';
 import type { Model, ModelNode } from '../core/types';
 import { Glyph } from './glyphs';
@@ -212,9 +212,12 @@ export function FieldEditor({
 }) {
   const f = model.nodes[fieldId];
   const owner = Object.values(model.edges).find((e) => e.type === 'contains' && e.to === fieldId)?.from;
+  const ownerIsKey = owner ? model.nodes[owner]?.type === 'RedisKey' : false;
   // 类型建议跟着归属数据库的引擎走：MySQL 的 enum/datetime 与 PostgreSQL 的 jsonb/inet 不混在一份列表里。
-  const db = owner ? databaseOfTable(model, owner) : undefined;
-  const dbEngine = typeof db?.attrs?.engine === 'string' ? db.attrs.engine : undefined;
+  // 字段可能挂在表或 Redis 键下，databaseOfField 会沿 contains 向上找到数据库。
+  const db = databaseOfField(model, fieldId);
+  const dbEngine = db ? databaseEngine(model, db) : undefined;
+  const isRedis = normalizeEngine(dbEngine) === 'redis';
   const typeOptions = sqlTypesForEngine(dbEngine);
   const nameRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -230,7 +233,7 @@ export function FieldEditor({
       <div className="dd-fedit">
         {showTableLink && owner && (
           <p className="dd-hint-text dd-fedit-owner">
-            所属表：
+            {ownerIsKey ? '所属键：' : '所属表：'}
             <button className="dd-inline-link" onClick={() => onSelectNode(owner)}>
               {nodeName(model, owner)}
             </button>
@@ -251,22 +254,24 @@ export function FieldEditor({
                 onChange={(e) => onRename?.(e.target.value)}
               />
             </div>
-            <div>
-              <span className="dd-field-label">键角色</span>
-              <div className="dd-seg" role="group" aria-label="键角色">
-                {(['', 'PK', 'FK'] as const).map((k) => (
-                  <button
-                    key={k || 'plain'}
-                    type="button"
-                    aria-pressed={key === k}
-                    className={`dd-seg-btn${key === k ? ' on' : ''}${k ? ` seg-${k.toLowerCase()}` : ''}`}
-                    onClick={() => updateNode(fieldId, { key: k })}
-                  >
-                    {k === '' ? '普通列' : k}
-                  </button>
-                ))}
+            {!isRedis && (
+              <div>
+                <span className="dd-field-label">键角色</span>
+                <div className="dd-seg" role="group" aria-label="键角色">
+                  {(['', 'PK', 'FK'] as const).map((k) => (
+                    <button
+                      key={k || 'plain'}
+                      type="button"
+                      aria-pressed={key === k}
+                      className={`dd-seg-btn${key === k ? ' on' : ''}${k ? ` seg-${k.toLowerCase()}` : ''}`}
+                      onClick={() => updateNode(fieldId, { key: k })}
+                    >
+                      {k === '' ? '普通列' : k}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </section>
         <section className="dd-fedit-group">
@@ -285,23 +290,25 @@ export function FieldEditor({
                 id={`dd-ftype-${fieldId}`}
                 className="dd-input"
                 list="dd-sql-types"
-                placeholder="varchar"
+                placeholder={isRedis ? 'string' : 'varchar'}
                 value={str('dataType')}
                 onChange={(e) => updateNode(fieldId, { dataType: e.target.value })}
               />
             </div>
-            <div>
-              <label className="dd-field-label" htmlFor={`dd-fdef-${fieldId}`}>
-                默认值
-              </label>
-              <input
-                id={`dd-fdef-${fieldId}`}
-                className="dd-input"
-                placeholder="如 0 / NOW()"
-                value={str('default')}
-                onChange={(e) => updateNode(fieldId, { default: e.target.value })}
-              />
-            </div>
+            {!isRedis && (
+              <div>
+                <label className="dd-field-label" htmlFor={`dd-fdef-${fieldId}`}>
+                  默认值
+                </label>
+                <input
+                  id={`dd-fdef-${fieldId}`}
+                  className="dd-input"
+                  placeholder="如 0 / NOW()"
+                  value={str('default')}
+                  onChange={(e) => updateNode(fieldId, { default: e.target.value })}
+                />
+              </div>
+            )}
           </div>
           <datalist id="dd-sql-types">
             {typeOptions.map((t) => (
@@ -309,14 +316,16 @@ export function FieldEditor({
             ))}
           </datalist>
         </section>
-        <section className="dd-fedit-group">
-          <h4>约束</h4>
-          <div className="dd-switches">
-            <SwitchRow label="可空" desc="允许 NULL 值" checked={f.attrs?.nullable === true} onChange={(v) => updateNode(fieldId, { nullable: v })} />
-            <SwitchRow label="唯一" desc="UNIQUE · 不允许重复" checked={f.attrs?.unique === true} onChange={(v) => updateNode(fieldId, { unique: v })} />
-            <SwitchRow label="自增" desc="写入时自动递增" checked={f.attrs?.autoIncrement === true} onChange={(v) => updateNode(fieldId, { autoIncrement: v })} />
-          </div>
-        </section>
+        {!isRedis && (
+          <section className="dd-fedit-group">
+            <h4>约束</h4>
+            <div className="dd-switches">
+              <SwitchRow label="可空" desc="允许 NULL 值" checked={f.attrs?.nullable === true} onChange={(v) => updateNode(fieldId, { nullable: v })} />
+              <SwitchRow label="唯一" desc="UNIQUE · 不允许重复" checked={f.attrs?.unique === true} onChange={(v) => updateNode(fieldId, { unique: v })} />
+              <SwitchRow label="自增" desc="写入时自动递增" checked={f.attrs?.autoIncrement === true} onChange={(v) => updateNode(fieldId, { autoIncrement: v })} />
+            </div>
+          </section>
+        )}
         <section className="dd-fedit-group">
           <h4>备注</h4>
           <textarea
@@ -354,10 +363,18 @@ export function AttrsEditor({
   const node = model.nodes[nodeId];
   const schema = NODE_TYPES[node.type].attrs;
   if (!schema) return null;
+  // 数据库属性随引擎切换：Redis 没有字符集，但有持久化/淘汰策略；关系库反之。
+  const isDb = node.type === 'Database';
+  const isRedisDb = isDb && normalizeEngine(databaseEngine(model, node)) === 'redis';
+  const entries = Object.entries(schema).filter(([key]) => {
+    if (!isDb) return true;
+    if (isRedisDb) return key !== 'charset';
+    return key !== 'persistence' && key !== 'eviction';
+  });
   return (
     <Section title="实体属性">
       <div className="dd-attrs-grid">
-        {Object.entries(schema).map(([key, label]) => {
+        {entries.map(([key, label]) => {
           const v = node.attrs?.[key];
           if (BOOL_ATTRS.has(key)) {
             return (
@@ -379,6 +396,45 @@ export function AttrsEditor({
                   onChange={(id) => updateNode(nodeId, { about: id })}
                   placeholder="选择关联实体…"
                 />
+              </div>
+            );
+          }
+          // Redis 键结构：固定几种，用下拉避免手滑写错。
+          if (key === 'structure') {
+            return (
+              <div key={key}>
+                <label className="dd-field-label">{label}</label>
+                <select
+                  className="dd-input"
+                  value={typeof v === 'string' && v ? v : 'string'}
+                  onChange={(e) => updateNode(nodeId, { structure: e.target.value })}
+                >
+                  {['string', 'hash', 'list', 'set', 'zset', 'stream'].map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          }
+          // 引擎：给常见引擎建议，但仍可自由输入（Redis/ClickHouse…）。
+          if (key === 'engine') {
+            return (
+              <div key={key}>
+                <label className="dd-field-label">{label}</label>
+                <input
+                  className="dd-input"
+                  list="dd-engine-suggestions"
+                  placeholder="如 MySQL / PostgreSQL / Redis"
+                  value={typeof v === 'string' ? v : ''}
+                  onChange={(e) => updateNode(nodeId, { engine: e.target.value })}
+                />
+                <datalist id="dd-engine-suggestions">
+                  {ENGINE_SUGGESTIONS.map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+                </datalist>
               </div>
             );
           }

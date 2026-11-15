@@ -12,6 +12,9 @@ describe('按引擎的 SQL 类型目录', () => {
     expect(normalizeEngine('SQL Server')).toBe('sqlserver');
     expect(normalizeEngine('mssql')).toBe('sqlserver');
     expect(normalizeEngine('Oracle')).toBe('oracle');
+    expect(normalizeEngine('Redis')).toBe('redis');
+    expect(normalizeEngine('keydb')).toBe('redis');
+    expect(normalizeEngine('valkey')).toBe('redis');
     expect(normalizeEngine('')).toBe('generic');
     expect(normalizeEngine(undefined)).toBe('generic');
     expect(normalizeEngine('cockroachdb')).toBe('generic');

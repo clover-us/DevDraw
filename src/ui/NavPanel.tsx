@@ -126,6 +126,11 @@ export function NavPanel({
                     {model.nodes[id]?.type === 'Table' && (
                       <span className="dd-entity-meta">{fieldCount(model, id)} 列</span>
                     )}
+                    {model.nodes[id]?.type === 'RedisKey' && (
+                      <span className="dd-entity-meta">
+                        {model.nodes[id]?.attrs?.structure === 'hash' ? `${fieldCount(model, id)} 字段` : String(model.nodes[id]?.attrs?.structure ?? 'string').toUpperCase()}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>

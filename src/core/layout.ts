@@ -14,6 +14,7 @@ import {
   fieldRowOffset,
   foldRows,
   foldedCardHeight,
+  isErStructure,
   resolveFkLink,
   shouldAutoFold,
   tableCardHeight,
@@ -44,6 +45,7 @@ export const NODE_WIDTH: Record<NodeType, number> = {
   ExternalSystem: 190,
   Actor: 190,
   Table: 264,
+  RedisKey: 264,
   Field: 200,
   Lifecycle: 180,
   State: 160,
@@ -68,7 +70,7 @@ function lineCount(text: string, contentWidth: number, fontSize: number): number
 
 /** 节点估算高度：固定宽 + 文本换行行数 → ELK 预留正确竖向空间，长文本卡片不重叠。 */
 export function nodeHeight(model: Model | undefined, id: string, type: NodeType, name: string): number {
-  if (type === 'Table') return tableHeight(model, id);
+  if (type === 'Table' || type === 'RedisKey') return structureHeight(model, id, type);
   const attrs = model?.nodes[id]?.attrs;
   const detail = typeof attrs?.detail === 'string' ? attrs.detail : '';
   if (KNOWLEDGE_TYPES.has(type)) {
@@ -102,13 +104,15 @@ const DIRECTION: Record<LensId, string> = {
   'state-machine': 'RIGHT',
 };
 
-/** 表卡片高度 = 表头 + 字段行（与 .dd-table-* 的 CSS 尺寸同源），让间距贴合真实卡片。 */
-function tableHeight(model: Model | undefined, tableId: string): number {
+/** 结构卡片高度 = 表头 + 字段行（与 .dd-table-* 的 CSS 尺寸同源），让间距贴合真实卡片。
+ *  非 hash 的 Redis 键没有字段行，但有一行结构 meta（string · 单值 …），按 1 行算。 */
+function structureHeight(model: Model | undefined, id: string, type: NodeType): number {
   const base = 74;
   if (!model) return base;
-  const count = Object.values(model.edges).filter(
-    (e) => e.type === 'contains' && e.from === tableId && model.nodes[e.to]?.type === 'Field',
+  let count = Object.values(model.edges).filter(
+    (e) => e.type === 'contains' && e.from === id && model.nodes[e.to]?.type === 'Field',
   ).length;
+  if (type === 'RedisKey' && model.nodes[id]?.attrs?.structure !== 'hash') count = Math.max(count, 1);
   return Math.max(base, tableCardHeight(count));
 }
 
@@ -209,7 +213,7 @@ export async function layoutProjection(
 
   const heights: Record<string, number> = {};
   const children: ElkNode[] = Object.entries(projection.nodes).map(([id, n]) => {
-    const isTable = Boolean(erModel) && n.type === 'Table';
+    const isTable = Boolean(erModel) && isErStructure(n.type);
     const fold = isTable ? visibleOf(id) : undefined;
     const height = fold
       ? Math.max(74, foldedCardHeight(fold.rows.length))

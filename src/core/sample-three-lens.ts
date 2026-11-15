@@ -39,6 +39,18 @@ export const sampleThreeLensModel: Model = {
       name: '分析库',
       attrs: { component: 'postgres', engine: 'PostgreSQL', version: '16', charset: 'UTF8', comment: '审计与行为分析，只读副本' },
     },
+    // 缓存库补全 Redis 运维属性（引擎由组件身份推断，这里显式写引擎+持久化/淘汰）。
+    n_cache: {
+      ...sampleModel.nodes.n_cache,
+      attrs: { ...sampleModel.nodes.n_cache.attrs, component: 'redis', engine: 'Redis', persistence: 'RDB+AOF', eviction: 'allkeys-lru', comment: '会话与热点缓存' },
+    },
+    // ── ER：Redis 键（键空间）——hash 带字段，其余结构单值 ──
+    k_session: { type: 'RedisKey', name: 'session:{uid}', attrs: { structure: 'hash', ttl: '1800s', comment: '用户会话' } },
+    k_order_cache: { type: 'RedisKey', name: 'order:{id}', attrs: { structure: 'string', ttl: '300s', comment: '订单详情缓存' } },
+    k_rank: { type: 'RedisKey', name: 'rank:hot', attrs: { structure: 'zset', ttl: '3600s', comment: '热销榜' } },
+    f_sess_user: { type: 'Field', name: 'user_id', attrs: { dataType: 'number', comment: '用户 id' } },
+    f_sess_cart: { type: 'Field', name: 'cart', attrs: { dataType: 'json', comment: '购物车快照' } },
+    f_sess_seen: { type: 'Field', name: 'last_seen', attrs: { dataType: 'timestamp', comment: '最后活跃' } },
     // ── ER：表 ──
     t_orders: { type: 'Table', name: 'orders', attrs: { comment: '订单主表，状态映射订单生命周期', engine: 'InnoDB', charset: 'utf8mb4' } },
     t_order_items: { type: 'Table', name: 'order_items', attrs: { comment: '订单明细，一单多行' } },
@@ -164,6 +176,13 @@ export const sampleThreeLensModel: Model = {
     // audit_log 用的是 PG 类型（inet/jsonb/timestamptz）——归分析库，演示按引擎给类型建议。
     c_db_audit: { type: 'contains', from: 'n_analytics_db', to: 't_audit_log' },
     c_db_shipments: { type: 'contains', from: 'n_order_db', to: 't_shipments' },
+    // ── 跨镜片：架构(Redis) ↔ ER(键空间) ──
+    c_cache_session: { type: 'contains', from: 'n_cache', to: 'k_session' },
+    c_cache_order: { type: 'contains', from: 'n_cache', to: 'k_order_cache' },
+    c_cache_rank: { type: 'contains', from: 'n_cache', to: 'k_rank' },
+    c_sess_user: { type: 'contains', from: 'k_session', to: 'f_sess_user' },
+    c_sess_cart: { type: 'contains', from: 'k_session', to: 'f_sess_cart' },
+    c_sess_seen: { type: 'contains', from: 'k_session', to: 'f_sess_seen' },
     e_order_reads_orders: { type: 'reads', from: 'n_order', to: 't_orders' },
     e_order_writes_orders: { type: 'writes', from: 'n_order', to: 't_orders' },
     e_pay_writes_payments: { type: 'writes', from: 'n_payment', to: 't_payments' },
@@ -217,6 +236,13 @@ export const threeLensPositions: Record<string, { x: number; y: number }> = {
   t_order_items: { x: 744, y: 150 },
   t_audit_log: { x: 1116, y: 40 },
   t_shipments: { x: 372, y: 320 },
+  // Redis 键空间：独立一列，hash 键带字段行。
+  k_session: { x: 1488, y: 0 },
+  k_order_cache: { x: 1488, y: 160 },
+  k_rank: { x: 1488, y: 280 },
+  f_sess_user: { x: 1488, y: 36 },
+  f_sess_cart: { x: 1488, y: 60 },
+  f_sess_seen: { x: 1488, y: 84 },
   // ER 字段（已折进表卡片，坐标只作兜底）
   f_orders_id: { x: 0, y: 96 },
   f_orders_status: { x: 0, y: 120 },

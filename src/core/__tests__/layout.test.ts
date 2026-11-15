@@ -20,7 +20,7 @@ describe('layoutProjection（ELK 自动布局）', () => {
   it('ER 镜片：表卡片按外键分层，父表在子表左侧（字段已折进卡片）', async () => {
     const projection = projectLens(sampleThreeLensModel, getLens('er'));
     const pos = await layoutProjection(projection, 'er', sampleThreeLensModel);
-    expect(Object.keys(pos).length).toBe(7);
+    expect(Object.keys(pos).length).toBe(10);
     for (const id of Object.keys(projection.nodes)) {
       expect(Number.isFinite(pos[id].x)).toBe(true);
       expect(Number.isFinite(pos[id].y)).toBe(true);

@@ -454,6 +454,16 @@ export function FieldGlyph(p: GlyphProps) {
   );
 }
 
+/** Redis 键：钥匙。 */
+export function KeyGlyph(p: GlyphProps) {
+  return (
+    <svg {...base(p)}>
+      <circle cx="8" cy="8" r="4.5" />
+      <path d="M11.2 11.2 20 20M16.5 16.5l2.5-2.5M13.5 13.5l2-2" />
+    </svg>
+  );
+}
+
 /** 生命周期：循环。 */
 export function LifecycleGlyph(p: GlyphProps) {
   return (
@@ -552,6 +562,7 @@ export const GLYPHS: Record<string, ComponentType<GlyphProps>> = {
   dns: DnsGlyph,
   secret: SecretGlyph,
   table: TableGlyph,
+  key: KeyGlyph,
   field: FieldGlyph,
   lifecycle: LifecycleGlyph,
   state: StateGlyph,
@@ -600,6 +611,7 @@ export const GLYPH_LIST: { id: string; label: string }[] = [
   { id: 'dns', label: 'DNS' },
   { id: 'secret', label: '密钥' },
   { id: 'table', label: '表' },
+  { id: 'key', label: '键' },
   { id: 'field', label: '字段' },
   { id: 'lifecycle', label: '生命周期' },
   { id: 'state', label: '状态' },

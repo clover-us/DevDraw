@@ -28,6 +28,15 @@ const APPEARANCE_TYPES = new Set(['Service', 'Database', 'Queue', 'Endpoint', 'E
 type TabId = 'details' | 'attrs' | 'fields' | 'appearance';
 const TAB_LABEL: Record<TabId, string> = { details: '详情', attrs: '属性', fields: '字段', appearance: '外观' };
 
+/** 非 hash 结构的一句话说明（预览 meta 行用）。 */
+const KEY_META: Record<string, string> = {
+  string: '单值 · 字符串/数字/序列化对象',
+  list: '有序列表 · 可作队列/栈',
+  set: '无序集合 · 去重',
+  zset: '有序集合 · 带分数排序',
+  stream: '消息流 · 消费组',
+};
+
 interface Props {
   model: Model;
   node: ModelNode;
@@ -44,7 +53,10 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
   const hasAppearance = APPEARANCE_TYPES.has(node.type);
   // 子页面按类型动态组合：有属性 schema（或字段编辑器）才有「属性」，表才有「字段」。
   const hasAttrs = node.type === 'Field' || Boolean(NODE_TYPES[node.type].attrs);
-  const hasFields = node.type === 'Table';
+  const isRedisKey = node.type === 'RedisKey';
+  const keyStructure = isRedisKey && typeof node.attrs?.structure === 'string' ? node.attrs.structure : 'string';
+  // 表恒有字段页；Redis 键只有 hash 结构才有字段（其余结构是单值/集合，无列）。
+  const hasFields = node.type === 'Table' || (isRedisKey && keyStructure === 'hash');
   const tabs: TabId[] = ['details'];
   if (hasAttrs) tabs.push('attrs');
   if (hasFields) tabs.push('fields');
@@ -137,7 +149,8 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
       let n = rows.length + 1;
       while (names.has(`field_${n}`)) n += 1;
       const fid = newNodeId('Field');
-      let m = applyPatchChecked(model, { op: 'add-node', id: fid, node: { type: 'Field', name: `field_${n}`, attrs: { dataType: 'varchar' } } });
+      const defaultType = isRedisKey ? 'string' : 'varchar';
+      let m = applyPatchChecked(model, { op: 'add-node', id: fid, node: { type: 'Field', name: `field_${n}`, attrs: { dataType: defaultType } } });
       m = applyPatchChecked(m, { op: 'add-edge', id: newEdgeId('contains'), edge: { type: 'contains', from: nodeId, to: fid } });
       onChange(m);
       setFieldId(fid);
@@ -189,6 +202,23 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
         }
         if (lcId) m = applyPatchChecked(m, { op: 'add-edge', id: newEdgeId('has-lifecycle'), edge: { type: 'has-lifecycle', from: nodeId, to: lcId } });
       }
+      onChange(m);
+      return null;
+    });
+
+  // 表/键归属数据库：Database --contains--> Table/RedisKey。换挂先拆旧 contains 边再挂新。
+  const databaseEntries = Object.entries(model.nodes).filter(([, n]) => n.type === 'Database');
+  const currentDbId =
+    node.type === 'Table' || isRedisKey
+      ? Object.values(model.edges).find((e) => e.type === 'contains' && e.to === nodeId && model.nodes[e.from]?.type === 'Database')?.from ?? ''
+      : '';
+  const setDatabaseLink = (dbId: string) =>
+    tryChange(() => {
+      let m = model;
+      for (const [eid, e] of Object.entries(model.edges)) {
+        if (e.type === 'contains' && e.to === nodeId && model.nodes[e.from]?.type === 'Database') m = applyPatchChecked(m, { op: 'remove-edge', id: eid });
+      }
+      if (dbId) m = applyPatchChecked(m, { op: 'add-edge', id: newEdgeId('contains'), edge: { type: 'contains', from: dbId, to: nodeId } });
       onChange(m);
       return null;
     });
@@ -260,9 +290,10 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
   const targets = nodes.filter(([id]) => id !== nodeId);
   // 表的实时预览行：直接读模型，编辑字段 / 备注 / 类型即时反映在左侧迷你表卡；
   // 预览行同时是字段导航：点哪行，右栏就编辑哪列。
-  const previewRows = node.type === 'Table' ? erFieldRows(model, nodeId) : [];
+  const previewRows = node.type === 'Table' || (isRedisKey && keyStructure === 'hash') ? erFieldRows(model, nodeId) : [];
   const selRow = previewRows.find((r) => r.id === fieldId);
   const tableComment = typeof node.attrs?.comment === 'string' && node.attrs.comment ? node.attrs.comment : '';
+  const keyTtl = isRedisKey && typeof node.attrs?.ttl === 'string' && node.attrs.ttl ? node.attrs.ttl : '';
 
   return createPortal(
     <div
@@ -340,17 +371,34 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
           <div className="dd-modal-preview">
             <div className="dd-modal-preview-label">预览</div>
             <div className="dd-modal-canvas">
-              {node.type === 'Table' ? (
-                <div className="dd-modal-preview-table" aria-label="表卡片预览">
+              {node.type === 'Table' || isRedisKey ? (
+                <div className="dd-modal-preview-table" aria-label={isRedisKey ? 'Redis 键卡片预览' : '表卡片预览'}>
                   <div className="dd-table-head">
                     <span className="dd-table-glyph">
                       <Glyph id={displayGlyph} size={16} />
                     </span>
                     <span className="dd-node-name">{node.name}</span>
-                    <span className="dd-table-count">{previewRows.length} 列</span>
+                    {isRedisKey ? (
+                      <>
+                        <span className="dd-struct-badge">{keyStructure.toUpperCase()}</span>
+                        {keyTtl && <span className="dd-ttl-chip">TTL {keyTtl}</span>}
+                      </>
+                    ) : (
+                      <span className="dd-table-count">{previewRows.length} 列</span>
+                    )}
                   </div>
                   <div className="dd-table-fields">
-                    {previewRows.length === 0 && <div className="dd-table-empty">无字段 · 在右侧添加</div>}
+                    {isRedisKey && keyStructure !== 'hash' ? (
+                      <div className="dd-key-meta">
+                        <span className="dd-field-name">{keyStructure}</span>
+                        <span className="dd-field-comment">{KEY_META[keyStructure] ?? '单值结构'}</span>
+                        <span className="dd-field-type-cell">
+                          <span className="dd-field-type">{keyTtl ? `TTL ${keyTtl}` : '无 TTL'}</span>
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                    {previewRows.length === 0 && <div className="dd-table-empty">{isRedisKey ? '无字段 · 在右侧添加' : '无字段 · 在右侧添加'}</div>}
                     {previewRows.map((f) => (
                       <button
                         key={f.id}
@@ -382,6 +430,8 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                         </span>
                       </button>
                     ))}
+                      </>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -405,7 +455,7 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
             <p className="dd-modal-note">
               {tab === 'appearance'
                 ? '外观是组件身份的快照：换身份会同步图标，也可单独直挑图标。'
-                : node.type === 'Table' && tab === 'fields'
+                : (node.type === 'Table' || isRedisKey) && tab === 'fields'
                   ? '点击预览行切换字段，右侧编辑即时同步到画布。'
                   : '左侧为实时预览，编辑会即时反映在这里。'}
             </p>
@@ -474,6 +524,29 @@ export function NodeEditor({ model, node, nodeId, lens, nodes, onChange, onDelet
                         )}
                       </div>
                       <p className="dd-modal-note">状态机镜片按生命周期分scope；没挂机器的状态在「未归属」里。</p>
+                    </Section>
+                  )}
+                  {(node.type === 'Table' || isRedisKey) && (
+                    <Section title="归属数据库">
+                      <div className="dd-connect-row">
+                        <NodePicker
+                          model={model}
+                          nodes={databaseEntries}
+                          value={currentDbId}
+                          onChange={(id) => setDatabaseLink(id)}
+                          placeholder="选择数据库…"
+                        />
+                        {currentDbId && (
+                          <button className="dd-mini-btn" onClick={() => setDatabaseLink('')}>
+                            解除
+                          </button>
+                        )}
+                      </div>
+                      <p className="dd-modal-note">
+                        {isRedisKey
+                          ? '挂到 Redis 库后，ER 镜片按库分scope、字段类型建议跟随 Redis。'
+                          : '挂到数据库后，ER 镜片按库分scope、字段类型建议跟随该库引擎。'}
+                      </p>
                     </Section>
                   )}
                   <AttrsEditor model={model} nodeId={nodeId} updateNode={updateNode} />

@@ -1671,6 +1671,51 @@ select.dd-input {
   /* 不能 overflow:hidden——字段行的连线圆点要探出卡片边缘一点点才点得到。 */
   border-color: var(--border-strong);
 }
+/* Redis 键卡片：与表同宽同构，但表头左侧一条 Redis 红标识身份。 */
+.dd-node.kind-rediskey {
+  width: 264px;
+  padding: 0;
+  border-color: var(--border-strong);
+}
+.dd-node.kind-rediskey .dd-table-head {
+  box-shadow: inset 3px 0 0 #d4382c;
+}
+.dd-struct-badge {
+  flex: none;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #d4382c;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 1px 5px;
+  line-height: 1.4;
+}
+.dd-ttl-chip {
+  flex: none;
+  font-size: 9px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  line-height: 1.4;
+}
+/* 非 hash 键的单行 meta：结构名 · 一句话说明 · TTL。 */
+.dd-key-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+}
+.dd-key-meta .dd-field-name {
+  flex: none;
+  font-weight: 600;
+}
+.dd-key-meta .dd-field-comment {
+  flex: 1;
+  min-width: 0;
+}
 .dd-table-head {
   display: flex;
   align-items: center;
@@ -4372,6 +4417,33 @@ select.dd-input {
 .dd-scope-chip.active .dd-scope-count {
   background: var(--accent);
   color: var(--accent-contrast);
+}
+/* 空scope引导：当前视图没有结构/状态时，居中给一句说明 + 就地新建入口。 */
+.dd-scope-empty-panel {
+  pointer-events: none;
+}
+.dd-scope-empty {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 64px;
+  padding: 16px 22px;
+  background: var(--panel);
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px var(--shadow-soft);
+  text-align: center;
+}
+.dd-scope-empty p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.dd-scope-empty-actions {
+  display: flex;
+  gap: 8px;
 }
 .dd-fedit-comment {
   min-height: 56px;

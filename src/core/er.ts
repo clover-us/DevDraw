@@ -8,7 +8,14 @@
  * 纯数据，无 UI 依赖：渲染（handle id）、布局（ELK port）、拖线（外键语义）三处共用同一份
  * 「外键列在哪张表、哪一行」的判断，避免三处各猜一套。
  */
-import type { Model, ModelEdge, ModelNode } from './types';
+import type { Model, ModelEdge, ModelNode, NodeType } from './types';
+import { nodeComponent } from './components';
+
+/** ER 镜片里的「结构卡片」：关系表 + Redis 键。两者都折字段、都按归属库分scope。 */
+export const ER_STRUCTURE_TYPES: ReadonlySet<NodeType> = new Set<NodeType>(['Table', 'RedisKey']);
+export function isErStructure(type: NodeType): boolean {
+  return ER_STRUCTURE_TYPES.has(type);
+}
 
 /** 表卡片里的一行（字段）。 */
 export interface ErField {
@@ -101,7 +108,7 @@ export function erFieldRows(model: Model, tableId: string): ErField[] {
   });
 }
 
-/** 表归属的数据库实体：Database --contains--> Table。没挂数据库的表返回 undefined。 */
+/** 表/键归属的数据库实体：Database --contains--> Table/RedisKey。没挂数据库返回 undefined。 */
 export function databaseOfTable(model: Model, tableId: string): ModelNode | undefined {
   for (const e of Object.values(model.edges)) {
     if (e.type === 'contains' && e.to === tableId) {
@@ -112,34 +119,57 @@ export function databaseOfTable(model: Model, tableId: string): ModelNode | unde
   return undefined;
 }
 
-/** 一个数据库实体在 ER 镜片里的「内容」：它contains 的表（按边序）。 */
+/** 字段归属的数据库：Field --contains⁻¹--> Table/RedisKey --contains⁻¹--> Database。 */
+export function databaseOfField(model: Model, fieldId: string): ModelNode | undefined {
+  const owner = Object.values(model.edges).find((e) => e.type === 'contains' && e.to === fieldId)?.from;
+  if (!owner) return undefined;
+  const ownerNode = model.nodes[owner];
+  if (ownerNode?.type === 'Database') return ownerNode;
+  return ownerNode && isErStructure(ownerNode.type) ? databaseOfTable(model, owner) : undefined;
+}
+
+/**
+ * 数据库引擎的推断链：显式 attrs.engine > 组件身份（redis/mysql/postgres 组件自带引擎语义）
+ * > attrs.tech。老项目里「用 Redis 组件建的缓存节点」没写 engine，也能被认成 Redis。
+ * 通用 database / 对象存储 oss 组件不代表具体引擎，跳过。
+ */
+export function databaseEngine(model: Model, node: ModelNode): string | undefined {
+  if (typeof node.attrs?.engine === 'string' && node.attrs.engine.trim()) return node.attrs.engine;
+  const comp = nodeComponent(model, node);
+  if (comp && comp.baseType === 'Database' && comp.id !== 'database' && comp.id !== 'oss') return comp.name;
+  if (typeof node.attrs?.tech === 'string' && node.attrs.tech.trim()) return node.attrs.tech;
+  return undefined;
+}
+
+/** 一个数据库实体在 ER 镜片里的「内容」：它contains 的表/键（按边序）。 */
 export interface ErDatabase {
   id: string;
   name: string;
-  /** 数据库引擎（MySQL / PostgreSQL …），决定字段类型目录。 */
+  /** 数据库引擎（MySQL / PostgreSQL / Redis …），决定字段类型目录。 */
   engine?: string;
   tableIds: string[];
 }
 
-/** 模型里全部数据库实体 + 各自的表清单（架构里有多库时，ER 按库分scope）。 */
+/** 模型里全部数据库实体 + 各自的表/键清单（架构里有多库时，ER 按库分scope）。 */
 export function erDatabases(model: Model): ErDatabase[] {
   const out: ErDatabase[] = [];
   for (const [id, n] of Object.entries(model.nodes)) {
     if (n.type !== 'Database') continue;
     const tableIds: string[] = [];
     for (const e of Object.values(model.edges)) {
-      if (e.type === 'contains' && e.from === id && model.nodes[e.to]?.type === 'Table') tableIds.push(e.to);
+      const to = model.nodes[e.to];
+      if (e.type === 'contains' && e.from === id && to && isErStructure(to.type)) tableIds.push(e.to);
     }
-    out.push({ id, name: n.name, engine: typeof n.attrs?.engine === 'string' ? n.attrs.engine : undefined, tableIds });
+    out.push({ id, name: n.name, engine: databaseEngine(model, n), tableIds });
   }
   return out;
 }
 
-/** 没挂任何数据库的表（ER scope 条里给它们一个「未归属」入口）。 */
+/** 没挂任何数据库的表/键（ER scope 条里给它们一个「未归属」入口）。 */
 export function unassignedTableIds(model: Model): string[] {
   const assigned = new Set(erDatabases(model).flatMap((d) => d.tableIds));
   return Object.entries(model.nodes)
-    .filter(([id, n]) => n.type === 'Table' && !assigned.has(id))
+    .filter(([id, n]) => isErStructure(n.type) && !assigned.has(id))
     .map(([id]) => id);
 }
 
@@ -165,7 +195,7 @@ export function applyErScope(model: Model, proj: ErProjection, scope: string): E
   }
   const nodes: Record<string, ModelNode> = {};
   for (const [id, n] of Object.entries(proj.nodes)) {
-    if (n.type !== 'Table' || tableSet.has(id)) nodes[id] = n;
+    if (!isErStructure(n.type) || tableSet.has(id)) nodes[id] = n;
   }
   const edges: Record<string, ModelEdge> = {};
   for (const [id, e] of Object.entries(proj.edges)) {

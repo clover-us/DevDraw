@@ -63,6 +63,10 @@ export interface DevDrawNodeData extends Record<string, unknown> {
   componentLabel?: string;
   /** ER 表卡片：内部字段行。 */
   fields?: FieldRow[];
+  /** Redis 键：结构（string/hash/list/set/zset/stream）。 */
+  structure?: string;
+  /** Redis 键：过期时间（如 300s / 1800s）。 */
+  ttl?: string;
   /** ER 表卡片：被折叠起来的字段数（> 0 时底部显示「还有 N 列」）。 */
   hiddenFields?: number;
   /** 当前是否折叠（只显示键列）。 */
@@ -206,6 +210,17 @@ const KIND_LABEL: Record<NodeType, string> = {
   Note: '笔记',
   Lifecycle: '生命周期',
   State: '状态',
+  RedisKey: '键',
+};
+
+/** Redis 键结构 → 一句话语义（非 hash 键的卡片 meta 行）。 */
+const KEY_STRUCTURE_META: Record<string, string> = {
+  string: '单值 · 缓存 / 计数 / 分布式锁',
+  hash: '字段表 · 对象缓存',
+  list: '列表 · 有序可重 · 队列 / 最新 N 条',
+  set: '集合 · 无序唯一 · 标签 / 共同好友',
+  zset: '有序集合 · 带 score · 排行 / 延迟队列',
+  stream: '流 · 消费组 · 消息日志',
 };
 
 export function DevDrawNode({ id, data }: NodeProps) {
@@ -225,43 +240,70 @@ export function DevDrawNode({ id, data }: NodeProps) {
   const renameNode = (name: string) => d.onRename?.(id, name);
 
   let body: ReactNode;
-  if (d.kind === 'Table') {
+  if (d.kind === 'Table' || d.kind === 'RedisKey') {
+    const isKey = d.kind === 'RedisKey';
     const fields = d.fields ?? [];
+    const structure = d.structure ?? 'string';
+    const isHash = structure === 'hash';
     body = (
       <>
         <div className="dd-table-head">
           <span className="dd-table-glyph">
-            <Glyph id={d.icon ?? 'table'} size={16} />
+            <Glyph id={d.icon ?? (isKey ? 'key' : 'table')} size={16} />
           </span>
           <InlineName
             className="dd-node-name"
             name={d.name}
             renaming={d.renaming}
-            ariaLabel="重命名表"
+            ariaLabel={isKey ? '重命名键' : '重命名表'}
             onRename={renameNode}
             onCancel={d.onRenameCancel}
           />
-          <span className={`dd-table-count${d.folded ? ' is-folded' : ''}`}>
-            {d.folded ? `${fields.length}/${d.fieldCount ?? fields.length}` : d.fieldCount ?? fields.length} 列
-          </span>
-          {d.foldable && (
-            <button
-              type="button"
-              className={`dd-table-fold nodrag${d.folded ? ' is-folded' : ''}`}
-              title={d.folded ? `展开全部 ${d.fieldCount ?? ''} 列` : '折叠：只显示键列'}
-              aria-label={d.folded ? '展开字段' : '折叠字段'}
-              onClick={(e) => {
-                e.stopPropagation();
-                d.onToggleFold?.(id);
-              }}
-            >
-              {d.folded ? '＋' : '－'}
-            </button>
+          {isKey ? (
+            <>
+              <span className="dd-struct-badge" title={`Redis 结构：${structure}`}>
+                {structure.toUpperCase()}
+              </span>
+              {d.ttl && (
+                <span className="dd-ttl-chip" title={`过期时间 ${d.ttl}`}>
+                  TTL {d.ttl}
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <span className={`dd-table-count${d.folded ? ' is-folded' : ''}`}>
+                {d.folded ? `${fields.length}/${d.fieldCount ?? fields.length}` : d.fieldCount ?? fields.length} 列
+              </span>
+              {d.foldable && (
+                <button
+                  type="button"
+                  className={`dd-table-fold nodrag${d.folded ? ' is-folded' : ''}`}
+                  title={d.folded ? `展开全部 ${d.fieldCount ?? ''} 列` : '折叠：只显示键列'}
+                  aria-label={d.folded ? '展开字段' : '折叠字段'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    d.onToggleFold?.(id);
+                  }}
+                >
+                  {d.folded ? '＋' : '－'}
+                </button>
+              )}
+            </>
           )}
         </div>
         <div className="dd-table-fields">
-          {fields.length === 0 && <div className="dd-table-empty">无字段 · 在右侧抽屉添加</div>}
-          {fields.map((f) => (
+          {isKey && !isHash && (
+            <div className="dd-field-row dd-key-meta">
+              <span className="dd-field-name">{structure}</span>
+              <span className="dd-field-comment">{KEY_STRUCTURE_META[structure] ?? ''}</span>
+              <span className="dd-field-type-cell">
+                <span className="dd-field-type">{d.ttl ? `TTL ${d.ttl}` : '无 TTL'}</span>
+              </span>
+            </div>
+          )}
+          {(!isKey || isHash) && fields.length === 0 && <div className="dd-table-empty">无字段 · 在右侧抽屉添加</div>}
+          {(!isKey || isHash) && fields.map((f) => (
             <div
               key={f.id}
               className={`dd-field-row${d.selectedFieldId === f.id ? ' selected' : ''}${f.keyRole ? ' is-key' : ''}`}
@@ -395,17 +437,17 @@ export function DevDrawNode({ id, data }: NodeProps) {
         显式给 id，别让 React Flow 按 DOM 顺序把边接到第一行字段上。
       */}
       <Handle
-        id={d.kind === 'Table' ? ER_ANCHOR_HANDLE.left : undefined}
+        id={d.kind === 'Table' || d.kind === 'RedisKey' ? ER_ANCHOR_HANDLE.left : undefined}
         type="target"
         position={Position.Left}
-        className={d.kind === 'Table' ? 'dd-anchor-handle' : undefined}
+        className={d.kind === 'Table' || d.kind === 'RedisKey' ? 'dd-anchor-handle' : undefined}
       />
       {body}
       <Handle
-        id={d.kind === 'Table' ? ER_ANCHOR_HANDLE.right : undefined}
+        id={d.kind === 'Table' || d.kind === 'RedisKey' ? ER_ANCHOR_HANDLE.right : undefined}
         type="source"
         position={Position.Right}
-        className={d.kind === 'Table' ? 'dd-anchor-handle' : undefined}
+        className={d.kind === 'Table' || d.kind === 'RedisKey' ? 'dd-anchor-handle' : undefined}
       />
     </div>
   );

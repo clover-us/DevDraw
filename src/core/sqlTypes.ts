@@ -8,7 +8,7 @@
  * 纯数据，无 UI 依赖：目录只作 datalist 建议，输入仍自由（引擎冷门类型不该被挡住）。
  */
 
-export type EngineId = 'mysql' | 'postgresql' | 'sqlite' | 'sqlserver' | 'oracle' | 'generic';
+export type EngineId = 'mysql' | 'postgresql' | 'sqlite' | 'sqlserver' | 'oracle' | 'redis' | 'generic';
 
 const CATALOGS: Record<EngineId, string[]> = {
   mysql: [
@@ -43,6 +43,8 @@ const CATALOGS: Record<EngineId, string[]> = {
     'char', 'varchar2', 'nchar', 'nvarchar2', 'clob', 'nclob', 'blob',
     'date', 'timestamp', 'interval', 'raw', 'rowid',
   ],
+  // Redis 没有 SQL 类型：hash 字段的「类型」是值序列化约定，目录给常用几种。
+  redis: ['string', 'number', 'json', 'boolean', 'timestamp', 'binary'],
   generic: [
     'bigint', 'int', 'smallint', 'varchar', 'char', 'text',
     'decimal', 'numeric', 'boolean',
@@ -56,8 +58,15 @@ const LABELS: Record<EngineId, string> = {
   sqlite: 'SQLite',
   sqlserver: 'SQL Server',
   oracle: 'Oracle',
+  redis: 'Redis',
   generic: '通用 SQL',
 };
+
+/** 引擎输入框的 datalist 建议：覆盖常见关系库 + 内存/分析库，输入仍自由。 */
+export const ENGINE_SUGGESTIONS = [
+  'MySQL', 'PostgreSQL', 'SQLite', 'SQL Server', 'Oracle',
+  'Redis', 'MongoDB', 'ClickHouse', 'Elasticsearch',
+];
 
 /** 引擎别名归一：MariaDB 走 MySQL 目录，pg/postgres 走 PostgreSQL，未知引擎退回通用 SQL。 */
 export function normalizeEngine(engine?: string): EngineId {
@@ -68,6 +77,7 @@ export function normalizeEngine(engine?: string): EngineId {
   if (e === 'sqlite' || e === 'sqlite3') return 'sqlite';
   if (e === 'sqlserver' || e === 'mssql' || e === 'sql server') return 'sqlserver';
   if (e === 'oracle') return 'oracle';
+  if (e === 'redis' || e === 'keydb' || e === 'valkey') return 'redis';
   return 'generic';
 }
 

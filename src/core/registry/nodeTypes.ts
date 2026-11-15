@@ -17,7 +17,8 @@ export const NODE_TYPES: Record<NodeType, TypeDef> = {
     id: 'Database',
     label: '数据库',
     lenses: ['architecture'],
-    attrs: { engine: '引擎', version: '版本', charset: '字符集', comment: '备注' },
+    // persistence / eviction 只对 Redis 这类内存引擎有意义，AttrsEditor 按引擎显隐。
+    attrs: { engine: '引擎', version: '版本', charset: '字符集', persistence: '持久化', eviction: '淘汰策略', comment: '备注' },
     edges: { asSource: ['contains'], asTarget: ['reads', 'writes'] },
   },
   Table: {
@@ -26,6 +27,14 @@ export const NODE_TYPES: Record<NodeType, TypeDef> = {
     lenses: ['er'],
     attrs: { engine: '存储引擎', charset: '字符集', comment: '备注' },
     edges: { asSource: ['contains', 'fk', 'has-lifecycle'], asTarget: ['contains', 'fk', 'reads', 'writes'] },
+  },
+  RedisKey: {
+    id: 'RedisKey',
+    label: '键',
+    lenses: ['er'],
+    attrs: { structure: '结构', ttl: 'TTL', comment: '备注' },
+    // hash 的字段复用 Field（contains）；键本身挂在 Database 下（contains）。
+    edges: { asSource: ['contains'], asTarget: ['contains', 'reads', 'writes'] },
   },
   Field: {
     id: 'Field',

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyErScope,
+  databaseEngine,
+  databaseOfField,
   databaseOfTable,
   ER_ANCHOR_HANDLE,
   erDatabases,
@@ -9,6 +11,7 @@ import {
   fieldIdFromHandle,
   fieldRowOffset,
   foldRows,
+  isErStructure,
   planFkConnection,
   resolveFkLink,
   resolveFkLinks,
@@ -155,7 +158,7 @@ describe('ER 按数据库分scope', () => {
     expect(databaseOfTable(sampleThreeLensModel, 't_audit_log')?.attrs?.engine).toBe('PostgreSQL');
   });
 
-  it('erDatabases 列出全部库 + 各自表清单（Redis 缓存也是 Database，0 表）', () => {
+  it('erDatabases 列出全部库 + 各自表/键清单（Redis 缓存收 3 个键）', () => {
     const dbs = erDatabases(sampleThreeLensModel);
     expect(dbs.map((d) => d.name)).toEqual(['订单库', '订单缓存', '分析库']);
     const order = dbs.find((d) => d.id === 'n_order_db')!;
@@ -164,7 +167,21 @@ describe('ER 按数据库分scope', () => {
     expect(order.tableIds).not.toContain('t_audit_log');
     expect(analytics.tableIds).toEqual(['t_audit_log']);
     expect(analytics.engine).toBe('PostgreSQL');
-    expect(dbs.find((d) => d.id === 'n_cache')!.tableIds).toEqual([]);
+    const cache = dbs.find((d) => d.id === 'n_cache')!;
+    expect(cache.tableIds).toEqual(['k_session', 'k_order_cache', 'k_rank']);
+    expect(cache.engine).toBe('Redis');
+  });
+
+  it('scope=订单缓存：只留 Redis 键；字段不独立投影（折进键卡片，渲染读全模型）', () => {
+    const scoped = applyErScope(sampleThreeLensModel, erProj(), 'n_cache');
+    const ids = Object.keys(scoped.nodes);
+    expect(ids).toContain('k_session');
+    expect(ids).toContain('k_order_cache');
+    expect(ids).toContain('k_rank');
+    expect(ids).not.toContain('t_orders');
+    // 字段不在 ER 投影里（与表一致），但键卡片渲染仍能从全模型读到 hash 字段。
+    expect(ids).not.toContain('f_sess_user');
+    expect(erFieldRows(sampleThreeLensModel, 'k_session').length).toBe(3);
   });
 
   it('scope=分析库：只留它的表，跨库外键自动隐藏', () => {
@@ -199,5 +216,44 @@ describe('ER 按数据库分scope', () => {
     const scoped = applyErScope(model, projectLens(model, getLens('er')), 'unassigned');
     expect(Object.keys(scoped.nodes)).toContain('t_loose');
     expect(Object.keys(scoped.nodes)).not.toContain('t_orders');
+  });
+});
+
+describe('Redis 键空间与引擎推断', () => {
+  it('isErStructure 收表与键，不收字段/库', () => {
+    expect(isErStructure('Table')).toBe(true);
+    expect(isErStructure('RedisKey')).toBe(true);
+    expect(isErStructure('Field')).toBe(false);
+    expect(isErStructure('Database')).toBe(false);
+  });
+
+  it('databaseEngine：显式 engine 优先，其次组件身份，最后 tech', () => {
+    // 显式 engine。
+    expect(databaseEngine(sampleThreeLensModel, sampleThreeLensModel.nodes.n_order_db)).toBe('MySQL');
+    // 组件身份推断：redis 组件 → Redis（用户旧项目只有 component 没有 engine）。
+    const redisOnly: Model = {
+      ...sampleThreeLensModel,
+      nodes: { ...sampleThreeLensModel.nodes, n_cache: { type: 'Database', name: '缓存', attrs: { component: 'redis' } } },
+    };
+    expect(databaseEngine(redisOnly, redisOnly.nodes.n_cache)).toBe('Redis');
+    // 兜底 tech。
+    const techOnly: Model = {
+      ...sampleThreeLensModel,
+      nodes: { ...sampleThreeLensModel.nodes, n_cache: { type: 'Database', name: '缓存', attrs: { tech: 'ClickHouse' } } },
+    };
+    expect(databaseEngine(techOnly, techOnly.nodes.n_cache)).toBe('ClickHouse');
+  });
+
+  it('databaseOfField：字段→结构→库，hash 字段归到 Redis', () => {
+    expect(databaseOfField(sampleThreeLensModel, 'f_sess_user')?.name).toBe('订单缓存');
+    expect(databaseOfField(sampleThreeLensModel, 'f_pay_id')?.name).toBe('订单库');
+    expect(databaseOfField(sampleThreeLensModel, 'f_missing')).toBeUndefined();
+  });
+
+  it('hash 键的字段行带 Redis 类型；非 hash 键无字段行', () => {
+    const rows = erFieldRows(sampleThreeLensModel, 'k_session');
+    expect(rows.map((r) => r.name)).toEqual(['user_id', 'cart', 'last_seen']);
+    expect(rows.map((r) => r.dataType)).toEqual(['number', 'json', 'timestamp']);
+    expect(erFieldRows(sampleThreeLensModel, 'k_order_cache')).toEqual([]);
   });
 });

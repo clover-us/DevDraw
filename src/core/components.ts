@@ -90,6 +90,7 @@ export const DEFAULT_NODE_ICON: Record<NodeType, string> = {
   Note: 'note',
   Lifecycle: 'lifecycle',
   State: 'state',
+  RedisKey: 'key',
 };
 
 /** 完整目录 = 内置 + 自定义（自定义可覆盖同 id 内置）。 */

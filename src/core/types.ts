@@ -13,7 +13,8 @@ export type NodeType =
   | 'Assumption'
   | 'Note'
   | 'Lifecycle'
-  | 'State';
+  | 'State'
+  | 'RedisKey';
 
 export type EdgeType =
   | 'calls'

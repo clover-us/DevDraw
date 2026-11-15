@@ -34,6 +34,7 @@ import {
   fieldIdFromHandle,
   foldRows,
   foldedCardHeight,
+  isErStructure,
   planFkConnection,
   resolveFkLinks,
   shouldAutoFold,
@@ -250,7 +251,7 @@ export function App() {
   // ER scope 条的数据源：架构里的数据库实体 + 各自表数；没挂库的表给「未归属」入口。
   const erDbs = useMemo(() => erDatabases(model), [model]);
   const erUnassigned = useMemo(() => unassignedTableIds(model), [model]);
-  const erTableTotal = useMemo(() => Object.values(model.nodes).filter((n) => n.type === 'Table').length, [model]);
+  const erTableTotal = useMemo(() => Object.values(model.nodes).filter((n) => isErStructure(n.type)).length, [model]);
   // 选中的库被删 / 未归属清空时退回「全部」，不让scope条指着空气。
   const activeErScope =
     erScope !== 'all' && !(erScope === 'unassigned' ? erUnassigned.length > 0 : model.nodes[erScope]?.type === 'Database')
@@ -276,6 +277,9 @@ export function App() {
   );
   const projectionRef = useRef(projection);
   projectionRef.current = projection;
+  // 空scope引导：当前视图里一个结构/状态都没有时，给一句说明 + 就地新建入口，不让画布干空着。
+  const erStructureInView = useMemo(() => Object.values(projection.nodes).filter((n) => isErStructure(n.type)).length, [projection]);
+  const smStateInView = useMemo(() => Object.values(projection.nodes).filter((n) => n.type === 'State').length, [projection]);
 
   // 结构签名：节点 id + 边(id/type/from/to)。改名/改属性不触发重布局，增删节点/改连线才触发。
   const structKey = useMemo(() => {
@@ -425,7 +429,7 @@ export function App() {
     const out: Record<string, { all: ErField[]; folded: boolean; rows: ErField[]; hidden: number }> = {};
     if (lens !== 'er') return out;
     for (const [id, n] of Object.entries(projection.nodes)) {
-      if (n.type !== 'Table') continue;
+      if (!isErStructure(n.type)) continue;
       const all = erFieldRows(model, id);
       // 没手动选过就按字段数自动折叠：4 列的表全展开，12 列的表默认只露键列。
       const folded = foldedTables[id] ?? shouldAutoFold(all);
@@ -455,7 +459,8 @@ export function App() {
       const positions: Positions = {};
       const heights: Record<string, number> = {};
       for (const nid of Object.keys(projection.nodes)) {
-        if (model.nodes[nid]?.type !== 'Table') continue;
+        const nt = model.nodes[nid]?.type;
+        if (!nt || !isErStructure(nt)) continue;
         const rows = erFieldRows(model, nid);
         const folded = nid === id ? next : (foldedTables[nid] ?? shouldAutoFold(rows));
         const visible = foldRows(rows, folded);
@@ -602,15 +607,14 @@ export function App() {
   const onNodeDragStop = useCallback(
     (_: unknown, node: Node) => {
       persistPosition(node.id, node.position);
-      if (lens !== 'er' || model.nodes[node.id]?.type !== 'Table') return;
+      const draggedType = model.nodes[node.id]?.type;
+      if (lens !== 'er' || !draggedType || !isErStructure(draggedType)) return;
       const col = Math.round(node.position.x);
       const siblings = Object.entries(projection.nodes)
-        .filter(
-          ([id]) =>
-            id !== node.id &&
-            model.nodes[id]?.type === 'Table' &&
-            Math.round(positionFor(id).x) === col,
-        )
+        .filter(([id]) => {
+          const t = model.nodes[id]?.type;
+          return id !== node.id && t !== undefined && isErStructure(t) && Math.round(positionFor(id).x) === col;
+        })
         .map(([id]) => {
           const fold = tableFolds[id];
           const height = fold ? Math.max(74, foldedCardHeight(fold.rows.length)) : 74;
@@ -761,16 +765,18 @@ export function App() {
           keyRole: typeof n.attrs?.key === 'string' ? n.attrs.key : undefined,
           comment: typeof n.attrs?.comment === 'string' && n.attrs.comment ? n.attrs.comment : undefined,
           initial: n.attrs?.initial === true,
-          fieldCount: n.type === 'Table' ? (tableFolds[id]?.all.length ?? fieldCount(id)) : undefined,
-          fields: n.type === 'Table' ? (tableFolds[id]?.rows ?? fieldsOf(model, id)) : undefined,
-          hiddenFields: n.type === 'Table' ? tableFolds[id]?.hidden || undefined : undefined,
-          folded: n.type === 'Table' ? tableFolds[id]?.folded : undefined,
+          fieldCount: isErStructure(n.type) ? (tableFolds[id]?.all.length ?? fieldCount(id)) : undefined,
+          fields: isErStructure(n.type) ? (tableFolds[id]?.rows ?? fieldsOf(model, id)) : undefined,
+          hiddenFields: isErStructure(n.type) ? tableFolds[id]?.hidden || undefined : undefined,
+          folded: isErStructure(n.type) ? tableFolds[id]?.folded : undefined,
           // 3 列及以下折起来没意义（键列差不多就是全部），不给按钮。
           foldable: n.type === 'Table' ? (tableFolds[id]?.all.length ?? 0) > 3 : undefined,
           onToggleFold: toggleFold,
-          selectedFieldId: n.type === 'Table' ? selectedNode : undefined,
+          selectedFieldId: isErStructure(n.type) ? selectedNode : undefined,
           onFieldSelect: selectNode,
-          renamingFieldId: n.type === 'Table' ? renamingFieldId : undefined,
+          renamingFieldId: isErStructure(n.type) ? renamingFieldId : undefined,
+          structure: n.type === 'RedisKey' && typeof n.attrs?.structure === 'string' ? n.attrs.structure : undefined,
+          ttl: n.type === 'RedisKey' && typeof n.attrs?.ttl === 'string' && n.attrs.ttl ? n.attrs.ttl : undefined,
           onFieldRenameStart: startFieldRename,
           onFieldRename: commitFieldRename,
           onFieldRenameCancel: cancelFieldRename,
@@ -792,15 +798,15 @@ export function App() {
   const cardRects = useMemo(() => {
     if (lens !== 'er') return [];
     return Object.entries(projection.nodes)
-      .filter(([, n]) => n.type === 'Table')
-      .map(([id]) => {
+      .filter(([, n]) => isErStructure(n.type))
+      .map(([id, n]) => {
         const p = positionFor(id);
         const fold = tableFolds[id];
         const rows = fold ? fold.rows.length : erFieldRows(model, id).length;
         return {
           left: p.x,
           top: p.y,
-          right: p.x + NODE_WIDTH.Table,
+          right: p.x + NODE_WIDTH[n.type],
           bottom: p.y + Math.max(74, foldedCardHeight(rows)),
         };
       });
@@ -875,8 +881,10 @@ export function App() {
         // 表卡片有十几个 handle（每行左右各一），不点名的话 React Flow 会把无边名的边
         // 接到 DOM 里第一个同类型 handle —— 也就是第一行字段，于是"读这张表"会被画成"读 id 这一列"。
         // 所以表与表之间非外键的线也要显式锚到卡片级锚点。
-        const anchored = (nodeId: string, side: 'left' | 'right') =>
-          model.nodes[nodeId]?.type === 'Table' ? ER_ANCHOR_HANDLE[side] : undefined;
+        const anchored = (nodeId: string, side: 'left' | 'right') => {
+          const t = model.nodes[nodeId]?.type;
+          return t !== undefined && isErStructure(t) ? ER_ANCHOR_HANDLE[side] : undefined;
+        };
         return {
           id,
           source: e.from,
@@ -1184,6 +1192,23 @@ export function App() {
       else setEditorNode({ id, tab: 'details' });
     },
     [quickCreate, setModel, persistPosition, centerAt, lensDef],
+  );
+
+  // 空scope引导的「新建」：不依赖双击落点，直接放在当前视口中心。
+  const placeCentered = useCallback(
+    (type: NodeType) => {
+      const flow = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+      const id = newNodeId(type);
+      const name = NODE_TYPES[type].label;
+      setModel((m) => applyPatchChecked(m, { op: 'add-node', id, node: { type, name, provenance: { by: 'human' } } }));
+      persistPosition(id, centerAt(type, name, flow));
+      setSelectedNode(id);
+      setSelectedEdge(null);
+      setCreateMode(false);
+      if (lensDef.nodeTypes.includes(type)) setRenamingId(id);
+      else setEditorNode({ id, tab: 'details' });
+    },
+    [screenToFlowPosition, setModel, persistPosition, centerAt, lensDef],
   );
 
   const changeEdgeMode = useCallback(
@@ -1690,7 +1715,7 @@ export function App() {
                       className={`dd-scope-chip${activeErScope === d.id ? ' active' : ''}`}
                       aria-pressed={activeErScope === d.id}
                       onClick={() => setErScope(d.id)}
-                      title={`${d.name} · ${engineLabel(d.engine)} · ${d.tableIds.length} 张表`}
+                      title={`${d.name} · ${engineLabel(d.engine)} · ${d.tableIds.length} 张表/键`}
                     >
                       {d.name}
                       <span className="dd-scope-engine">{engineLabel(d.engine)}</span>
@@ -1749,6 +1774,39 @@ export function App() {
                       <span className="dd-scope-count">{smUnassigned.length}</span>
                     </button>
                   )}
+                </div>
+              </Panel>
+            )}
+            {lens === 'er' && erStructureInView === 0 && (
+              <Panel position="top-center" className="dd-scope-empty-panel">
+                <div className="dd-scope-empty">
+                  <p>
+                    {activeErScope === 'all'
+                      ? '这个镜片还没有表或 Redis 键。'
+                      : activeErScope === 'unassigned'
+                        ? '没有未归属的表/键。'
+                        : '这个数据库下还没有表/键。'}
+                  </p>
+                  <div className="dd-scope-empty-actions">
+                    <button type="button" className="dd-primary" onClick={() => placeCentered('Table')}>
+                      新建表
+                    </button>
+                    <button type="button" className="dd-ghost" onClick={() => placeCentered('RedisKey')}>
+                      新建 Redis 键
+                    </button>
+                  </div>
+                </div>
+              </Panel>
+            )}
+            {lens === 'state-machine' && smStateInView === 0 && (
+              <Panel position="top-center" className="dd-scope-empty-panel">
+                <div className="dd-scope-empty">
+                  <p>{activeSmScope === 'all' ? '这个镜片还没有状态。' : activeSmScope === 'unassigned' ? '没有未归属的状态。' : '这个生命周期下还没有状态。'}</p>
+                  <div className="dd-scope-empty-actions">
+                    <button type="button" className="dd-primary" onClick={() => placeCentered('State')}>
+                      新建状态
+                    </button>
+                  </div>
                 </div>
               </Panel>
             )}

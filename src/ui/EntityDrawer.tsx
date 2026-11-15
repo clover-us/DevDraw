@@ -182,7 +182,9 @@ export function EntityDrawer(props: Props) {
 
         {APPEARANCE_TYPES.has(node.type) && <ComponentDetails model={model} node={node} />}
 
-        {node.type === 'Table' && <TableFieldsView model={model} tableId={id} onSelectField={props.onSelectNode} />}
+        {(node.type === 'Table' || (node.type === 'RedisKey' && node.attrs?.structure === 'hash')) && (
+          <TableFieldsView model={model} tableId={id} onSelectField={props.onSelectNode} />
+        )}
         {node.type === 'Field' && <FieldView model={model} fieldId={id} onSelectNode={props.onSelectNode} />}
         {node.type === 'State' && (
           <Section title="状态">
