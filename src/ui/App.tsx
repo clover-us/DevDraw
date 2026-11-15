@@ -67,7 +67,7 @@ import { EdgePicker } from './EdgePicker';
 import { EntityDrawer } from './EntityDrawer';
 import { ReasoningNudge } from './ReasoningNudge';
 import { DynamicLegend } from './DynamicLegend';
-import { FitFrameIcon, LayoutIcon, MaximizeIcon, MinimizeIcon, MinusIcon, PlusIcon, RedoIcon, UndoIcon } from './icons';
+import { FitFrameIcon, LayoutIcon, LogoIcon, MaximizeIcon, MinimizeIcon, MinusIcon, PlusIcon, RedoIcon, UndoIcon } from './icons';
 import { NavPanel } from './NavPanel';
 import { NavRail, type NavSection } from './NavRail';
 import { QuickCreate } from './QuickCreate';
@@ -1215,6 +1215,23 @@ export function App() {
     setActiveSessionId(null);
   }, [project]);
 
+  // 重置示例会丢掉当前模型，是破坏性操作——两步确认：先点一下「上膛」，3 秒内再点才真的重置。
+  // 用按钮自身的文案变化做确认，不弹模态打断心流（§2.2 推演不打断建模）。
+  const [resetArmed, setResetArmed] = useState(false);
+  const resetTimerRef = useRef<number | null>(null);
+  useEffect(() => () => { if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current); }, []);
+  const handleResetClick = useCallback(() => {
+    if (resetArmed) {
+      if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+      setResetArmed(false);
+      resetAll();
+      return;
+    }
+    setResetArmed(true);
+    resetTimerRef.current = window.setTimeout(() => setResetArmed(false), 3000);
+  }, [resetArmed, resetAll]);
+
   // ── 组件库：点添加 / 拖入画布 / 自定义组件 CRUD（语义底座稳定，图标是表现层）──
   const addComponent = useCallback(
     (comp: ComponentDef, position?: { x: number; y: number }) => {
@@ -1310,8 +1327,12 @@ export function App() {
   return (
     <div className="dd-app">
       <header className="dd-header">
-        <div className="dd-brand">DevDraw · 研绘</div>
-        <div className="dd-model-name">{model.name}</div>
+        <div className="dd-brand">
+          <LogoIcon size={20} className="dd-brand-mark" />
+          <span className="dd-brand-name">DevDraw</span>
+          <span className="dd-brand-sub">研绘</span>
+        </div>
+        <div className="dd-model-name" title={model.name}>{model.name}</div>
         <nav className="dd-lens-tabs">
           {LENSES.map((l) => (
             <button
@@ -1325,33 +1346,47 @@ export function App() {
           ))}
         </nav>
         <div className="dd-actions">
-          <button
-            className="dd-icon-btn"
-            onClick={project.undo}
-            disabled={!project.canUndo}
-            title="撤销 (Ctrl+Z)"
-            aria-label="撤销"
-          >
-            <UndoIcon size={16} />
-          </button>
-          <button
-            className="dd-icon-btn"
-            onClick={project.redo}
-            disabled={!project.canRedo}
-            title="重做 (Ctrl+Shift+Z)"
-            aria-label="重做"
-          >
-            <RedoIcon size={16} />
-          </button>
+          <div className="dd-action-group" role="group" aria-label="历史">
+            <button
+              className="dd-icon-btn"
+              onClick={project.undo}
+              disabled={!project.canUndo}
+              title="撤销 (Ctrl+Z)"
+              aria-label="撤销"
+            >
+              <UndoIcon size={16} />
+            </button>
+            <button
+              className="dd-icon-btn"
+              onClick={project.redo}
+              disabled={!project.canRedo}
+              title="重做 (Ctrl+Shift+Z)"
+              aria-label="重做"
+            >
+              <RedoIcon size={16} />
+            </button>
+          </div>
+          <span className="dd-action-divider" aria-hidden="true" />
           {lens === 'architecture' && (
-            <button onClick={clearScenario} disabled={seeds.length === 0}>
+            <button
+              className="dd-tool-btn"
+              onClick={clearScenario}
+              disabled={seeds.length === 0}
+              title="清除当前失效源与推演结果，回到干净画布"
+            >
               清除推演
             </button>
           )}
-          <button onClick={project.exportZip} title="把当前状态打包下载一份 zip 快照（备份 / 分享 / 换浏览器）">
+          <button className="dd-tool-btn" onClick={project.exportZip} title="把当前状态打包下载一份 zip 快照（备份 / 分享 / 换浏览器）">
             导出 zip
           </button>
-          <button onClick={resetAll}>重置示例</button>
+          <button
+            className={`dd-tool-btn dd-tool-danger${resetArmed ? ' armed' : ''}`}
+            onClick={handleResetClick}
+            title={resetArmed ? '再点一次确认重置（会丢掉当前模型）' : '重置为内置示例模型（会丢掉当前模型）'}
+          >
+            {resetArmed ? '确认重置？' : '重置示例'}
+          </button>
         </div>
       </header>
       <div className="dd-main">

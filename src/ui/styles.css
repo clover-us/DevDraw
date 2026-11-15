@@ -155,11 +155,15 @@ button {
   font-size: 13px;
   font-family: inherit;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.06s;
 }
 button:hover:not(:disabled) {
   border-color: var(--border-strong);
   background: var(--overlay);
+}
+/* 按压反馈：轻微下沉，让每次点击都有「按到了」的触感 */
+button:active:not(:disabled) {
+  transform: translateY(0.5px) scale(0.985);
 }
 button:disabled {
   opacity: 0.45;
@@ -215,7 +219,7 @@ textarea:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 5px;
+  padding: 6px 9px;
   border-radius: 7px;
   background: none;
   border: 1px solid transparent;
@@ -225,6 +229,9 @@ textarea:focus-visible {
   color: var(--text);
   background: var(--panel-2);
   border-color: var(--border);
+}
+.dd-icon-btn:disabled {
+  opacity: 0.35;
 }
 
 .dd-mini-btn {
@@ -357,8 +364,26 @@ select.dd-input {
   font-size: 15px;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 7px;
   white-space: nowrap;
+}
+/* 品牌罗盘标记：推演方向的隐喻，用主色点亮，让 header 有识别锚点 */
+.dd-brand-mark {
+  color: var(--accent);
+  flex: none;
+  filter: drop-shadow(0 1px 3px var(--ring));
+}
+.dd-brand-name {
+  letter-spacing: 0.01em;
+}
+.dd-brand-sub {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  letter-spacing: 0.06em;
 }
 .dd-model-name {
   color: var(--muted);
@@ -370,19 +395,58 @@ select.dd-input {
 .dd-actions {
   margin-left: auto;
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
 }
 .dd-actions button {
   white-space: nowrap;
 }
-.dd-icon-btn {
-  display: inline-flex;
+/* 历史（撤销/重做）自成一组，与场景/文件动作之间用一道细分隔线断句 */
+.dd-action-group {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 6px 9px;
+  gap: 2px;
 }
-.dd-icon-btn:disabled {
-  opacity: 0.35;
+.dd-action-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border-strong);
+  margin: 0 4px;
+  flex: none;
+}
+/* 工具按钮：ghost 风格，比基础按钮轻盈，不与镜片 tabs 抢视觉重量 */
+.dd-tool-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 6px 11px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.dd-tool-btn:hover:not(:disabled) {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+/* 破坏性动作（重置示例）：平时低调，悬停/上膛时才露出危险色 */
+.dd-tool-danger {
+  color: var(--muted);
+}
+.dd-tool-danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+.dd-tool-danger.armed {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  font-weight: 600;
+  animation: dd-reset-pulse 1s ease-in-out infinite;
+}
+@keyframes dd-reset-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--danger-soft); }
+  50% { box-shadow: 0 0 0 4px var(--danger-soft); }
 }
 
 /* ---------- 镜片 tabs ---------- */
@@ -845,11 +909,13 @@ select.dd-input {
   border: 1px solid transparent;
   color: var(--text-2);
   font-size: 13px;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, padding-left 0.12s;
 }
 .dd-entity-row:hover:not(:disabled) {
   background: var(--panel-2);
   border-color: var(--border);
   color: var(--text);
+  padding-left: 12px;
 }
 .dd-entity-row.selected {
   background: var(--accent-soft);
@@ -2245,11 +2311,13 @@ select.dd-input {
   text-align: left;
   color: var(--text);
   font-family: inherit;
-  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.12s;
 }
 .dd-comp-item:hover {
   background: var(--bg-elevated);
   border-color: var(--border);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px var(--shadow);
 }
 .dd-comp-item:active {
   cursor: grabbing;
@@ -2778,11 +2846,13 @@ select.dd-input {
   background: var(--panel-2);
   color: var(--text);
   cursor: pointer;
-  transition: background 0.13s ease, border-color 0.13s ease;
+  transition: background 0.13s ease, border-color 0.13s ease, transform 0.13s ease, box-shadow 0.13s ease;
 }
 .dd-session-item:hover {
   background: var(--bg-elevated);
   border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px var(--shadow);
 }
 .dd-session-item.active {
   border-color: var(--accent);
