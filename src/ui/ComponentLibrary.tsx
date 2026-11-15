@@ -3,7 +3,7 @@
  * 按类别分组，点一下添加到画布中心，或拖拽到画布任意位置。支持自定义组件（CRUD，存模型）。
  * 只显示与当前镜片语义底座匹配的组件（架构镜片看不到 Table 组件，反之亦然）。
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { COMPONENT_CATEGORIES, componentCatalog } from '../core/components';
 import type { LensDef } from '../core/registry';
 import type { ComponentDef, Model } from '../core/types';
@@ -33,6 +33,14 @@ export function ComponentLibrary({
   onClose,
 }: ComponentLibraryProps) {
   const [query, setQuery] = useState('');
+  // 删除自定义组件两步确认：先上膛（图标变红呼吸），再点一次才真删，3s 不点自动解除。
+  // 与抽屉删除 / 重置示例同一套语言，破坏性动作不再一键直达。
+  const [armedDelete, setArmedDelete] = useState<string | null>(null);
+  useEffect(() => {
+    if (!armedDelete) return;
+    const t = window.setTimeout(() => setArmedDelete(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [armedDelete]);
   const customIds = useMemo(() => new Set(Object.keys(model.components ?? {})), [model.components]);
 
   const filtered = useMemo(() => {
@@ -113,7 +121,12 @@ export function ComponentLibrary({
                   <button className="dd-icon-btn" onClick={() => onEditCustom(c)} title="编辑组件" aria-label={`编辑 ${c.name}`}>
                     <PencilIcon size={14} />
                   </button>
-                  <button className="dd-icon-btn danger" onClick={() => onDeleteCustom(c.id)} title="删除组件" aria-label={`删除 ${c.name}`}>
+                  <button
+                    className={`dd-icon-btn danger${armedDelete === c.id ? ' armed' : ''}`}
+                    onClick={() => (armedDelete === c.id ? onDeleteCustom(c.id) : setArmedDelete(c.id))}
+                    title={armedDelete === c.id ? '再点一次确认删除' : '删除组件'}
+                    aria-label={armedDelete === c.id ? `确认删除 ${c.name}` : `删除 ${c.name}`}
+                  >
                     <TrashIcon size={14} />
                   </button>
                 </span>

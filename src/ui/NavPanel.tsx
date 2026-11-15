@@ -64,6 +64,9 @@ export function NavPanel({
   const total = Object.keys(projection.nodes).length;
   const errorCount = findings.filter((f) => f.severity === 'error').length;
   const questionCount = findings.filter((f) => f.severity === 'question').length;
+  // 提醒（warning，如单点无兜底）也要计入：否则只有 warning 时计数会误报「没有待处理问题」，
+  // 而下方列表却明明列着卡片——计数与列表必须口径一致。
+  const warningCount = findings.filter((f) => f.severity === 'warning').length;
 
   return (
     <aside className={`dd-navpanel section-${section}`} aria-label={section === 'entities' ? '实体浏览' : '模型发现'}>
@@ -94,7 +97,18 @@ export function NavPanel({
           </div>
 
           <div className="dd-entity-scroll">
-            {groups.length === 0 && <p className="dd-empty">没有匹配的实体。</p>}
+            {total === 0 ? (
+              // 空模型 ≠ 搜索无结果：前者要引导「迈出第一步」，后者只需提示换关键词。
+              <div className="dd-panel-empty">
+                <p>这副镜片还是空的。</p>
+                <button className="dd-create-btn" onClick={onCreate}>
+                  <PlusIcon size={16} /> 新建第一个实体
+                </button>
+                <p className="dd-hint-text">也可以从组件库拖一个进来，或点右上角「重置示例」看一个完整例子。</p>
+              </div>
+            ) : groups.length === 0 ? (
+              <p className="dd-empty">没有匹配「{query.trim()}」的实体，换个关键词试试。</p>
+            ) : null}
             {groups.map((g) => (
               <div key={g.type} className="dd-entity-group">
                 <div className="dd-entity-group-head">
@@ -135,13 +149,18 @@ export function NavPanel({
           <div className="dd-finding-counts dd-navpanel-counts">
             {errorCount > 0 && <span className="dd-count sev-error">{errorCount} 错</span>}
             {questionCount > 0 && <span className="dd-count sev-question">{questionCount} 问</span>}
-            {errorCount === 0 && questionCount === 0 && <span className="dd-count sev-ok">没有待处理问题</span>}
+            {warningCount > 0 && <span className="dd-count sev-warning">{warningCount} 提醒</span>}
+            {errorCount === 0 && questionCount === 0 && warningCount === 0 && (
+              <span className="dd-count sev-ok">没有待处理问题</span>
+            )}
           </div>
 
           <p className="dd-navpanel-desc">{lens.description}</p>
 
           <div className="dd-entity-scroll">
-            {findings.length === 0 && <p className="dd-empty">这副镜片下模型没有发现问题。</p>}
+            {findings.length === 0 && (
+              <p className="dd-empty">模型暂时没顶嘴。继续画，或换一副镜片再看看——思考是建模的质检。</p>
+            )}
             <ul className="dd-finding-list">
               {findings.map((f) => (
                 <FindingCard
