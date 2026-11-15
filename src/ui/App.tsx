@@ -62,7 +62,7 @@ import type { ComponentDef, DependencyMode, EdgeType, Model, NodeType } from '..
 import { ComponentEditor } from './ComponentEditor';
 import { COMPONENT_MIME, ComponentLibrary } from './ComponentLibrary';
 import { ContextMenu, type MenuItem } from './ContextMenu';
-import { DevDrawEdge, DevDrawNode, type DevDrawEdgeData, type DevDrawNodeData, type FieldRow } from './components';
+import { DevDrawEdge, DevDrawNode, Z_SELECTED, type DevDrawEdgeData, type DevDrawNodeData, type FieldRow } from './components';
 import { EdgePicker } from './EdgePicker';
 import { EntityDrawer } from './EntityDrawer';
 import { ReasoningNudge } from './ReasoningNudge';
@@ -811,6 +811,9 @@ export function App() {
               : erFieldPort('left', link.toFieldId ?? ''),
           type: 'devdraw',
           selected: selectedEdge === id,
+          // 选中的线抬到最上层（manual 模式，层级自管）。边标签在 DevDrawEdge 里带同一个值，
+          // 因为标签经 EdgeLabelRenderer portal 到独立容器，不随边路径一起抬升。
+          zIndex: selectedEdge === id ? Z_SELECTED : 0,
           data: {
             edgeType: e.type,
             mode: edgeDependency(e),
@@ -852,6 +855,14 @@ export function App() {
     setPrevDerivedEdges(derivedEdges);
     setRfEdges(derivedEdges);
   }
+
+  // 选中 / 拖拽中的节点抬到最上层。读 rfNodes 的实时 selected/dragging，而不是 App 的 selectedNode：
+  // 拖拽时 React Flow 会先把节点标记 selected，但 App 的选中态未必同步——以画布实时态为准，
+  // 拖动中的卡片才不会钻到别的卡片底下。manual 模式下 React Flow 不再自动抬升，层级全由这里说了算。
+  const renderNodes = useMemo(
+    () => rfNodes.map((n) => ({ ...n, zIndex: n.selected || n.dragging ? Z_SELECTED : 0 })),
+    [rfNodes],
+  );
 
   const applySeeds = useCallback(
     (next: string[], forLens: LensId) => {
@@ -1431,8 +1442,10 @@ export function App() {
         >
           <ReactFlow
             key={lens}
-            nodes={rfNodes}
+            nodes={renderNodes}
             edges={rfEdges}
+            // 层级自管：选中的组件/线（含边标签）永远盖在最上层，见 renderNodes / derivedEdges / DevDrawEdge。
+            zIndexMode="manual"
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             onNodesChange={onNodesChange}

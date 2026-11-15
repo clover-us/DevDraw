@@ -20,6 +20,16 @@ import { Glyph } from './glyphs';
 /** 语义类型 → 兜底图标（节点无组件身份时）。 */
 const KIND_GLYPH = DEFAULT_NODE_ICON;
 
+/**
+ * 画布堆叠优先级（配合 React Flow 的 zIndexMode="manual"，层级完全自管）：
+ * 选中的组件 / 线永远盖在最上层——它是用户当前的焦点，被别的卡片或线压住就读不下去了。
+ *
+ * 为什么标签也要带这个值：边的路径由 React Flow 按 edge.zIndex 抬升，但边标签是经
+ * EdgeLabelRenderer portal 到一个独立的扁平容器里的，那个容器不随边一起抬升。所以标签
+ * 必须显式带上与路径相同的 z-index，才能跟线一起浮上来，否则「线浮上来了、字还埋在下面」。
+ */
+export const Z_SELECTED = 1000;
+
 /** 表卡片内的一行字段（从全模型 contains 边折叠而来）。 */
 export interface FieldRow {
   id: string;
@@ -552,6 +562,7 @@ export function DevDrawEdge(props: EdgeProps) {
               <div
                 className={`dd-edge-card ${cls}`}
                 style={{
+                  zIndex: selected ? Z_SELECTED : 0,
                   transform: `translate(-50%, -50%) translate(${sourceX + 10 + lane * 15}px, ${sourceY - 10}px)`,
                 }}
               >
@@ -562,6 +573,7 @@ export function DevDrawEdge(props: EdgeProps) {
               <div
                 className={`dd-edge-card ${cls}`}
                 style={{
+                  zIndex: selected ? Z_SELECTED : 0,
                   transform: `translate(-50%, -50%) translate(${targetX - 10 - lane * 15}px, ${targetY - 10}px)`,
                 }}
               >
@@ -574,6 +586,7 @@ export function DevDrawEdge(props: EdgeProps) {
             className={`dd-edge-label ${cls}`}
             title={d.edgeType === 'fk' && d.keyCol ? `${d.cardinality ?? ''} · ${d.keyCol}` : undefined}
             style={{
+              zIndex: selected ? Z_SELECTED : 0,
               transform:
                 tagOrigin === 'left'
                   ? `translate(0, -50%) translate(${tagX}px, ${tagY}px)`
