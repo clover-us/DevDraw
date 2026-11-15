@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { arrangeColumns, columnKey, groupColumns, packAround, reflowColumn, type Positions } from '../er-arrange';
+import { arrangeColumns, columnKey, groupColumns, packAround, placeIsolated, reflowColumn, type Positions } from '../er-arrange';
 
 const H = 50;
 const heights = { a: H, b: H, c: H, d: H };
@@ -137,5 +137,34 @@ describe('packAround', () => {
 
   it('锚点不存在时返回空表', () => {
     expect(packAround(entries, 20, 'zzz', 0)).toEqual({});
+  });
+});
+
+describe('placeIsolated', () => {
+  const widths = { a: 232, b: 232, c: 220, d: 220, e: 232 };
+  const hs = { a: 74, b: 74, c: 72, d: 72, e: 74 };
+
+  it('没有游离节点时返回空表', () => {
+    expect(placeIsolated([], widths, hs, 1000, 0, 44)).toEqual({});
+  });
+
+  it('从主图右边界 + gap 起排，纵向从主图顶边开始', () => {
+    const out = placeIsolated(['a', 'b'], widths, hs, 1000, 120, 44);
+    expect(out.a).toEqual({ x: 1044, y: 120 });
+    expect(out.b).toEqual({ x: 1044, y: 120 + 74 + 44 });
+  });
+
+  it('超过每列上限就换列，列宽取该列最宽的卡', () => {
+    const out = placeIsolated(['a', 'b', 'c', 'd', 'e'], widths, hs, 1000, 0, 44, 2);
+    // 第一列 a/b（宽 232），第二列 c/d（宽 220），第三列 e。
+    expect(out.c.x).toBe(1000 + 44 + 232 + 44);
+    expect(out.e.x).toBe(1000 + 44 + 232 + 44 + 220 + 44);
+    expect(out.e.y).toBe(0);
+  });
+
+  it('同一列内不重叠', () => {
+    const out = placeIsolated(['a', 'b', 'c'], widths, hs, 0, 0, 44);
+    expect(out.b.y).toBeGreaterThanOrEqual(out.a.y + hs.a + 44);
+    expect(out.c.y).toBeGreaterThanOrEqual(out.b.y + hs.b + 44);
   });
 });

@@ -20,7 +20,7 @@ import {
   type ErField,
   type FoldedRows,
 } from './er';
-import { arrangeColumns, type Positions } from './er-arrange';
+import { arrangeColumns, placeIsolated, type Positions } from './er-arrange';
 import type { LensId, Projection } from './registry';
 import type { Model, NodeType } from './types';
 
@@ -253,10 +253,28 @@ export async function layoutProjection(
   }
   // ER：列内排序 + 列对齐（见 er-arrange.ts）。其余镜片保持 ELK 原样。
   if (lens !== 'er') return out;
-  return arrangeColumns(
+  const arranged = arrangeColumns(
     out,
     heights,
     Object.values(projection.edges).map((e) => ({ from: e.from, to: e.to })),
     44,
   );
+  // 游离节点（一条边都没有的卡）不参与分层：ELK 会把它们塞进任意一层的空隙里压住别人。
+  // 单独收到主图右侧一列，位置稳定、一眼能看见"还没连上的表"。
+  const linked = new Set<string>();
+  for (const e of Object.values(projection.edges)) {
+    linked.add(e.from);
+    linked.add(e.to);
+  }
+  const isolated = Object.keys(arranged).filter((id) => !linked.has(id));
+  if (isolated.length === 0) return arranged;
+  const main = Object.keys(arranged).filter((id) => linked.has(id));
+  const widths: Record<string, number> = {};
+  for (const [id, n] of Object.entries(projection.nodes)) widths[id] = NODE_WIDTH[n.type];
+  const mainRight = main.length > 0 ? Math.max(...main.map((id) => arranged[id].x + (widths[id] ?? 0))) : 0;
+  const mainTop = main.length > 0 ? Math.min(...main.map((id) => arranged[id].y)) : 0;
+  return {
+    ...arranged,
+    ...placeIsolated(isolated, widths, heights, mainRight, mainTop, 44),
+  };
 }

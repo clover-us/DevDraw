@@ -140,6 +140,41 @@ export interface ReflowEntry {
 }
 
 /**
+ * 游离节点（没有任何连线的卡）单独成区：排在主图右侧，按列竖排。
+ *
+ * 为什么不能交给 ELK：分层算法对"没有边的节点"没有约束，它们会被塞进任意一层的空隙里，
+ * 于是空表、游离笔记就压在别的卡片上（实测 4 处重叠）。而 ER 图里"还没连上的表"恰恰是
+ * 最需要被看见的东西——它得有个固定的落脚处，而不是随机漂在图上。
+ *
+ * 规则：主图最右边界 + `gap` 起，每列最多 `perColumn` 张，列宽取该列最宽的卡，列间 `gap`。
+ * 纵向从主图顶边开始排，不参与主图的垂直居中（否则主图一长，游离区就被推到画布外）。
+ */
+export function placeIsolated(
+  isolated: string[],
+  widths: Record<string, number>,
+  heights: Record<string, number>,
+  mainRight: number,
+  mainTop: number,
+  gap: number,
+  perColumn = 4,
+): Positions {
+  const out: Positions = {};
+  if (isolated.length === 0) return out;
+  let x = mainRight + gap;
+  for (let start = 0; start < isolated.length; start += perColumn) {
+    const column = isolated.slice(start, start + perColumn);
+    const width = Math.max(...column.map((id) => widths[id] ?? 0));
+    let y = mainTop;
+    for (const id of column) {
+      out[id] = { x: Math.round(x), y: Math.round(y) };
+      y += (heights[id] ?? 0) + gap;
+    }
+    x += width + gap;
+  }
+  return out;
+}
+
+/**
  * 拖完一张卡之后，把它所在的这一列重新贴紧（只在这一列内部动）。
  *
  * `pinned` 是刚被拖动的卡：它必须停在用户放下的地方，其余卡往上/往下让位——
