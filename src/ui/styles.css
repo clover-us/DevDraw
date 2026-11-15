@@ -2643,6 +2643,11 @@ select.dd-input {
   overflow: hidden;
   animation: dd-modal-in 0.16s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
+/* 可换身份的实体：固定弹窗框架。tab 切换、搜索过滤都不改外框尺寸，
+   详情 / 图标网格各自内部滚动，避免输入时整窗高度跳变。 */
+.dd-modal-tall {
+  height: min(720px, calc(100vh - 48px));
+}
 @keyframes dd-modal-in {
   from {
     opacity: 0;
@@ -2786,6 +2791,12 @@ select.dd-input {
   background: var(--bg-elevated);
   color: var(--muted);
 }
+/* 草稿徽标：预览里提醒「这是未应用的草稿」，琥珀色与 tab 黄点同一语义。 */
+.dd-modal-badge.draft {
+  background: var(--warning-soft);
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  color: var(--warning);
+}
 .dd-modal-lens {
   font-size: 10px;
   padding: 2px 8px;
@@ -2856,18 +2867,60 @@ select.dd-input {
   border-top: 1px solid var(--border);
   padding-top: 10px;
 }
+/* 图标搜索：整只字段一个边框，图标在内、聚焦整圈 ring，带清除钮。 */
 .dd-modal-icon-search {
   display: flex;
   align-items: center;
   gap: 6px;
   flex: none;
-  width: 170px;
+  width: 200px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--faint);
+  transition: border-color 0.15s, box-shadow 0.15s, color 0.15s;
+}
+.dd-modal-icon-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+  color: var(--accent);
+}
+.dd-modal-icon-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+}
+.dd-modal-icon-search input:focus-visible {
+  outline: none; /* ring 由容器 focus-within 提供，避免双圈 */
+}
+.dd-modal-icon-search input::placeholder {
   color: var(--faint);
 }
-.dd-modal-icon-search .dd-input {
-  margin: 0;
-  padding: 5px 9px;
-  font-size: 12px;
+.dd-search-clear {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--faint);
+}
+.dd-search-clear:hover:not(:disabled) {
+  background: var(--overlay);
+  color: var(--text);
 }
 .dd-modal-icon-grid {
   flex: 1;
@@ -2876,7 +2929,8 @@ select.dd-input {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
   gap: 6px;
-  padding-right: 4px;
+  padding-right: 2px;
+  scrollbar-gutter: stable; /* 出不出滚动条，格子宽度都不跳 */
   align-content: start;
 }
 .dd-modal-icon-grid .dd-glyph-cell {
@@ -2884,7 +2938,12 @@ select.dd-input {
 }
 .dd-modal-icon-empty {
   grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   margin: 8px 0;
+  padding: 18px 0;
   font-size: 12px;
   color: var(--muted);
 }
@@ -2923,6 +2982,14 @@ select.dd-input {
   }
   .dd-modal-preview {
     display: none;
+  }
+  .dd-modal-icon-search {
+    width: 150px;
+  }
+}
+@media (max-width: 700px) {
+  .dd-modal-foot-hint {
+    display: none; /* 窄屏先保按钮，提示语让位 */
   }
 }
 
@@ -3947,6 +4014,7 @@ select.dd-input {
 /* ---------- 读 / 写分离：统一编辑弹窗 + 只读抽屉 ---------- */
 /* 弹窗内 tab：详情 / 外观。单一编辑入口，操作在弹窗内划分。 */
 .dd-modal-tabs {
+  position: relative;
   display: flex;
   gap: 4px;
   padding: 10px 16px 0;
@@ -3957,21 +4025,47 @@ select.dd-input {
   appearance: none;
   border: none;
   background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 14px 10px;
   font-size: 13px;
   font-weight: 600;
   color: var(--muted);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
   margin-bottom: -1px;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.15s, background 0.15s;
 }
 .dd-modal-tabs button:hover {
   color: var(--text);
+  background: color-mix(in srgb, var(--panel-2) 70%, transparent);
 }
 .dd-modal-tabs button.active {
   color: var(--accent);
-  border-bottom-color: var(--accent);
+}
+.dd-modal-tabs button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+/* 滑动下划线：量活跃 tab 位置，切换时滑过去而不是跳过去。 */
+.dd-modal-tabs-ink {
+  position: absolute;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+  transition: left 0.18s cubic-bezier(0.2, 0.9, 0.3, 1), width 0.18s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+/* 未应用草稿的小黄点：详情 tab 时也能看见外观有改动挂着。 */
+.dd-tab-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--warning-soft);
 }
 /* 详情 tab：与外观共用左侧实时预览，右栏是带内边距、可滚动的表单。 */
 .dd-nodeeditor-details {
