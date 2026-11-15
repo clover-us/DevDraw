@@ -2820,11 +2820,42 @@ select.dd-input {
   overflow-y: auto;
 }
 .dd-modal-preview-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--faint);
+}
+/* 预览视图切换：结构 / 数据。 */
+.dd-preview-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.dd-preview-toggle button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.dd-preview-toggle button.on {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 4px var(--shadow-soft);
 }
 .dd-modal-canvas {
   display: flex;
@@ -2926,6 +2957,69 @@ select.dd-input {
 }
 .dd-modal-preview-table .dd-field-row:last-child {
   border-radius: 0 0 8px 8px;
+}
+/* 实例数据表格：预览只读紧凑、编辑器可输入；横向可滚以容纳多列。 */
+.dd-data-scroll {
+  overflow: auto;
+  max-height: 240px;
+  border-radius: 0 0 8px 8px;
+}
+.dd-data-scroll.editor {
+  max-height: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.dd-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.dd-data-table th,
+.dd-data-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dd-data-table th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 10.5px;
+  z-index: 1;
+}
+.dd-data-table.readonly td {
+  color: var(--text-2);
+}
+.dd-data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.dd-data-table .dd-data-cell {
+  width: 100%;
+  min-width: 70px;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+.dd-data-table td:has(.dd-data-cell) {
+  max-width: none;
+  overflow: visible;
+  padding: 3px 4px;
+}
+.dd-data-del {
+  width: 26px;
+  max-width: 26px;
+  text-align: center;
+}
+.dd-data-del .dd-icon-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
 }
 .dd-modal-meta {
   display: flex;

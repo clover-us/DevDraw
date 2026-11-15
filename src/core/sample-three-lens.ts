@@ -45,16 +45,62 @@ export const sampleThreeLensModel: Model = {
       attrs: { ...sampleModel.nodes.n_cache.attrs, component: 'redis', engine: 'Redis', persistence: 'RDB+AOF', eviction: 'allkeys-lru', comment: '会话与热点缓存' },
     },
     // ── ER：Redis 键（键空间）——hash 带字段，其余结构单值 ──
-    k_session: { type: 'RedisKey', name: 'session:{uid}', attrs: { structure: 'hash', ttl: '1800s', comment: '用户会话' } },
-    k_order_cache: { type: 'RedisKey', name: 'order:{id}', attrs: { structure: 'string', ttl: '300s', comment: '订单详情缓存' } },
+    k_session: {
+      type: 'RedisKey',
+      name: 'session:{uid}',
+      attrs: {
+        structure: 'hash',
+        ttl: '1800s',
+        comment: '用户会话',
+        data: JSON.stringify([
+          { f_sess_user: '42', f_sess_cart: '{"sku":"A1","qty":2}', f_sess_seen: '2026-11-16 00:59' },
+          { f_sess_user: '77', f_sess_cart: '{}', f_sess_seen: '2026-11-16 01:02' },
+        ]),
+      },
+    },
+    k_order_cache: {
+      type: 'RedisKey',
+      name: 'order:{id}',
+      attrs: {
+        structure: 'string',
+        ttl: '300s',
+        comment: '订单详情缓存',
+        data: JSON.stringify([{ value: '{"id":1001,"status":"Paid"}' }, { value: '{"id":1002,"status":"Created"}' }]),
+      },
+    },
     k_rank: { type: 'RedisKey', name: 'rank:hot', attrs: { structure: 'zset', ttl: '3600s', comment: '热销榜' } },
     f_sess_user: { type: 'Field', name: 'user_id', attrs: { dataType: 'number', comment: '用户 id' } },
     f_sess_cart: { type: 'Field', name: 'cart', attrs: { dataType: 'json', comment: '购物车快照' } },
     f_sess_seen: { type: 'Field', name: 'last_seen', attrs: { dataType: 'timestamp', comment: '最后活跃' } },
     // ── ER：表 ──
-    t_orders: { type: 'Table', name: 'orders', attrs: { comment: '订单主表，状态映射订单生命周期', engine: 'InnoDB', charset: 'utf8mb4' } },
+    t_orders: {
+      type: 'Table',
+      name: 'orders',
+      attrs: {
+        comment: '订单主表，状态映射订单生命周期',
+        engine: 'InnoDB',
+        charset: 'utf8mb4',
+        data: JSON.stringify([
+          { f_orders_id: '1001', f_orders_status: 'Paid', f_orders_amount: '129.00' },
+          { f_orders_id: '1002', f_orders_status: 'Created', f_orders_amount: '58.50' },
+          { f_orders_id: '1003', f_orders_status: 'Completed', f_orders_amount: '249.90' },
+        ]),
+      },
+    },
     t_order_items: { type: 'Table', name: 'order_items', attrs: { comment: '订单明细，一单多行' } },
-    t_payments: { type: 'Table', name: 'payments', attrs: { comment: '支付流水，一单可多次支付', engine: 'InnoDB', charset: 'utf8mb4' } },
+    t_payments: {
+      type: 'Table',
+      name: 'payments',
+      attrs: {
+        comment: '支付流水，一单可多次支付',
+        engine: 'InnoDB',
+        charset: 'utf8mb4',
+        data: JSON.stringify([
+          { f_pay_id: '9001', f_pay_order_id: '1001', f_pay_amount: '129.00' },
+          { f_pay_id: '9002', f_pay_order_id: '1003', f_pay_amount: '249.90' },
+        ]),
+      },
+    },
     t_refunds: { type: 'Table', name: 'refunds' },
     t_products: { type: 'Table', name: 'products' },
     // 宽表：12 列，用来演示"列多的表默认只露键列"（AUTO_FOLD_AT = 6）。
