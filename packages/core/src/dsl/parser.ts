@@ -298,6 +298,88 @@ export function serializeSlotToDsl(slot: Pick<CanvasSlot, 'name' | 'nodes' | 'ed
   return lines.join('\n').trimEnd() + '\n';
 }
 
+export function serializeFlowsToDsl(flows: FlowScript[], allNodes: EntityNode[]): string {
+  if (!flows || flows.length === 0) return '';
+  const idToDsl = buildNodeDslIdMap(allNodes);
+  const lines: string[] = [];
+  for (const flow of flows) {
+    lines.push(`flow ${sanitizeDslId(flow.id, 'main_flow')} "${escapeString(flow.name)}" {`);
+    if (flow.description) {
+      lines.push(`  desc "${escapeString(flow.description)}"`);
+    }
+    for (const step of flow.steps) {
+      const fromId = idToDsl.get(step.from) ?? step.from;
+      const toId = idToDsl.get(step.to) ?? step.to;
+      const meta: string[] = [];
+      if (step.latency) meta.push(`latency: "${escapeString(step.latency)}"`);
+      if (step.rationale) meta.push(`rationale: "${escapeString(step.rationale)}"`);
+      if (step.parallel) meta.push('parallel');
+      const metaStr = meta.length > 0 ? ` [${meta.join(', ')}]` : '';
+      lines.push(`  ${step.order}: ${fromId} -> ${toId} "${escapeString(step.label)}"${metaStr}`);
+    }
+    lines.push('}');
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd();
+}
+
+/**
+ * Losslessly replace or append all `flow { ... }` blocks inside `.arch` source
+ * while keeping entities, annotations, relations, and user comments completely untouched.
+ */
+export function syncFlowsInDsl(
+  source: string,
+  flows: FlowScript[],
+  allNodes: EntityNode[]
+): string {
+  const rawLines = source.split('\n');
+  const lineOffsets: number[] = [];
+  let cursor = 0;
+  for (const l of rawLines) {
+    lineOffsets.push(cursor);
+    cursor += l.length + 1;
+  }
+
+  const flowSpans: Array<{ start: number; end: number }> = [];
+  let i = 0;
+  while (i < rawLines.length) {
+    const trimmed = rawLines[i].trim();
+    if (/^flow\s+[A-Za-z_][A-Za-z0-9_-]*\s+"(?:[^"\\]|\\.)*"\s*\{$/.test(trimmed)) {
+      const start = lineOffsets[i];
+      i++;
+      while (i < rawLines.length && rawLines[i].trim() !== '}') {
+        i++;
+      }
+      const endLineIdx = Math.min(i, rawLines.length - 1);
+      let end = lineOffsets[endLineIdx] + rawLines[endLineIdx].length;
+      if (source[end] === '\n') end += 1;
+      flowSpans.push({ start, end });
+    }
+    i++;
+  }
+
+  const serializedFlows = serializeFlowsToDsl(flows, allNodes);
+
+  if (flowSpans.length > 0) {
+    const patches: TextEditPatch[] = flowSpans.map((span, idx) => ({
+      from: span.start,
+      to: span.end,
+      insert: idx === 0 && serializedFlows ? serializedFlows + '\n' : '',
+    }));
+    const patched = applyTextPatches(source, patches);
+    return patched.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+  }
+
+  if (!serializedFlows) return source;
+
+  const trimmedEnd = source.replace(/\s*$/, '');
+  const hasHeader = /\/\/\s*──\s*动态推演链路\s*──/.test(trimmedEnd);
+  const section = hasHeader
+    ? serializedFlows
+    : `// ── 动态推演链路 ──\n${serializedFlows}`;
+  return (trimmedEnd ? trimmedEnd + '\n\n' : '') + section + '\n';
+}
+
 function buildEdgeMatchKey(from: string, to: string, fromField?: string, toField?: string): string {
   return `${from}|${fromField ?? ''}|${to}|${toField ?? ''}`;
 }

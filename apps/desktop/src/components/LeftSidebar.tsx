@@ -17,6 +17,7 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Route,
   Search,
   Trash2,
   Wand2,
@@ -31,6 +32,7 @@ import {
 } from '@devdraw/core';
 import { ENTITY_ICON_MAP } from '@devdraw/canvas';
 import { getActiveSlotFromProject, useWorkbenchStore, type LeftActivityTab } from '../store/useWorkbenchStore';
+import { FlowEditorPanel } from './FlowEditorPanel';
 
 const PALETTE_COLOR_MAP: Record<SemanticColor, { box: string; badge: string }> = {
   violet: { box: 'bg-violet-500/15 text-violet-300 border-violet-400/25', badge: 'bg-violet-500/15 text-violet-300' },
@@ -94,6 +96,7 @@ export const LeftSidebar: React.FC = () => {
   }> = [
     { id: 'palette', title: '实体原语库 (拖放组件)', icon: Blocks, activeColorClass: 'text-violet-400' },
     { id: 'layers', title: '推演层与实体大纲', icon: Layers, activeColorClass: 'text-sky-400' },
+    { id: 'flows', title: '动态链路编排 (Step-by-step)', icon: Route, activeColorClass: 'text-emerald-400' },
     { id: 'dsl', title: '图码双向 .arch DSL (Ctrl+\\)', icon: Code2, activeColorClass: 'text-emerald-400' },
     { id: 'tools', title: 'ELK 自动布局与辅助', icon: Wand2, activeColorClass: 'text-amber-400' },
     { id: 'versions', title: '版本与快照管理', icon: History, activeColorClass: 'text-indigo-400' },
@@ -157,7 +160,12 @@ export const LeftSidebar: React.FC = () => {
 
       {/* Expandable Drawer */}
       {leftTab && (
-        <aside className="relative w-64 h-full border-r bg-[var(--dd-bg-panel)] border-[var(--dd-border-subtle)] flex flex-col overflow-hidden shrink-0">
+        <aside
+          className={`relative h-full border-r bg-[var(--dd-bg-panel)] border-[var(--dd-border-subtle)] flex flex-col overflow-hidden shrink-0 ${
+            leftTab === 'flows' ? 'w-72 xl:w-80' : 'w-64'
+          }`}
+        >
+          {leftTab === 'flows' && <FlowEditorPanel />}
           {leftTab === 'palette' && (
             <div className="flex-1 flex flex-col min-h-0 p-3">
               <div className="flex items-center justify-between mb-2">

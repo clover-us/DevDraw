@@ -29,6 +29,7 @@ export const App: React.FC = () => {
     activeFlowId,
     flowStepIndex,
     isFlowPlaying,
+    flowPickEdgeMode,
     history,
     historyIndex,
     recentKinds,
@@ -67,6 +68,9 @@ export const App: React.FC = () => {
     toggleFlowAutoPlay,
     resetFlowStep,
     stopSimulation,
+    openFlowEditor,
+    setFlowPickEdgeMode,
+    addFlowStepFromEdge,
     toggleDslSplit,
     runAutoLayout,
     undo,
@@ -127,7 +131,9 @@ export const App: React.FC = () => {
       } else if (!e.ctrlKey && !e.metaKey && !e.altKey && lower === 't') {
         addNodeFromPrimitive('note', 300, 260);
       } else if (e.key === 'Escape') {
-        if (activeTool !== 'select') {
+        if (flowPickEdgeMode) {
+          setFlowPickEdgeMode(false);
+        } else if (activeTool !== 'select') {
           setTool('select');
         } else if (inspectorOpen) {
           closeInspector();
@@ -160,7 +166,9 @@ export const App: React.FC = () => {
     selectedEdgeId,
     inspectorOpen,
     simulating,
+    flowPickEdgeMode,
     setTool,
+    setFlowPickEdgeMode,
     selectNode,
     selectEdge,
     closeInspector,
@@ -261,6 +269,10 @@ export const App: React.FC = () => {
               onFlowTogglePlay={toggleFlowAutoPlay}
               onFlowReset={resetFlowStep}
               onFlowClose={stopSimulation}
+              onEditFlows={openFlowEditor}
+              flowPickEdgeMode={flowPickEdgeMode}
+              onFlowPickEdge={addFlowStepFromEdge}
+              onCancelFlowPickEdge={() => setFlowPickEdgeMode(false)}
             />
           </ReactFlowProvider>
         </main>

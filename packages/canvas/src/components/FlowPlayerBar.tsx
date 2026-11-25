@@ -1,5 +1,14 @@
 import React from 'react';
-import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Sparkles, X } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  ListOrdered,
+  Pause,
+  Play,
+  RotateCcw,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import type { FlowScript } from '@devdraw/core';
 
 export interface FlowPlayerBarProps {
@@ -13,6 +22,7 @@ export interface FlowPlayerBarProps {
   onNext: () => void;
   onTogglePlay: () => void;
   onReset: () => void;
+  onEditFlows?: () => void;
   onClose: () => void;
 }
 
@@ -27,6 +37,7 @@ export const FlowPlayerBar: React.FC<FlowPlayerBarProps> = ({
   onNext,
   onTogglePlay,
   onReset,
+  onEditFlows,
   onClose,
 }) => {
   const isLight = theme === 'light';
@@ -104,6 +115,17 @@ export const FlowPlayerBar: React.FC<FlowPlayerBarProps> = ({
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
+          {onEditFlows && (
+            <button
+              type="button"
+              onClick={onEditFlows}
+              title="打开链路步骤编排面板"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 text-violet-300 text-[11px] transition-colors"
+            >
+              <ListOrdered className="w-3 h-3" />
+              <span>编排</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}

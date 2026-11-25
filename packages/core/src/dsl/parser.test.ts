@@ -13,6 +13,7 @@ import {
   patchEdgeInDsl,
   patchEntityInDsl,
   serializeSlotToDsl,
+  syncFlowsInDsl,
 } from './parser';
 import { buildScenePresetForTemplate } from '../presets';
 import type { EntityNode, RelationEdge } from '../types';
@@ -312,5 +313,53 @@ describe('@devdraw/core .arch DSL parser & lossless patcher', () => {
     const bad = 'service broken "未闭合" {\n  tech "Go"';
     const parsed = parseArchDsl(bad);
     expect(parsed.diagnostics.some((d) => d.severity === 'error')).toBe(true);
+  });
+
+  it('losslessly syncs flow blocks while preserving entities, edges, and comments', () => {
+    const src = [
+      '// Keep my header comment',
+      'service gw "网关"',
+      'service app "核心服务"',
+      'gw -> app "HTTP"',
+      '',
+      'flow old_flow "旧链路" {',
+      '  1: gw -> app "旧步骤"',
+      '}',
+    ].join('\n');
+
+    const parsed = parseArchDsl(src);
+    const updated = syncFlowsInDsl(
+      src,
+      [
+        {
+          id: 'checkout_flow',
+          name: '下单主链路',
+          description: '核心同步链路',
+          steps: [
+            {
+              order: 1,
+              from: parsed.nodes[0].id,
+              to: parsed.nodes[1].id,
+              label: '转发下单请求',
+              latency: '6ms',
+              rationale: '网关统一鉴权',
+            },
+          ],
+        },
+      ],
+      parsed.nodes
+    );
+
+    expect(updated).toContain('// Keep my header comment');
+    expect(updated).toContain('gw -> app "HTTP"');
+    expect(updated).not.toContain('old_flow');
+    expect(updated).toContain('flow checkout_flow "下单主链路"');
+    expect(updated).toContain('desc "核心同步链路"');
+    expect(updated).toContain('rationale: "网关统一鉴权"');
+
+    const reparsed = parseArchDsl(updated, parsed.nodes, parsed.edges);
+    expect(reparsed.diagnostics).toHaveLength(0);
+    expect(reparsed.flows).toHaveLength(1);
+    expect(reparsed.flows[0].steps[0].rationale).toBe('网关统一鉴权');
   });
 });

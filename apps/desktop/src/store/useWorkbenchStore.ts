@@ -16,6 +16,7 @@ import {
   patchEntityInDsl,
   sanitizeDslId,
   serializeSlotToDsl,
+  syncFlowsInDsl,
   type CanvasExpandMode,
   type CanvasSlot,
   type CanvasToolMode,
@@ -25,6 +26,8 @@ import {
   type EdgeWaypoint,
   type EntityNode,
   type EntityVisualStyle,
+  type FlowScript,
+  type FlowStep,
   type FreehandStroke,
   type LayerDocument,
   type LayerTemplateName,
@@ -36,12 +39,13 @@ import {
 } from '@devdraw/core';
 import { storageAdapter } from '../storage/adapter';
 
-export type LeftActivityTab = 'palette' | 'layers' | 'dsl' | 'tools' | 'versions';
+export type LeftActivityTab = 'palette' | 'layers' | 'flows' | 'dsl' | 'tools' | 'versions';
 export type SaveState = 'saved' | 'saving' | 'error';
 
 interface HistoryEntry {
   nodes: EntityNode[];
   edges: RelationEdge[];
+  flows: FlowScript[];
   freehand: FreehandStroke[];
   dslSource: string;
 }
@@ -63,11 +67,12 @@ interface WorkbenchState {
   saveState: SaveState;
   toastMessage: string | null;
 
-  // Dynamic Step-by-step Flow playback
+  // Dynamic Step-by-step Flow playback & orchestration
   simulating: boolean;
   activeFlowId: string | null;
   flowStepIndex: number;
   isFlowPlaying: boolean;
+  flowPickEdgeMode: boolean;
 
   // Export, Import, Cross-Ref & Style Customizer Modals
   exportModalOpen: boolean;
@@ -180,13 +185,24 @@ interface WorkbenchState {
   undo: () => void;
   redo: () => void;
 
-  // Flow playback
+  // Flow playback & orchestration
   toggleSimulation: () => void;
   selectFlow: (flowId: string) => void;
+  setFlowStepIndex: (index: number) => void;
   stepFlow: (delta: 1 | -1) => void;
   toggleFlowAutoPlay: () => void;
   resetFlowStep: () => void;
   stopSimulation: () => void;
+  openFlowEditor: () => void;
+  setFlowPickEdgeMode: (active: boolean) => void;
+  createFlow: (name?: string, description?: string) => string | null;
+  updateFlowMeta: (flowId: string, patch: { name?: string; description?: string }) => void;
+  deleteFlow: (flowId: string) => void;
+  addFlowStep: (flowId: string, step: Omit<FlowStep, 'order'>) => void;
+  addFlowStepFromEdge: (edgeId: string) => void;
+  updateFlowStep: (flowId: string, stepIndex: number, patch: Partial<FlowStep>) => void;
+  moveFlowStep: (flowId: string, fromIndex: number, toIndex: number) => void;
+  deleteFlowStep: (flowId: string, stepIndex: number) => void;
 }
 
 export function getActiveSlotFromProject(
@@ -264,6 +280,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     const entry: HistoryEntry = {
       nodes: clone(active.slot.nodes),
       edges: clone(active.slot.edges),
+      flows: clone(active.slot.flows ?? []),
       freehand: clone(active.slot.freehand ?? []),
       dslSource: active.slot.dslSource || serializeSlotToDsl(active.slot),
     };
@@ -294,6 +311,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     activeFlowId: null,
     flowStepIndex: -1,
     isFlowPlaying: false,
+    flowPickEdgeMode: false,
     exportModalOpen: false,
     importModalOpen: false,
     crossRefModalOpen: false,
@@ -334,6 +352,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             {
               nodes: clone(active.slot.nodes),
               edges: clone(active.slot.edges),
+              flows: clone(active.slot.flows ?? []),
               freehand: clone(active.slot.freehand ?? []),
               dslSource: active.slot.dslSource || serializeSlotToDsl(active.slot),
             },
@@ -349,6 +368,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         simulating: false,
         flowStepIndex: -1,
         isFlowPlaying: false,
+        flowPickEdgeMode: false,
         dslDiagnostics: [],
         history: initialHistory,
         historyIndex: initialHistory.length - 1,
@@ -527,6 +547,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
                 {
                   nodes: clone(active.slot.nodes),
                   edges: clone(active.slot.edges),
+                  flows: clone(active.slot.flows ?? []),
                   freehand: clone(active.slot.freehand ?? []),
                   dslSource: active.slot.dslSource || serializeSlotToDsl(active.slot),
                 },
@@ -576,6 +597,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             {
               nodes: clone(active.slot.nodes),
               edges: clone(active.slot.edges),
+              flows: clone(active.slot.flows ?? []),
               freehand: clone(active.slot.freehand ?? []),
               dslSource: active.slot.dslSource || serializeSlotToDsl(active.slot),
             },
@@ -589,6 +611,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         simulating: false,
         flowStepIndex: -1,
         isFlowPlaying: false,
+        flowPickEdgeMode: false,
         dslDiagnostics: [],
         history,
         historyIndex: history.length - 1,
@@ -612,6 +635,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
             {
               nodes: clone(active.slot.nodes),
               edges: clone(active.slot.edges),
+              flows: clone(active.slot.flows ?? []),
               freehand: clone(active.slot.freehand ?? []),
               dslSource: active.slot.dslSource || serializeSlotToDsl(active.slot),
             },
@@ -621,6 +645,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         projects: next,
         selectedNodeId: null,
         selectedEdgeId: null,
+        flowPickEdgeMode: false,
         dslDiagnostics: [],
         history,
         historyIndex: history.length - 1,
@@ -1793,6 +1818,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
         slot.nodes = clone(target.nodes);
         slot.edges = clone(target.edges);
+        slot.flows = clone(target.flows ?? []);
         slot.freehand = clone(target.freehand ?? []);
         slot.dslSource = target.dslSource;
       });
@@ -1807,6 +1833,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
         slot.nodes = clone(target.nodes);
         slot.edges = clone(target.edges);
+        slot.flows = clone(target.flows ?? []);
         slot.freehand = clone(target.freehand ?? []);
         slot.dslSource = target.dslSource;
       });
@@ -1822,20 +1849,36 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       }
       const proj = get().projects.find((p) => p.id === get().activeProjectId);
       const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
-      const firstFlow = active?.slot.flows?.[0] ?? null;
+      const existing = active?.slot.flows?.find((f) => f.id === get().activeFlowId);
+      const targetFlow = existing ?? active?.slot.flows?.[0] ?? null;
       set({
         simulating: true,
-        activeFlowId: firstFlow?.id ?? null,
-        flowStepIndex: firstFlow ? 0 : -1,
+        activeFlowId: targetFlow?.id ?? null,
+        flowStepIndex: targetFlow && targetFlow.steps.length > 0 ? 0 : -1,
         isFlowPlaying: false,
       });
       get().showToast(
-        firstFlow ? `已启动链路演播：${firstFlow.name}` : '已启动全图拓扑脉冲校验'
+        targetFlow ? `已启动链路演播：${targetFlow.name}` : '已启动全图拓扑脉冲校验'
       );
     },
 
     selectFlow(flowId) {
-      set({ activeFlowId: flowId, flowStepIndex: 0, isFlowPlaying: false });
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
+      const target = active?.slot.flows?.find((f) => f.id === flowId);
+      set({
+        activeFlowId: flowId,
+        flowStepIndex: target && target.steps.length > 0 ? 0 : -1,
+        isFlowPlaying: false,
+      });
+    },
+
+    setFlowStepIndex(index) {
+      set({
+        simulating: true,
+        flowStepIndex: index,
+        isFlowPlaying: false,
+      });
     },
 
     stepFlow(delta) {
@@ -1859,7 +1902,188 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     },
 
     stopSimulation() {
-      set({ simulating: false, isFlowPlaying: false, flowStepIndex: -1 });
+      set({ simulating: false, isFlowPlaying: false, flowStepIndex: -1, flowPickEdgeMode: false });
+    },
+
+    openFlowEditor() {
+      set({ leftTab: 'flows' });
+    },
+
+    setFlowPickEdgeMode(active) {
+      set({ flowPickEdgeMode: active, activeTool: active ? 'select' : get().activeTool });
+      if (active) {
+        get().showToast('已进入连线拾取模式：点击画布任意连线即可追加步骤');
+      }
+    },
+
+    createFlow(name, description) {
+      const { activeProjectId, activeLayerIndex, projects } = get();
+      if (!activeProjectId) return null;
+      const newFlowId = `flow_${Date.now().toString(36)}`;
+      let resolvedName = '';
+      const next = mutateActiveSlot(projects, activeProjectId, activeLayerIndex, (slot) => {
+        const flows = slot.flows ? [...slot.flows] : [];
+        resolvedName = (name || `推演链路 ${flows.length + 1}`).trim();
+        flows.push({
+          id: newFlowId,
+          name: resolvedName,
+          description: description?.trim() || undefined,
+          steps: [],
+        });
+        slot.flows = flows;
+        slot.dslSource = slot.dslSource
+          ? syncFlowsInDsl(slot.dslSource, flows, slot.nodes)
+          : serializeSlotToDsl(slot);
+      });
+      set({ projects: next, activeFlowId: newFlowId, flowStepIndex: -1, isFlowPlaying: false });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast(`已新建推演链路「${resolvedName}」`);
+      return newFlowId;
+    },
+
+    updateFlowMeta(flowId, patch) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const target = slot.flows?.find((f) => f.id === flowId);
+        if (!target) return;
+        if (patch.name !== undefined) target.name = patch.name;
+        if (patch.description !== undefined) target.description = patch.description || undefined;
+        slot.dslSource = slot.dslSource
+          ? syncFlowsInDsl(slot.dslSource, slot.flows ?? [], slot.nodes)
+          : serializeSlotToDsl(slot);
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    deleteFlow(flowId) {
+      let nextActiveId: string | null = null;
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const remaining = (slot.flows ?? []).filter((f) => f.id !== flowId);
+        slot.flows = remaining;
+        nextActiveId = remaining[0]?.id ?? null;
+        slot.dslSource = slot.dslSource
+          ? syncFlowsInDsl(slot.dslSource, remaining, slot.nodes)
+          : serializeSlotToDsl(slot);
+      });
+      set({
+        projects: next,
+        activeFlowId: nextActiveId,
+        flowStepIndex: -1,
+        isFlowPlaying: false,
+        flowPickEdgeMode: false,
+      });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast('已删除推演链路');
+    },
+
+    addFlowStep(flowId, step) {
+      let addedIdx = 0;
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const flow = slot.flows?.find((f) => f.id === flowId);
+        if (!flow) return;
+        flow.steps.push({ ...step, order: flow.steps.length + 1 });
+        addedIdx = flow.steps.length - 1;
+        slot.dslSource = slot.dslSource
+          ? syncFlowsInDsl(slot.dslSource, slot.flows ?? [], slot.nodes)
+          : serializeSlotToDsl(slot);
+      });
+      set({ projects: next, simulating: true, activeFlowId: flowId, flowStepIndex: addedIdx, isFlowPlaying: false });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    addFlowStepFromEdge(edgeId) {
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
+      if (!active) return;
+      const edge = active.slot.edges.find((e) => e.id === edgeId);
+      if (!edge) return;
+
+      let flowId =
+        active.slot.flows?.find((f) => f.id === get().activeFlowId)?.id ??
+        active.slot.flows?.[0]?.id ??
+        null;
+      if (!flowId) {
+        flowId = get().createFlow('核心业务链路');
+      }
+      if (!flowId) return;
+
+      const fromNode = active.slot.nodes.find((n) => n.id === edge.from);
+      const toNode = active.slot.nodes.find((n) => n.id === edge.to);
+      const defaultLabel =
+        [edge.protocol, edge.label].filter(Boolean).join(' · ') ||
+        `${fromNode?.title ?? edge.from} → ${toNode?.title ?? edge.to}`;
+
+      get().addFlowStep(flowId, {
+        from: edge.from,
+        to: edge.to,
+        edgeId: edge.id,
+        label: defaultLabel,
+      });
+      get().showToast(`已追加步骤：${defaultLabel}`);
+    },
+
+    updateFlowStep(flowId, stepIndex, patch) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const flow = slot.flows?.find((f) => f.id === flowId);
+        if (!flow || !flow.steps[stepIndex]) return;
+        Object.assign(flow.steps[stepIndex], patch);
+        slot.dslSource = slot.dslSource
+          ? syncFlowsInDsl(slot.dslSource, slot.flows ?? [], slot.nodes)
+          : serializeSlotToDsl(slot);
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    moveFlowStep(flowId, fromIndex, toIndex) {
+      if (fromIndex === toIndex) return;
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const flow = slot.flows?.find((f) => f.id === flowId);
+        if (
+          !flow ||
+          fromIndex < 0 ||
+          toIndex < 0 ||
+          fromIndex >= flow.steps.length ||
+          toIndex >= flow.steps.length
+        ) {
+          return;
+        }
+        const [moved] = flow.steps.splice(fromIndex, 1);
+        flow.steps.splice(toIndex, 0, moved);
+        flow.steps.forEach((s, i) => {
+          s.order = i + 1;
+        });
+        slot.dslSource = slot.dslSource
+          ? syncFlowsInDsl(slot.dslSource, slot.flows ?? [], slot.nodes)
+          : serializeSlotToDsl(slot);
+      });
+      set({ projects: next, flowStepIndex: toIndex });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    deleteFlowStep(flowId, stepIndex) {
+      let nextStepIdx = -1;
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const flow = slot.flows?.find((f) => f.id === flowId);
+        if (!flow || !flow.steps[stepIndex]) return;
+        flow.steps.splice(stepIndex, 1);
+        flow.steps.forEach((s, i) => {
+          s.order = i + 1;
+        });
+        nextStepIdx = flow.steps.length > 0 ? Math.min(stepIndex, flow.steps.length - 1) : -1;
+        slot.dslSource = slot.dslSource
+          ? syncFlowsInDsl(slot.dslSource, slot.flows ?? [], slot.nodes)
+          : serializeSlotToDsl(slot);
+      });
+      set({ projects: next, flowStepIndex: nextStepIdx });
+      pushHistoryForCurrent(next);
+      void persist(next);
     },
   };
 });

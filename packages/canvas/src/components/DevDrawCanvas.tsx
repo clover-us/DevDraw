@@ -19,10 +19,12 @@ import {
   GitCommitHorizontal,
   LayoutGrid,
   ListFilter,
+  ListOrdered,
   Maximize,
   Minimize2,
   Minus,
   Moon,
+  MousePointerClick,
   Plus,
   Sun,
   Table2,
@@ -140,6 +142,10 @@ export interface DevDrawCanvasProps {
   onFlowTogglePlay?: () => void;
   onFlowReset?: () => void;
   onFlowClose?: () => void;
+  onEditFlows?: () => void;
+  flowPickEdgeMode?: boolean;
+  onFlowPickEdge?: (edgeId: string) => void;
+  onCancelFlowPickEdge?: () => void;
 }
 
 export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
@@ -197,6 +203,10 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
   onFlowTogglePlay,
   onFlowReset,
   onFlowClose,
+  onEditFlows,
+  flowPickEdgeMode = false,
+  onFlowPickEdge,
+  onCancelFlowPickEdge,
 }) => {
   const { zoomIn, zoomOut, fitView, screenToFlowPosition } = useReactFlow();
   const isLight = theme === 'light';
@@ -562,6 +572,10 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
         onEdgeClick={(e, edge) => {
           e.stopPropagation();
           setContextMenu(null);
+          if (flowPickEdgeMode && onFlowPickEdge) {
+            onFlowPickEdge(edge.id);
+            return;
+          }
           if (activeTool !== 'select') return;
           onSelectEdge(edge.id);
         }}
@@ -709,8 +723,30 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
         onDeleteEdge={onDeleteEdge}
       />
 
+      {/* Flow Edge-Pick Mode Floating Hint Pill */}
+      {flowPickEdgeMode && (
+        <div
+          className={`absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3.5 py-1.5 rounded-full border backdrop-blur-xl shadow-2xl text-xs select-none ${
+            isLight
+              ? 'bg-emerald-50/95 border-emerald-300 text-emerald-900'
+              : 'bg-[#12221b]/94 border-emerald-400/45 text-emerald-200'
+          }`}
+        >
+          <MousePointerClick className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span>点选画布上的任意连线，即可按序追加为当前链路步骤</span>
+          <button
+            type="button"
+            onClick={() => onCancelFlowPickEdge?.()}
+            title="退出拾取模式 (Esc)"
+            className="p-0.5 rounded-full hover:bg-white/10 text-emerald-300 hover:text-white"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Connect Mode Floating Hint Pill */}
-      {activeTool === 'connect' && (
+      {!flowPickEdgeMode && activeTool === 'connect' && (
         <div
           className={`absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full border backdrop-blur-xl shadow-2xl text-xs select-none ${
             isLight
@@ -749,8 +785,30 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
             onNext={() => onFlowNext?.()}
             onTogglePlay={() => onFlowTogglePlay?.()}
             onReset={() => onFlowReset?.()}
+            onEditFlows={onEditFlows}
             onClose={() => onFlowClose?.()}
           />
+        </div>
+      )}
+
+      {simulating && flows.length === 0 && onEditFlows && (
+        <div className="pointer-events-auto absolute left-1/2 -translate-x-1/2 bottom-16 z-30 flex items-center gap-2.5 px-3.5 py-2 rounded-2xl border backdrop-blur-xl shadow-2xl text-xs bg-[#171220]/94 border-violet-400/30 text-zinc-200">
+          <span>当前画布暂无推演链路</span>
+          <button
+            type="button"
+            onClick={onEditFlows}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-medium"
+          >
+            <ListOrdered className="w-3 h-3" />
+            <span>编排首条链路</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onFlowClose?.()}
+            className="p-1 rounded-lg hover:bg-white/10 text-zinc-400 hover:text-white"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
