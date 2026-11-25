@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Bot,
   Box,
   Code2,
   CornerDownLeft,
@@ -49,6 +50,7 @@ export const CommandPalette: React.FC = () => {
     setCrossRefModalOpen,
     setImportModalOpen,
     setExportModalOpen,
+    copyAiPromptContext,
     toggleTheme,
   } = useWorkbenchStore();
 
@@ -142,11 +144,20 @@ export const CommandPalette: React.FC = () => {
         run: () => setCrossRefModalOpen(true),
       },
       {
+        id: 'act-ai-prompt',
+        category: '快捷操作',
+        title: '复制 AI 推演上下文 (.arch 语法 + 当前源码)',
+        subtitle: '发给 ChatGPT / Claude / Gemini 评审或扩展架构',
+        icon: Bot,
+        keywords: 'ai llm prompt context chatgpt claude gemini 复制 上下文',
+        run: () => void copyAiPromptContext(),
+      },
+      {
         id: 'act-import',
         category: '快捷操作',
-        title: '导入 SQL DDL / DevDraw JSON',
+        title: '导入 SQL DDL / Mermaid / DevDraw JSON',
         icon: Download,
-        keywords: 'import sql ddl json 导入 建表',
+        keywords: 'import sql ddl mermaid json 导入 建表',
         run: () => setImportModalOpen(true),
       },
       {
@@ -244,6 +255,7 @@ export const CommandPalette: React.FC = () => {
     setCrossRefModalOpen,
     setImportModalOpen,
     setExportModalOpen,
+    copyAiPromptContext,
     toggleTheme,
   ]);
 

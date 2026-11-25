@@ -1,9 +1,15 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Database, Download, FileJson, Sparkles, X } from 'lucide-react';
-import { importSqlDdlToSlot } from '@devdraw/core';
+import { Database, Download, FileJson, Network, Sparkles, X } from 'lucide-react';
+import { importMermaidToSlot, importSqlDdlToSlot } from '@devdraw/core';
 import { useWorkbenchStore } from '../store/useWorkbenchStore';
 
-type ImportTab = 'sql' | 'json';
+type ImportTab = 'sql' | 'mermaid' | 'json';
+
+const SAMPLE_MERMAID = `flowchart LR
+  gw(["API 接入网关"]) -->|HTTPS| auth("鉴权中心")
+  gw -->|gRPC| order_svc("订单聚合服务")
+  order_svc -->|SQL| order_db[("订单主库")]
+  order_svc -.->|Kafka| notify_svc("异步通知服务")`;
 
 const SAMPLE_SQL_DDL = `-- 示例：电商订单核心表结构（MySQL / PostgreSQL 均支持）
 CREATE TABLE users (
@@ -36,12 +42,15 @@ export const ImportModal: React.FC = () => {
     importModalOpen,
     setImportModalOpen,
     importSqlDdl,
+    importMermaid,
     importJsonDocument,
   } = useWorkbenchStore();
 
   const [tab, setTab] = useState<ImportTab>('sql');
   const [sqlText, setSqlText] = useState('');
   const [sqlMode, setSqlMode] = useState<'append' | 'new-layer'>('new-layer');
+  const [mermaidText, setMermaidText] = useState('');
+  const [mermaidMode, setMermaidMode] = useState<'append' | 'new-layer'>('new-layer');
   const [jsonText, setJsonText] = useState('');
   const [jsonMode, setJsonMode] = useState<'replace-slot' | 'new-layer' | 'new-project'>('new-layer');
   const [importing, setImporting] = useState(false);
@@ -51,6 +60,11 @@ export const ImportModal: React.FC = () => {
     if (!sqlText.trim()) return null;
     return importSqlDdlToSlot(sqlText);
   }, [sqlText]);
+
+  const mermaidPreview = useMemo(() => {
+    if (!mermaidText.trim()) return null;
+    return importMermaidToSlot(mermaidText);
+  }, [mermaidText]);
 
   if (!importModalOpen) return null;
 
@@ -62,6 +76,20 @@ export const ImportModal: React.FC = () => {
       if (ok) {
         setImportModalOpen(false);
         setSqlText('');
+      }
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleConfirmMermaid = async () => {
+    if (!mermaidText.trim()) return;
+    setImporting(true);
+    try {
+      const ok = await importMermaid(mermaidText, mermaidMode);
+      if (ok) {
+        setImportModalOpen(false);
+        setMermaidText('');
       }
     } finally {
       setImporting(false);
@@ -100,9 +128,9 @@ export const ImportModal: React.FC = () => {
               <Download className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-white">导入 SQL DDL / DevDraw JSON</h3>
+              <h3 className="text-sm font-semibold text-white">导入 SQL DDL / Mermaid / JSON</h3>
               <p className="text-[11px] text-zinc-400">
-                粘贴建表语句自动生成 ER 表与外键连线，或恢复导出的 JSON 快照
+                支持从建表 SQL、Mermaid 流程图/ER 图或 DevDraw JSON 快速生成可编辑画布
               </p>
             </div>
           </div>
@@ -131,6 +159,18 @@ export const ImportModal: React.FC = () => {
             </button>
             <button
               type="button"
+              onClick={() => setTab('mermaid')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                tab === 'mermaid'
+                  ? 'bg-violet-600 text-white'
+                  : 'bg-white/[0.04] hover:bg-white/[0.08] text-zinc-300'
+              }`}
+            >
+              <Network className="w-3.5 h-3.5" />
+              <span>Mermaid 图</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setTab('json')}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                 tab === 'json'
@@ -151,6 +191,15 @@ export const ImportModal: React.FC = () => {
             >
               <Sparkles className="w-3 h-3" />
               <span>填入示例 DDL</span>
+            </button>
+          ) : tab === 'mermaid' ? (
+            <button
+              type="button"
+              onClick={() => setMermaidText(SAMPLE_MERMAID)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.09] border border-white/10 text-[11px] text-violet-300"
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>填入示例 Mermaid</span>
             </button>
           ) : (
             <>
@@ -227,6 +276,59 @@ export const ImportModal: React.FC = () => {
                 )}
               </div>
             </>
+          ) : tab === 'mermaid' ? (
+            <>
+              <textarea
+                rows={11}
+                value={mermaidText}
+                onChange={(e) => setMermaidText(e.target.value)}
+                placeholder="粘贴 Mermaid flowchart / graph 或 erDiagram 代码，自动识别节点形态、实/虚线关系并执行 ELK 自动排版..."
+                className="w-full p-3.5 rounded-xl bg-[#110e17] border border-white/10 focus:border-violet-400/60 text-xs font-mono text-zinc-200 focus:outline-none resize-none leading-relaxed"
+              />
+              <div className="flex items-center justify-between gap-2 flex-wrap text-[11px]">
+                <div className="font-mono">
+                  {mermaidPreview ? (
+                    mermaidPreview.nodeCount > 0 ? (
+                      <span className="text-emerald-400">
+                        已识别 {mermaidPreview.dialect === 'er' ? 'erDiagram' : 'flowchart'} ·{' '}
+                        {mermaidPreview.nodeCount} 实体 · {mermaidPreview.edgeCount} 连线
+                      </span>
+                    ) : (
+                      <span className="text-amber-400">未检测到有效的 Mermaid 节点或连线</span>
+                    )
+                  ) : (
+                    <span className="text-zinc-500">支持 flowchart LR/TD、erDiagram、圆柱库/菱形判断与虚线箭头</span>
+                  )}
+                </div>
+
+                {activeProjectId && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setMermaidMode('new-layer')}
+                      className={`px-2.5 py-1 rounded-md border text-[11px] ${
+                        mermaidMode === 'new-layer'
+                          ? 'bg-violet-500/20 border-violet-400/50 text-violet-200'
+                          : 'bg-white/[0.03] border-white/10 text-zinc-400'
+                      }`}
+                    >
+                      新建推演层
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMermaidMode('append')}
+                      className={`px-2.5 py-1 rounded-md border text-[11px] ${
+                        mermaidMode === 'append'
+                          ? 'bg-violet-500/20 border-violet-400/50 text-violet-200'
+                          : 'bg-white/[0.03] border-white/10 text-zinc-400'
+                      }`}
+                    >
+                      追加到当前画布
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
           ) : (
             <>
               <textarea
@@ -282,6 +384,15 @@ export const ImportModal: React.FC = () => {
               className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-medium transition-colors"
             >
               {importing ? '布局生成中...' : '生成 ER 实体并自动排版'}
+            </button>
+          ) : tab === 'mermaid' ? (
+            <button
+              type="button"
+              disabled={importing || !mermaidPreview || mermaidPreview.nodeCount === 0}
+              onClick={() => void handleConfirmMermaid()}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-medium transition-colors"
+            >
+              {importing ? '布局生成中...' : '导入 Mermaid 并自动排版'}
             </button>
           ) : (
             <button

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { importDevDrawJson, importSqlDdlToSlot } from './importers';
+import { importDevDrawJson, importMermaidToSlot, importSqlDdlToSlot } from './importers';
+import { buildAiPromptContext } from '../export/exporters';
 import { createDefaultProjects } from '../presets';
 
 describe('@devdraw/core SQL DDL & JSON importers', () => {
@@ -80,5 +81,53 @@ describe('@devdraw/core SQL DDL & JSON importers', () => {
 
     expect(() => importDevDrawJson('{ bad json')).toThrow('JSON 语法格式不正确');
     expect(() => importDevDrawJson('{"hello": 1}')).toThrow('无法识别的 DevDraw JSON');
+  });
+
+  it('reverse-imports Mermaid flowchart and erDiagram into editable DevDraw nodes & edges', () => {
+    const flowMmd = `
+      %% System topology
+      flowchart LR
+        gw(["API 网关"]) -->|HTTPS| order_svc("订单服务")
+        order_svc -.->|Kafka| notify_svc["通知服务"]
+        order_svc -- SQL --> order_db[("订单主库")]
+        classDef annotation stroke-dasharray: 5 5;
+    `;
+
+    const flowRes = importMermaidToSlot(flowMmd, { idPrefix: 'm1' });
+    expect(flowRes.dialect).toBe('flowchart');
+    expect(flowRes.nodeCount).toBe(4);
+    expect(flowRes.edgeCount).toBe(3);
+    expect(flowRes.nodes.find((n) => n.dslId === 'gw')?.kind).toBe('ingress');
+    expect(flowRes.nodes.find((n) => n.dslId === 'order_db')?.kind).toBe('db');
+    expect(flowRes.edges.find((e) => e.label === 'Kafka')?.dashed).toBe(true);
+    expect(flowRes.edges.find((e) => e.label === 'SQL')?.dashed).toBe(false);
+
+    const erMmd = `
+      erDiagram
+        users {
+          BIGINT id PK "主键"
+          VARCHAR email UK
+        }
+        orders {
+          BIGINT id PK
+          BIGINT user_id FK
+        }
+        users ||--o{ orders : "下单"
+    `;
+    const erRes = importMermaidToSlot(erMmd, { idPrefix: 'm2' });
+    expect(erRes.dialect).toBe('er');
+    expect(erRes.nodeCount).toBe(2);
+    expect(erRes.edgeCount).toBe(1);
+    expect(erRes.nodes[0].fields).toHaveLength(2);
+    expect(erRes.edges[0].label).toBe('下单');
+    expect(erRes.edges[0].routing).toBe('orthogonal');
+
+    const prompt = buildAiPromptContext(
+      { name: '架构层', nodes: flowRes.nodes, edges: flowRes.edges },
+      '测试项目',
+      'service order_svc "订单服务"'
+    );
+    expect(prompt).toContain('`.arch` DSL 语法速查');
+    expect(prompt).toContain('service order_svc "订单服务"');
   });
 });

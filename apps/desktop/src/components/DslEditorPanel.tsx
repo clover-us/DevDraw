@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, type ViewUpdate } from '@codemirror/view';
-import { AlertCircle, CheckCircle2, Code2, Crosshair, Sparkles, X } from 'lucide-react';
+import { AlertCircle, Bot, CheckCircle2, Code2, Crosshair, Sparkles, X } from 'lucide-react';
 import {
   locateEdgeInDsl,
   locateEntityInDsl,
@@ -30,6 +30,7 @@ export const DslEditorPanel: React.FC = () => {
     dslDiagnostics,
     theme,
     applyDslSource,
+    copyAiPromptContext,
     selectNode,
     selectEdge,
     toggleDslSplit,
@@ -216,6 +217,15 @@ export const DslEditorPanel: React.FC = () => {
               <Crosshair className="w-3.5 h-3.5" />
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => void copyAiPromptContext()}
+            title="一键复制 .arch 语法规范与当前源码，发给任意 AI 协助推演"
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-mono text-[var(--dd-text-secondary)] hover:text-emerald-300 hover:bg-white/[0.08]"
+          >
+            <Bot className="w-3 h-3 text-emerald-400" />
+            <span>AI 上下文</span>
+          </button>
           <button
             type="button"
             onClick={handleFormat}

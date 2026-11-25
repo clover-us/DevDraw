@@ -571,6 +571,38 @@ export function exportSlotToJson(slot: CanvasSlot): string {
 }
 
 /**
+ * Build a compact, LLM-ready prompt containing the `.arch` DSL grammar cheat-sheet
+ * and the current canvas's `.arch` source so any AI assistant can review or extend it.
+ */
+export function buildAiPromptContext(
+  slot: Pick<CanvasSlot, 'name' | 'nodes' | 'edges' | 'flows' | 'dslSource'>,
+  projectTitle: string,
+  dslSource: string
+): string {
+  return [
+    `你正在协助我使用 **DevDraw · 研绘** 推演项目「${projectTitle}」的「${slot.name}」视图。`,
+    '',
+    '## `.arch` DSL 语法速查',
+    '- 实体声明：`<kind> <dsl_id> "<显示名称>" { tag "..." tech "..." status active|planned|deprecated owner "@team" note "..." }`',
+    '  - 常用 `kind`：`ingress`、`service`、`db`、`cache`、`mq`、`worker`、`er_main`、`kv_hash`、`group`（分组容器）',
+    '  - ER 字段块：`fields { id: BIGINT [PK] "主键" }`',
+    '- 研思标注：`assumption | decision | note <id> "<标题>" { link <target_dsl_id> note "..." }`',
+    '- 拓扑关系：`<from>[.<field>] -> <to>[.<field>] "<标签>" [HTTPS|gRPC|Kafka|SQL, orthogonal, timeout: "3s", retry: 3, circuitBreaker]`（异步虚线用 `~>`）',
+    '- 动态链路：`flow <id> "<链路名>" { 1: <from> -> <to> "<动作>" [latency: "12ms", rationale: "..."] }`',
+    '',
+    '## 当前画布 `.arch` 源码',
+    '```arch',
+    dslSource.trim(),
+    '```',
+    '',
+    '## 请协助我',
+    '1. 指出当前设计中的潜在瓶颈、单点风险或缺失契约；',
+    '2. 若需修改架构，请直接输出完整合法的 `.arch` 代码块（保持原有 `dsl_id` 与注释，方便我粘贴回 DevDraw 或直接落盘热更新）。',
+    '',
+  ].join('\n');
+}
+
+/**
  * Generate a self-contained, zero-dependency interactive HTML reviewer
  * with zoom/pan, node detail drawer, and Step-by-step Flow playback.
  */

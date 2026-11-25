@@ -3,6 +3,7 @@ import {
   alignNodes,
   appendEdgeToDsl,
   appendEntityToDsl,
+  buildAiPromptContext,
   buildScenePresetForTemplate,
   computeAutoLayout,
   computeGroupBoundsForNodes,
@@ -12,6 +13,7 @@ import {
   distributeNodes,
   findPrimitiveByKind,
   importDevDrawJson,
+  importMermaidToSlot,
   importSqlDdlToSlot,
   isCollapsibleEntity,
   parseArchDsl,
@@ -137,10 +139,12 @@ interface WorkbenchState {
   setExportModalOpen: (open: boolean) => void;
   setImportModalOpen: (open: boolean) => void;
   importSqlDdl: (sql: string, mode: 'append' | 'new-layer') => Promise<boolean>;
+  importMermaid: (mermaid: string, mode: 'append' | 'new-layer') => Promise<boolean>;
   importJsonDocument: (
     rawJson: string,
     mode: 'replace-slot' | 'new-layer' | 'new-project'
   ) => boolean;
+  copyAiPromptContext: () => Promise<void>;
   openStyleModal: (nodeId?: string | null) => void;
   closeStyleModal: () => void;
   updateNodeStyle: (nodeId: string, patch: Partial<EntityVisualStyle>) => void;
@@ -1140,6 +1144,109 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       void persist(next);
       get().showToast(`已追加 ${parsed.tableCount} 张数据表、${parsed.relationCount} 条外键关系`);
       return true;
+    },
+
+    async importMermaid(mermaid, mode) {
+      const parsed = importMermaidToSlot(mermaid);
+      if (parsed.nodes.length === 0) {
+        get().showToast(parsed.warnings[0] || '未检测到有效的 Mermaid 节点');
+        return false;
+      }
+
+      const laidOut = await computeAutoLayout(parsed.nodes, parsed.edges, {
+        direction: 'RIGHT',
+        respectPinned: false,
+      });
+
+      const activeProjId = get().activeProjectId;
+      const targetTemplate: LayerTemplateName = parsed.dialect === 'er' ? '数据建模' : '系统架构拓扑';
+
+      if (!activeProjId) {
+        const layer: LayerDocument = {
+          id: `layer-mmd-${Date.now().toString(36)}`,
+          name: `Mermaid 导入 (${parsed.nodeCount} 实体)`,
+          template: targetTemplate,
+          engine: parsed.dialect === 'er' ? 'relational' : undefined,
+          nodes: laidOut.nodes,
+          edges: laidOut.edges,
+          flows: [],
+        };
+        layer.dslSource = serializeSlotToDsl(layer);
+
+        const newProj: ProjectDocument = {
+          id: `p-${Date.now()}`,
+          title: `Mermaid 推演项目 (${parsed.nodeCount} 实体)`,
+          subtitle: `本地项目 · Mermaid 导入 · ${parsed.nodeCount} 实体`,
+          meta: targetTemplate,
+          category: 'personal',
+          type: 'local',
+          icon: parsed.dialect === 'er' ? 'database' : 'network',
+          layers: [layer],
+          updatedAt: Date.now(),
+        };
+        const next = [newProj, ...get().projects];
+        set({ projects: next });
+        void persist(next, null);
+        get().openProject(newProj.id);
+        get().showToast(`已从 Mermaid 导入 ${parsed.nodeCount} 个实体、${parsed.edgeCount} 条关系`);
+        return true;
+      }
+
+      if (mode === 'new-layer') {
+        let newIdx = 0;
+        const next = get().projects.map((p) => {
+          if (p.id !== activeProjId) return p;
+          const copy = clone(p);
+          const newLayer: LayerDocument = {
+            id: `layer-mmd-${Date.now().toString(36)}`,
+            name: `Mermaid (${parsed.nodeCount} 实体)`,
+            template: targetTemplate,
+            engine: parsed.dialect === 'er' ? 'relational' : undefined,
+            nodes: laidOut.nodes,
+            edges: laidOut.edges,
+            flows: [],
+          };
+          newLayer.dslSource = serializeSlotToDsl(newLayer);
+          copy.layers.push(newLayer);
+          copy.meta = copy.layers.map((l) => l.name).join(' + ');
+          copy.updatedAt = Date.now();
+          newIdx = copy.layers.length - 1;
+          return copy;
+        });
+        set({ projects: next });
+        void persist(next);
+        get().selectLayer(newIdx);
+        get().showToast(`已新建推演层：${parsed.nodeCount} 个实体、${parsed.edgeCount} 条关系`);
+        return true;
+      }
+
+      const next = mutateActiveSlot(get().projects, activeProjId, get().activeLayerIndex, (slot) => {
+        const maxY = slot.nodes.reduce((m, n) => Math.max(m, n.y + (n.h ?? 120)), 0);
+        const offsetY = slot.nodes.length > 0 ? maxY + 80 : 0;
+        const shiftedNodes = laidOut.nodes.map((n) => ({ ...n, y: n.y + offsetY }));
+        slot.nodes.push(...shiftedNodes);
+        slot.edges.push(...laidOut.edges);
+        slot.dslSource = serializeSlotToDsl(slot);
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast(`已追加 ${parsed.nodeCount} 个实体、${parsed.edgeCount} 条关系`);
+      return true;
+    },
+
+    async copyAiPromptContext() {
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
+      if (!proj || !active) return;
+      const dsl = active.slot.dslSource || serializeSlotToDsl(active.slot);
+      const prompt = buildAiPromptContext(active.slot, proj.title, dsl);
+      try {
+        await navigator.clipboard.writeText(prompt);
+        get().showToast('已复制 .arch 语法规范与当前画布上下文（可直接发给 AI 助手）');
+      } catch {
+        get().showToast('复制 AI 上下文失败');
+      }
     },
 
     importJsonDocument(rawJson, mode) {
