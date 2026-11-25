@@ -1,0 +1,307 @@
+import {
+  createDefaultProjects,
+  deserializeWorkspaceFilesToProject,
+  serializeProjectToWorkspaceFiles,
+  type ProjectDocument,
+  type StorageAdapter,
+  type WorkspaceDiagnostic,
+} from '@devdraw/core';
+
+const PROJECTS_KEY = 'devdraw_studio_projects_v1';
+const THEME_KEY = 'devdraw_canvas_theme_v1';
+
+export function isTauriRuntime(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+// Browser File System Access API minimal types (avoids relying on lib.dom experimental flags)
+interface FsWritableStreamLike {
+  write(data: string): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface FsFileHandleLike {
+  kind: 'file';
+  name: string;
+  getFile(): Promise<File>;
+  createWritable(): Promise<FsWritableStreamLike>;
+}
+
+interface FsDirectoryHandleLike {
+  kind: 'directory';
+  name: string;
+  entries(): AsyncIterableIterator<[string, FsFileHandleLike | FsDirectoryHandleLike]>;
+  getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<FsDirectoryHandleLike>;
+  getFileHandle(name: string, options?: { create?: boolean }): Promise<FsFileHandleLike>;
+  removeEntry(name: string): Promise<void>;
+}
+
+type WindowWithDirectoryPicker = Window & {
+  showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<FsDirectoryHandleLike>;
+};
+
+export function supportsLocalDirectoryPicker(): boolean {
+  if (isTauriRuntime()) return true;
+  return (
+    typeof window !== 'undefined' &&
+    typeof (window as WindowWithDirectoryPicker).showDirectoryPicker === 'function'
+  );
+}
+
+/**
+ * In-memory directory handles for Browser File System Access API mode (`pnpm dev`).
+ * Tauri desktop mode persists paths directly via `project.workspacePath`.
+ */
+const browserDirHandles = new Map<string, FsDirectoryHandleLike>();
+
+async function readBrowserDirectoryFiles(
+  dirHandle: FsDirectoryHandleLike,
+  prefix = ''
+): Promise<Record<string, string>> {
+  const result: Record<string, string> = {};
+  for await (const [name, handle] of dirHandle.entries()) {
+    if (name === '.git' || name === 'node_modules' || name === 'target') continue;
+    const rel = prefix ? `${prefix}/${name}` : name;
+    if (handle.kind === 'directory') {
+      const nested = await readBrowserDirectoryFiles(handle, rel);
+      Object.assign(result, nested);
+    } else if (
+      name.endsWith('.arch') ||
+      name === 'project.json' ||
+      name === '.arch-layout.json'
+    ) {
+      const file = await handle.getFile();
+      result[rel] = await file.text();
+    }
+  }
+  return result;
+}
+
+async function writeBrowserDirectoryFiles(
+  rootHandle: FsDirectoryHandleLike,
+  files: Record<string, string>
+): Promise<void> {
+  const expectedLayerFiles = new Set<string>();
+
+  for (const [relPath, content] of Object.entries(files)) {
+    const segments = relPath.replace(/\\/g, '/').split('/').filter(Boolean);
+    if (segments.length === 0) continue;
+    if (segments.length === 2 && segments[0] === 'layers' && segments[1].endsWith('.arch')) {
+      expectedLayerFiles.add(segments[1]);
+    }
+
+    let currentDir = rootHandle;
+    for (let i = 0; i < segments.length - 1; i++) {
+      currentDir = await currentDir.getDirectoryHandle(segments[i], { create: true });
+    }
+    const fileHandle = await currentDir.getFileHandle(segments[segments.length - 1], {
+      create: true,
+    });
+    const writable = await fileHandle.createWritable();
+    await writable.write(content);
+    await writable.close();
+  }
+
+  // Clean up orphaned layers/*.arch files
+  try {
+    const layersDir = await rootHandle.getDirectoryHandle('layers');
+    for await (const [name, handle] of layersDir.entries()) {
+      if (handle.kind === 'file' && name.endsWith('.arch') && !expectedLayerFiles.has(name)) {
+        await layersDir.removeEntry(name);
+      }
+    }
+  } catch {
+    // layers/ directory may not exist yet
+  }
+}
+
+async function readTauriWorkspaceFiles(rootDir: string): Promise<Record<string, string>> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  const res = await invoke<{ root: string; files: Record<string, string> }>('read_workspace_dir', {
+    root: rootDir,
+  });
+  return res.files ?? {};
+}
+
+async function writeTauriWorkspaceFiles(
+  rootDir: string,
+  files: Record<string, string>
+): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('write_workspace_files', {
+    root: rootDir,
+    files,
+  });
+}
+
+async function pickTauriDirectory(title: string): Promise<string | null> {
+  const { open } = await import('@tauri-apps/plugin-dialog');
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    title,
+  });
+  if (typeof selected === 'string' && selected.trim()) {
+    return selected;
+  }
+  return null;
+}
+
+/**
+ * Dual-mode storage adapter:
+ * - Always maintains fast localStorage index for instant launcher startup.
+ * - Supports full three-layer Git-friendly directory workspaces (`project.json` +
+ *   `layers/*.arch` + `.arch-layout.json`) in BOTH:
+ *   1. Tauri v2 desktop runtime (`read_workspace_dir` / `write_workspace_files`)
+ *   2. Modern browsers via File System Access API (`showDirectoryPicker`)
+ */
+export const storageAdapter: StorageAdapter = {
+  get mode() {
+    return isTauriRuntime() ? 'tauri-fs' : 'local-storage';
+  },
+
+  async loadProjects(): Promise<ProjectDocument[]> {
+    try {
+      const raw = localStorage.getItem(PROJECTS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // Fallback to starter workspace
+    }
+    return createDefaultProjects();
+  },
+
+  async saveProjects(projects: ProjectDocument[]): Promise<boolean> {
+    try {
+      localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  async loadTheme(): Promise<'dark' | 'light'> {
+    try {
+      return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  },
+
+  async saveTheme(theme: 'dark' | 'light'): Promise<void> {
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      // Ignore quota errors
+    }
+  },
+
+  hasWorkspaceBinding(project: ProjectDocument): boolean {
+    if (!project.workspacePath) return false;
+    if (isTauriRuntime()) return true;
+    return browserDirHandles.has(project.id);
+  },
+
+  unbindWorkspaceDirectory(projectId: string): void {
+    browserDirHandles.delete(projectId);
+  },
+
+  async openWorkspaceDirectory(): Promise<{
+    project: ProjectDocument;
+    diagnostics: WorkspaceDiagnostic[];
+  } | null> {
+    if (isTauriRuntime()) {
+      const rootDir = await pickTauriDirectory('选择 DevDraw 本地工作区目录');
+      if (!rootDir) return null;
+      const files = await readTauriWorkspaceFiles(rootDir);
+      return deserializeWorkspaceFilesToProject(files, rootDir);
+    }
+
+    const picker = (window as WindowWithDirectoryPicker).showDirectoryPicker;
+    if (!picker) {
+      throw new Error('当前浏览器不支持本地目录 API，请使用 Chrome / Edge 或 Tauri 桌面端');
+    }
+
+    try {
+      const dirHandle = await picker({ mode: 'readwrite' });
+      const files = await readBrowserDirectoryFiles(dirHandle);
+      const loaded = deserializeWorkspaceFilesToProject(files, dirHandle.name);
+      browserDirHandles.set(loaded.project.id, dirHandle);
+      return loaded;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return null;
+      throw err;
+    }
+  },
+
+  async bindWorkspaceDirectory(project: ProjectDocument): Promise<string | null> {
+    const files = serializeProjectToWorkspaceFiles(project);
+
+    if (isTauriRuntime()) {
+      const rootDir = await pickTauriDirectory('选择要绑定落盘的本地文件夹');
+      if (!rootDir) return null;
+      await writeTauriWorkspaceFiles(rootDir, files);
+      return rootDir;
+    }
+
+    const picker = (window as WindowWithDirectoryPicker).showDirectoryPicker;
+    if (!picker) {
+      throw new Error('当前浏览器不支持本地目录 API，请使用 Chrome / Edge 或 Tauri 桌面端');
+    }
+
+    try {
+      const dirHandle = await picker({ mode: 'readwrite' });
+      await writeBrowserDirectoryFiles(dirHandle, files);
+      browserDirHandles.set(project.id, dirHandle);
+      return dirHandle.name;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return null;
+      throw err;
+    }
+  },
+
+  async reloadWorkspaceDirectory(project: ProjectDocument): Promise<{
+    project: ProjectDocument;
+    diagnostics: WorkspaceDiagnostic[];
+  } | null> {
+    if (isTauriRuntime()) {
+      if (!project.workspacePath) return null;
+      const files = await readTauriWorkspaceFiles(project.workspacePath);
+      const loaded = deserializeWorkspaceFilesToProject(files, project.workspacePath);
+      loaded.project.id = project.id;
+      return loaded;
+    }
+
+    const handle = browserDirHandles.get(project.id);
+    if (!handle) return null;
+    const files = await readBrowserDirectoryFiles(handle);
+    const loaded = deserializeWorkspaceFilesToProject(files, handle.name);
+    loaded.project.id = project.id;
+    return loaded;
+  },
+
+  async syncWorkspaceDirectory(project: ProjectDocument): Promise<boolean> {
+    if (!project.workspacePath) return true;
+    const files = serializeProjectToWorkspaceFiles(project);
+
+    if (isTauriRuntime()) {
+      await writeTauriWorkspaceFiles(project.workspacePath, files);
+      return true;
+    }
+
+    const handle = browserDirHandles.get(project.id);
+    if (!handle) return false;
+    await writeBrowserDirectoryFiles(handle, files);
+    return true;
+  },
+
+  async exportWorkspaceDirectory(project: ProjectDocument, rootDir: string): Promise<void> {
+    if (!isTauriRuntime()) {
+      throw new Error('仅在 Tauri 桌面端支持按路径直接写入本地文件夹');
+    }
+    const files = serializeProjectToWorkspaceFiles(project);
+    await writeTauriWorkspaceFiles(rootDir, files);
+  },
+};

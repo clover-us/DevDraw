@@ -1,0 +1,63 @@
+@import "@devdraw/canvas/theme.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.spotlight-beam {
+  background:
+    radial-gradient(ellipse 55% 40% at 58% -4%, rgba(132, 108, 224, 0.28) 0%, rgba(92, 74, 178, 0.12) 45%, transparent 78%),
+    linear-gradient(
+      128deg,
+      rgba(20, 17, 26, 0) 26%,
+      rgba(116, 95, 204, 0.16) 46%,
+      rgba(148, 126, 238, 0.22) 53%,
+      rgba(98, 80, 175, 0.09) 62%,
+      rgba(20, 17, 26, 0) 76%
+    );
+  filter: blur(22px);
+  pointer-events: none;
+}
+
+.glass-card {
+  background: linear-gradient(165deg, rgba(40, 34, 52, 0.62) 0%, rgba(27, 23, 36, 0.72) 100%);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  transition: all 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.glass-card:hover {
+  background: linear-gradient(165deg, rgba(48, 41, 63, 0.78) 0%, rgba(32, 27, 43, 0.86) 100%);
+  border-color: rgba(154, 134, 245, 0.38);
+  transform: translateY(-2px);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+}

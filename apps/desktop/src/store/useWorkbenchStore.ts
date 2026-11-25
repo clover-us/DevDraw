@@ -1,0 +1,1334 @@
+import { create } from 'zustand';
+import {
+  appendEdgeToDsl,
+  appendEntityToDsl,
+  buildScenePresetForTemplate,
+  computeAutoLayout,
+  createDefaultProjects,
+  deleteEdgesFromDsl,
+  deleteEntityFromDsl,
+  findPrimitiveByKind,
+  isCollapsibleEntity,
+  parseArchDsl,
+  patchEdgeInDsl,
+  patchEntityInDsl,
+  serializeSlotToDsl,
+  type CanvasExpandMode,
+  type CanvasSlot,
+  type CanvasToolMode,
+  type DslDiagnostic,
+  type EdgeRoutingMode,
+  type EdgeWaypoint,
+  type EntityNode,
+  type EntityVisualStyle,
+  type FreehandStroke,
+  type LayerDocument,
+  type LayerTemplateName,
+  type PortSide,
+  type ProjectDocument,
+  type RelationEdge,
+  type SemanticColor,
+} from '@devdraw/core';
+import { storageAdapter } from '../storage/adapter';
+
+export type LeftActivityTab = 'palette' | 'layers' | 'dsl' | 'tools' | 'versions';
+export type SaveState = 'saved' | 'saving' | 'error';
+
+interface HistoryEntry {
+  nodes: EntityNode[];
+  edges: RelationEdge[];
+  freehand: FreehandStroke[];
+  dslSource: string;
+}
+
+interface WorkbenchState {
+  projects: ProjectDocument[];
+  activeProjectId: string | null;
+  activeLayerIndex: number;
+  selectedNodeId: string | null;
+  selectedEdgeId: string | null;
+  inspectorOpen: boolean;
+  activeTool: CanvasToolMode;
+  leftTab: LeftActivityTab | null;
+  dslSplitOpen: boolean;
+  dslDiagnostics: DslDiagnostic[];
+  theme: 'dark' | 'light';
+  expandMode: CanvasExpandMode;
+  compactMode: boolean;
+  saveState: SaveState;
+  toastMessage: string | null;
+
+  // Dynamic Step-by-step Flow playback
+  simulating: boolean;
+  activeFlowId: string | null;
+  flowStepIndex: number;
+  isFlowPlaying: boolean;
+
+  // Export & Style Customizer Modals
+  exportModalOpen: boolean;
+  styleModalOpen: boolean;
+  styleTargetNodeId: string | null;
+
+  // Undo/Redo per active slot
+  history: HistoryEntry[];
+  historyIndex: number;
+  recentKinds: string[];
+
+  // Actions
+  hydrate: () => Promise<void>;
+  showToast: (msg: string) => void;
+  toggleTheme: () => void;
+  openProject: (projectId: string) => void;
+  returnToLauncher: () => void;
+  createProject: (title: string, templates: LayerTemplateName[]) => void;
+  duplicateProject: (projectId: string) => void;
+  toggleArchiveProject: (projectId: string) => void;
+  deleteProject: (projectId: string) => void;
+  renameActiveProject: (title: string) => void;
+
+  // Three-layer Git-friendly local directory workspace
+  openWorkspaceFolder: () => Promise<void>;
+  bindActiveProjectToFolder: () => Promise<void>;
+  reloadWorkspaceFolder: (projectId?: string) => Promise<void>;
+  unbindWorkspaceFolder: (projectId?: string) => void;
+
+  // Layer & sub-canvas
+  selectLayer: (index: number) => void;
+  selectSubCanvas: (subIndex: number) => void;
+  addLayer: (template: LayerTemplateName) => void;
+  drillToNodeTarget: (node: EntityNode) => void;
+
+  // UI controls
+  setTool: (tool: CanvasToolMode) => void;
+  toggleLeftTab: (tab: LeftActivityTab) => void;
+  toggleDslSplit: () => void;
+  setExportModalOpen: (open: boolean) => void;
+  openStyleModal: (nodeId?: string | null) => void;
+  closeStyleModal: () => void;
+  updateNodeStyle: (nodeId: string, patch: Partial<EntityVisualStyle>) => void;
+  resetNodeStyle: (nodeId: string) => void;
+  updateKindStyle: (kind: string, patch: Partial<EntityVisualStyle>) => void;
+  resetKindStyle: (kind: string) => void;
+  applyStyleToKind: (kind: string, style: EntityVisualStyle) => void;
+
+  // Canvas editing
+  selectNode: (nodeId: string | null, openInspector?: boolean) => void;
+  selectEdge: (edgeId: string | null, openInspector?: boolean) => void;
+  openNodeInspector: (nodeId: string) => void;
+  openEdgeInspector: (edgeId: string) => void;
+  closeInspector: () => void;
+  addNodeFromPrimitive: (kind: string, x: number, y: number) => void;
+  moveNode: (nodeId: string, x: number, y: number) => void;
+  updateNode: (nodeId: string, patch: Partial<EntityNode>) => void;
+  deleteNode: (nodeId: string) => void;
+  duplicateNode: (nodeId: string) => void;
+  disconnectNode: (nodeId: string) => void;
+  toggleNodePinned: (nodeId: string) => void;
+  connectNodes: (
+    from: string,
+    to: string,
+    fromField?: string,
+    toField?: string,
+    sourcePort?: PortSide,
+    targetPort?: PortSide
+  ) => void;
+  updateEdge: (edgeId: string, patch: Partial<RelationEdge>) => void;
+  updateEdgeWaypoints: (edgeId: string, waypoints: EdgeWaypoint[] | undefined) => void;
+  toggleEdgeDashed: (edgeId: string) => void;
+  toggleEdgeRouting: (edgeId: string) => void;
+  reverseEdge: (edgeId: string) => void;
+  deleteEdge: (edgeId: string) => void;
+  addFreehandStroke: (stroke: FreehandStroke) => void;
+  clearFreehandStrokes: () => void;
+
+  // Density & Layout
+  toggleNodeCollapse: (nodeId: string) => void;
+  cycleDensity: () => void;
+  toggleCompactMode: () => void;
+  runAutoLayout: (respectPinned?: boolean) => Promise<void>;
+
+  // DSL bidirectional sync
+  applyDslSource: (source: string) => void;
+
+  // Versions
+  createLayerVersion: (label?: string) => void;
+  restoreLayerVersion: (versionId: string) => void;
+
+  // Undo/Redo
+  undo: () => void;
+  redo: () => void;
+
+  // Flow playback
+  toggleSimulation: () => void;
+  selectFlow: (flowId: string) => void;
+  stepFlow: (delta: 1 | -1) => void;
+  toggleFlowAutoPlay: () => void;
+  resetFlowStep: () => void;
+  stopSimulation: () => void;
+}
+
+export function getActiveSlotFromProject(
+  project: ProjectDocument | undefined,
+  layerIndex: number
+): { layer: LayerDocument; slot: CanvasSlot } | null {
+  if (!project) return null;
+  const layer = project.layers[layerIndex];
+  if (!layer) return null;
+  if (layer.children && layer.children.length > 0) {
+    const idx = Math.min(Math.max(0, layer.activeChildIndex ?? 0), layer.children.length - 1);
+    return { layer, slot: layer.children[idx] };
+  }
+  return { layer, slot: layer };
+}
+
+function clone<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v));
+}
+
+function mutateActiveSlot(
+  projects: ProjectDocument[],
+  projectId: string | null,
+  layerIndex: number,
+  updater: (slot: CanvasSlot, layer: LayerDocument) => void
+): ProjectDocument[] {
+  if (!projectId) return projects;
+  return projects.map((p) => {
+    if (p.id !== projectId) return p;
+    const nextProject = clone(p);
+    const active = getActiveSlotFromProject(nextProject, layerIndex);
+    if (!active) return p;
+    updater(active.slot, active.layer);
+    nextProject.updatedAt = Date.now();
+    return nextProject;
+  });
+}
+
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+let workspaceSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
+  const persist = async (nextProjects: ProjectDocument[], projectIdToSync?: string | null) => {
+    set({ saveState: 'saving' });
+    const ok = await storageAdapter.saveProjects(nextProjects);
+
+    const targetId = projectIdToSync !== undefined ? projectIdToSync : get().activeProjectId;
+    const targetProject = targetId ? nextProjects.find((p) => p.id === targetId) : undefined;
+
+    if (
+      targetProject &&
+      storageAdapter.hasWorkspaceBinding?.(targetProject) &&
+      storageAdapter.syncWorkspaceDirectory
+    ) {
+      if (workspaceSyncTimer) clearTimeout(workspaceSyncTimer);
+      workspaceSyncTimer = setTimeout(async () => {
+        try {
+          const synced = await storageAdapter.syncWorkspaceDirectory!(targetProject);
+          set({ saveState: ok && synced ? 'saved' : 'error' });
+        } catch {
+          set({ saveState: 'error' });
+        }
+      }, 240);
+      return;
+    }
+
+    set({ saveState: ok ? 'saved' : 'error' });
+  };
+
+  const pushHistoryForCurrent = (nextProjects: ProjectDocument[]) => {
+    const { activeProjectId, activeLayerIndex, history, historyIndex } = get();
+    const proj = nextProjects.find((p) => p.id === activeProjectId);
+    const active = getActiveSlotFromProject(proj, activeLayerIndex);
+    if (!active) return;
+    const entry: HistoryEntry = {
+      nodes: clone(active.slot.nodes),
+      edges: clone(active.slot.edges),
+      freehand: clone(active.slot.freehand ?? []),
+      dslSource: active.slot.dslSource || serializeSlotToDsl(active.slot),
+    };
+    const sliced = history.slice(0, historyIndex + 1);
+    sliced.push(entry);
+    if (sliced.length > 50) sliced.shift();
+    set({ history: sliced, historyIndex: sliced.length - 1 });
+  };
+
+  return {
+    projects: createDefaultProjects(),
+    activeProjectId: null,
+    activeLayerIndex: 0,
+    selectedNodeId: null,
+    selectedEdgeId: null,
+    inspectorOpen: false,
+    activeTool: 'select',
+    leftTab: null,
+    dslSplitOpen: false,
+    dslDiagnostics: [],
+    theme: 'dark',
+    expandMode: 'full',
+    compactMode: false,
+    saveState: 'saved',
+    toastMessage: null,
+
+    simulating: false,
+    activeFlowId: null,
+    flowStepIndex: -1,
+    isFlowPlaying: false,
+    exportModalOpen: false,
+    styleModalOpen: false,
+    styleTargetNodeId: null,
+
+    history: [],
+    historyIndex: -1,
+    recentKinds: [],
+
+    async hydrate() {
+      const [projects, theme] = await Promise.all([
+        storageAdapter.loadProjects(),
+        storageAdapter.loadTheme(),
+      ]);
+      set({ projects, theme });
+    },
+
+    showToast(msg) {
+      if (toastTimer) clearTimeout(toastTimer);
+      set({ toastMessage: msg });
+      toastTimer = setTimeout(() => set({ toastMessage: null }), 2800);
+    },
+
+    toggleTheme() {
+      const next = get().theme === 'dark' ? 'light' : 'dark';
+      set({ theme: next });
+      void storageAdapter.saveTheme(next);
+      get().showToast(next === 'light' ? '已切换至晴昼白板画布' : '已切换至暗夜紫墨画布');
+    },
+
+    openProject(projectId) {
+      const proj = get().projects.find((p) => p.id === projectId);
+      if (!proj) return;
+      const active = getActiveSlotFromProject(proj, 0);
+      const initialHistory: HistoryEntry[] = active
+        ? [
+            {
+              nodes: clone(active.slot.nodes),
+              edges: clone(active.slot.edges),
+              freehand: clone(active.slot.freehand ?? []),
+              dslSource: active.slot.dslSource || serializeSlotToDsl(active.slot),
+            },
+          ]
+        : [];
+      set({
+        activeProjectId: projectId,
+        activeLayerIndex: 0,
+        selectedNodeId: null,
+        selectedEdgeId: null,
+        inspectorOpen: false,
+        leftTab: null,
+        simulating: false,
+        flowStepIndex: -1,
+        isFlowPlaying: false,
+        dslDiagnostics: [],
+        history: initialHistory,
+        historyIndex: initialHistory.length - 1,
+      });
+    },
+
+    returnToLauncher() {
+      set({
+        activeProjectId: null,
+        selectedNodeId: null,
+        selectedEdgeId: null,
+        inspectorOpen: false,
+        leftTab: null,
+        simulating: false,
+        isFlowPlaying: false,
+      });
+    },
+
+    createProject(title, templates) {
+      const list = templates.length > 0 ? templates : (['空白项目'] as LayerTemplateName[]);
+      const layers: LayerDocument[] = list.map((tpl, idx) => ({
+        id: `layer-${idx}-${Date.now()}`,
+        ...buildScenePresetForTemplate(tpl),
+      }));
+      const newProj: ProjectDocument = {
+        id: `p-${Date.now()}`,
+        title: title.trim() || `${list[0]} · 未命名项目`,
+        subtitle: `本地项目 · v0.1.0${list.length > 1 ? ` · ${list.length} 层架构` : ''}`,
+        meta: list.join(' + '),
+        category: 'personal',
+        type: 'local',
+        icon: list[0] === '数据建模' ? 'database' : list[0] === '状态机与时序' ? 'git-branch' : 'network',
+        layers,
+        updatedAt: Date.now(),
+      };
+      const next = [newProj, ...get().projects];
+      set({ projects: next });
+      void persist(next, null);
+      get().openProject(newProj.id);
+    },
+
+    duplicateProject(projectId) {
+      const origin = get().projects.find((p) => p.id === projectId);
+      if (!origin) return;
+      const copy: ProjectDocument = {
+        ...clone(origin),
+        id: `p-${Date.now()}`,
+        title: `${origin.title} (副本)`,
+        workspacePath: undefined,
+        updatedAt: Date.now(),
+      };
+      const next = [copy, ...get().projects];
+      set({ projects: next });
+      void persist(next, null);
+      get().showToast(`已创建副本：${copy.title}`);
+    },
+
+    toggleArchiveProject(projectId) {
+      const next = get().projects.map((p) => {
+        if (p.id !== projectId) return p;
+        const archived = p.category === 'archived';
+        return {
+          ...p,
+          category: archived ? ('personal' as const) : ('archived' as const),
+          subtitle: archived
+            ? p.subtitle.replace('归档项目', '本地项目')
+            : p.subtitle.replace('本地项目', '归档项目'),
+        };
+      });
+      set({ projects: next });
+      void persist(next, null);
+    },
+
+    deleteProject(projectId) {
+      storageAdapter.unbindWorkspaceDirectory?.(projectId);
+      const next = get().projects.filter((p) => p.id !== projectId);
+      set({ projects: next });
+      void persist(next, null);
+      get().showToast('已移除项目');
+    },
+
+    renameActiveProject(title) {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      const next = get().projects.map((p) =>
+        p.id === get().activeProjectId ? { ...p, title: trimmed, updatedAt: Date.now() } : p
+      );
+      set({ projects: next });
+      void persist(next);
+    },
+
+    async openWorkspaceFolder() {
+      if (!storageAdapter.openWorkspaceDirectory) {
+        get().showToast('当前环境暂不支持打开本地文件夹');
+        return;
+      }
+      try {
+        const result = await storageAdapter.openWorkspaceDirectory();
+        if (!result) return;
+
+        const { project: loaded, diagnostics } = result;
+        const existing = get().projects.find(
+          (p) =>
+            p.id === loaded.id ||
+            (loaded.workspacePath && p.workspacePath === loaded.workspacePath)
+        );
+        const nextProjects = existing
+          ? get().projects.map((p) => (p.id === existing.id ? { ...loaded, id: existing.id } : p))
+          : [loaded, ...get().projects];
+        const targetId = existing ? existing.id : loaded.id;
+
+        set({ projects: nextProjects });
+        await storageAdapter.saveProjects(nextProjects);
+        get().openProject(targetId);
+
+        if (diagnostics.length > 0) {
+          get().showToast(
+            `已打开「${loaded.title}」（${loaded.layers.length} 层，含 ${diagnostics.length} 条 DSL 提示）`
+          );
+        } else {
+          get().showToast(`已打开本地工作区「${loaded.title}」（自动同步已启用）`);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '打开本地目录失败';
+        get().showToast(message);
+      }
+    },
+
+    async bindActiveProjectToFolder() {
+      const activeId = get().activeProjectId;
+      const proj = get().projects.find((p) => p.id === activeId);
+      if (!proj || !storageAdapter.bindWorkspaceDirectory) return;
+
+      try {
+        set({ saveState: 'saving' });
+        const rootPath = await storageAdapter.bindWorkspaceDirectory(proj);
+        if (!rootPath) {
+          set({ saveState: 'saved' });
+          return;
+        }
+        const next = get().projects.map((p) =>
+          p.id === activeId ? { ...p, workspacePath: rootPath, updatedAt: Date.now() } : p
+        );
+        set({ projects: next, saveState: 'saved' });
+        await storageAdapter.saveProjects(next);
+        get().showToast(`已绑定目录「${rootPath}」，三层文件将自动落盘同步`);
+      } catch (err) {
+        set({ saveState: 'error' });
+        const message = err instanceof Error ? err.message : '绑定本地目录失败';
+        get().showToast(message);
+      }
+    },
+
+    async reloadWorkspaceFolder(projectId) {
+      const targetId = projectId ?? get().activeProjectId;
+      const proj = get().projects.find((p) => p.id === targetId);
+      if (!proj || !storageAdapter.reloadWorkspaceDirectory) return;
+
+      try {
+        const result = await storageAdapter.reloadWorkspaceDirectory(proj);
+        if (!result) {
+          get().showToast('目录句柄未授权，请重新绑定或打开本地工作区');
+          return;
+        }
+        const { project: reloaded, diagnostics } = result;
+        const next = get().projects.map((p) => (p.id === targetId ? reloaded : p));
+        const safeLayerIdx = Math.min(get().activeLayerIndex, Math.max(0, reloaded.layers.length - 1));
+
+        set({ projects: next });
+        await storageAdapter.saveProjects(next);
+
+        if (get().activeProjectId === targetId) {
+          const active = getActiveSlotFromProject(reloaded, safeLayerIdx);
+          const freshHistory: HistoryEntry[] = active
+            ? [
+                {
+                  nodes: clone(active.slot.nodes),
+                  edges: clone(active.slot.edges),
+                  freehand: clone(active.slot.freehand ?? []),
+                  dslSource: active.slot.dslSource || serializeSlotToDsl(active.slot),
+                },
+              ]
+            : [];
+          set({
+            activeLayerIndex: safeLayerIdx,
+            selectedNodeId: null,
+            selectedEdgeId: null,
+            dslDiagnostics: diagnostics
+              .filter((d) => !active || d.file.includes(active.slot.id))
+              .map(({ line, message, severity }) => ({ line, message, severity })),
+            history: freshHistory,
+            historyIndex: freshHistory.length - 1,
+          });
+        }
+
+        get().showToast(
+          diagnostics.length > 0
+            ? `已从磁盘重载（含 ${diagnostics.length} 条 DSL 提示）`
+            : '已从磁盘重新加载最新 .arch 与布局文件'
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '从磁盘重新加载失败';
+        get().showToast(message);
+      }
+    },
+
+    unbindWorkspaceFolder(projectId) {
+      const targetId = projectId ?? get().activeProjectId;
+      if (!targetId) return;
+      storageAdapter.unbindWorkspaceDirectory?.(targetId);
+      const next = get().projects.map((p) =>
+        p.id === targetId ? { ...p, workspacePath: undefined, updatedAt: Date.now() } : p
+      );
+      set({ projects: next });
+      void persist(next, null);
+      get().showToast('已解除本地目录绑定（仅保留浏览器本地缓存）');
+    },
+
+    selectLayer(index) {
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      if (!proj || index < 0 || index >= proj.layers.length) return;
+      const active = getActiveSlotFromProject(proj, index);
+      const history: HistoryEntry[] = active
+        ? [
+            {
+              nodes: clone(active.slot.nodes),
+              edges: clone(active.slot.edges),
+              freehand: clone(active.slot.freehand ?? []),
+              dslSource: active.slot.dslSource || serializeSlotToDsl(active.slot),
+            },
+          ]
+        : [];
+      set({
+        activeLayerIndex: index,
+        selectedNodeId: null,
+        selectedEdgeId: null,
+        inspectorOpen: false,
+        simulating: false,
+        flowStepIndex: -1,
+        isFlowPlaying: false,
+        dslDiagnostics: [],
+        history,
+        historyIndex: history.length - 1,
+      });
+    },
+
+    selectSubCanvas(subIndex) {
+      const next = get().projects.map((p) => {
+        if (p.id !== get().activeProjectId) return p;
+        const copy = clone(p);
+        const layer = copy.layers[get().activeLayerIndex];
+        if (layer?.children && subIndex >= 0 && subIndex < layer.children.length) {
+          layer.activeChildIndex = subIndex;
+        }
+        return copy;
+      });
+      const proj = next.find((p) => p.id === get().activeProjectId);
+      const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
+      const history: HistoryEntry[] = active
+        ? [
+            {
+              nodes: clone(active.slot.nodes),
+              edges: clone(active.slot.edges),
+              freehand: clone(active.slot.freehand ?? []),
+              dslSource: active.slot.dslSource || serializeSlotToDsl(active.slot),
+            },
+          ]
+        : [];
+      set({
+        projects: next,
+        selectedNodeId: null,
+        selectedEdgeId: null,
+        dslDiagnostics: [],
+        history,
+        historyIndex: history.length - 1,
+      });
+      void persist(next);
+    },
+
+    addLayer(template) {
+      const { activeProjectId, projects } = get();
+      if (!activeProjectId) return;
+      let newIndex = 0;
+      const next = projects.map((p) => {
+        if (p.id !== activeProjectId) return p;
+        const copy = clone(p);
+        const newLayer: LayerDocument = {
+          id: `layer-${Date.now()}`,
+          ...buildScenePresetForTemplate(template),
+        };
+        copy.layers.push(newLayer);
+        newIndex = copy.layers.length - 1;
+        return copy;
+      });
+      set({ projects: next });
+      void persist(next);
+      get().selectLayer(newIndex);
+      get().showToast(`已新增推演层：${template}`);
+    },
+
+    drillToNodeTarget(node) {
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      if (!proj) return;
+      const targetLayerId = node.drillTarget?.layerId || node.ref?.layerId;
+      const targetSubId = node.drillTarget?.subCanvasId || node.ref?.subCanvasId;
+      if (!targetLayerId) return;
+
+      const idx = proj.layers.findIndex((l) => l.id === targetLayerId);
+      if (idx === -1) {
+        get().showToast('未找到目标关联推演层');
+        return;
+      }
+      get().selectLayer(idx);
+      const targetLayer = proj.layers[idx];
+      if (targetSubId && targetLayer.children) {
+        const subIdx = targetLayer.children.findIndex((c) => c.id === targetSubId);
+        if (subIdx >= 0) get().selectSubCanvas(subIdx);
+      }
+      if (node.ref?.nodeId) {
+        set({ selectedNodeId: node.ref.nodeId });
+      }
+      get().showToast(`已下钻跳转至「${targetLayer.name}」`);
+    },
+
+    setTool(tool) {
+      set({ activeTool: tool });
+    },
+
+    toggleLeftTab(tab) {
+      if (tab === 'dsl') {
+        get().toggleDslSplit();
+        return;
+      }
+      set({ leftTab: get().leftTab === tab ? null : tab });
+    },
+
+    toggleDslSplit() {
+      set({ dslSplitOpen: !get().dslSplitOpen });
+    },
+
+    setExportModalOpen(open) {
+      set({ exportModalOpen: open });
+    },
+
+    openStyleModal(nodeId = null) {
+      set({ styleModalOpen: true, styleTargetNodeId: nodeId });
+    },
+
+    closeStyleModal() {
+      set({ styleModalOpen: false, styleTargetNodeId: null });
+    },
+
+    updateNodeStyle(nodeId, patch) {
+      // Pure visual style override — never modifies .arch semantic DSL
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const target = slot.nodes.find((n) => n.id === nodeId);
+        if (!target) return;
+        target.customStyle = { ...(target.customStyle ?? {}), ...patch };
+      });
+      set({ projects: next });
+      void persist(next);
+    },
+
+    resetNodeStyle(nodeId) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const target = slot.nodes.find((n) => n.id === nodeId);
+        if (target) delete target.customStyle;
+      });
+      set({ projects: next });
+      void persist(next);
+      get().showToast('已恢复该实体默认样式');
+    },
+
+    updateKindStyle(kind, patch) {
+      const next = get().projects.map((p) => {
+        if (p.id !== get().activeProjectId) return p;
+        const copy = clone(p);
+        copy.kindStyles = {
+          ...(copy.kindStyles ?? {}),
+          [kind]: { ...(copy.kindStyles?.[kind] ?? {}), ...patch },
+        };
+        return copy;
+      });
+      set({ projects: next });
+      void persist(next);
+    },
+
+    resetKindStyle(kind) {
+      const next = get().projects.map((p) => {
+        if (p.id !== get().activeProjectId) return p;
+        const copy = clone(p);
+        if (copy.kindStyles) delete copy.kindStyles[kind];
+        return copy;
+      });
+      set({ projects: next });
+      void persist(next);
+      get().showToast(`已恢复 ${kind} 类型默认样式`);
+    },
+
+    applyStyleToKind(kind, style) {
+      const next = get().projects.map((p) => {
+        if (p.id !== get().activeProjectId) return p;
+        const copy = clone(p);
+        copy.kindStyles = { ...(copy.kindStyles ?? {}), [kind]: { ...style } };
+        copy.layers.forEach((l) => {
+          const slots = l.children && l.children.length > 0 ? l.children : [l];
+          slots.forEach((s) => {
+            s.nodes.forEach((n) => {
+              if (n.kind === kind) delete n.customStyle;
+            });
+          });
+        });
+        return copy;
+      });
+      set({ projects: next });
+      void persist(next);
+      get().showToast(`已将样式同步至全项目所有 ${kind} 实体`);
+    },
+
+    selectNode(nodeId, openInspector) {
+      set((state) => ({
+        selectedNodeId: nodeId,
+        selectedEdgeId: null,
+        inspectorOpen:
+          nodeId === null
+            ? false
+            : openInspector !== undefined
+              ? openInspector
+              : state.inspectorOpen,
+      }));
+    },
+
+    selectEdge(edgeId, openInspector) {
+      set((state) => ({
+        selectedEdgeId: edgeId,
+        selectedNodeId: null,
+        inspectorOpen:
+          edgeId === null
+            ? false
+            : openInspector !== undefined
+              ? openInspector
+              : state.inspectorOpen,
+      }));
+    },
+
+    openNodeInspector(nodeId) {
+      set({ selectedNodeId: nodeId, selectedEdgeId: null, inspectorOpen: true });
+    },
+
+    openEdgeInspector(edgeId) {
+      set({ selectedEdgeId: edgeId, selectedNodeId: null, inspectorOpen: true });
+    },
+
+    closeInspector() {
+      set({ inspectorOpen: false });
+    },
+
+    addNodeFromPrimitive(kind, x, y) {
+      const prim = findPrimitiveByKind(kind);
+      const id = `n-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
+      const isEr = kind.startsWith('er_');
+      const isKv = kind.startsWith('kv_');
+      const newNode: EntityNode = {
+        id,
+        dslId: `${kind}_${Math.random().toString(36).slice(2, 5)}`,
+        kind,
+        title: prim?.label || '新实体',
+        tag: prim?.badge || kind.toUpperCase(),
+        note: prim?.desc || '',
+        color: (prim?.defaultColor || 'sky') as SemanticColor,
+        icon: prim?.icon,
+        engine: prim?.engine,
+        fields: isEr
+          ? [
+              { key: 'PK', name: 'id', type: 'BIGINT', note: '主键' },
+              { key: '', name: 'created_at', type: 'TIMESTAMP', note: '创建时间' },
+            ]
+          : isKv
+            ? [{ name: 'payload', type: 'string', note: '缓存值' }]
+            : undefined,
+        kv: isKv ? { ttl: '3600s', policy: 'allkeys-lru' } : undefined,
+        x,
+        y,
+        pinned: true,
+      };
+
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const baseDsl = slot.dslSource;
+        slot.nodes.push(newNode);
+        slot.dslSource = baseDsl
+          ? appendEntityToDsl(baseDsl, newNode, slot.nodes)
+          : serializeSlotToDsl(slot);
+      });
+      const prevRecent = get().recentKinds.filter((k) => k !== kind);
+      const nextRecent = ['assumption', 'decision', 'note'].includes(kind)
+        ? get().recentKinds
+        : [kind, ...prevRecent].slice(0, 5);
+      set({ projects: next, selectedNodeId: id, selectedEdgeId: null, recentKinds: nextRecent });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    moveNode(nodeId, x, y) {
+      // Geometry drag ONLY updates coordinates & pinned flag — preserves .arch DSL source untouched!
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const target = slot.nodes.find((n) => n.id === nodeId);
+        if (target) {
+          target.x = x;
+          target.y = y;
+          target.pinned = true;
+        }
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    updateNode(nodeId, patch) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const target = slot.nodes.find((n) => n.id === nodeId);
+        if (!target) return;
+
+        Object.assign(target, patch);
+
+        if (slot.dslSource) {
+          const patched = patchEntityInDsl(slot.dslSource, target, slot.nodes);
+          slot.dslSource = patched ?? serializeSlotToDsl(slot);
+        } else {
+          slot.dslSource = serializeSlotToDsl(slot);
+        }
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    deleteNode(nodeId) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const prevNodes = [...slot.nodes];
+        const prevEdges = [...slot.edges];
+        const prevDsl = slot.dslSource;
+
+        slot.nodes = slot.nodes.filter((n) => n.id !== nodeId);
+        slot.edges = slot.edges.filter((e) => e.from !== nodeId && e.to !== nodeId);
+        slot.nodes.forEach((n) => {
+          if (n.linkNodeId === nodeId) n.linkNodeId = null;
+        });
+
+        const patched = prevDsl ? deleteEntityFromDsl(prevDsl, nodeId, prevNodes, prevEdges) : null;
+        slot.dslSource = patched ?? serializeSlotToDsl(slot);
+      });
+      set({
+        projects: next,
+        selectedNodeId: get().selectedNodeId === nodeId ? null : get().selectedNodeId,
+      });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    duplicateNode(nodeId) {
+      let copyId: string | null = null;
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const orig = slot.nodes.find((n) => n.id === nodeId);
+        if (!orig) return;
+        const baseDsl = slot.dslSource;
+        copyId = `n-${Date.now().toString(36)}`;
+        const copyNode: EntityNode = {
+          ...clone(orig),
+          id: copyId,
+          dslId: `${orig.dslId || orig.id}_copy_${Math.random().toString(36).slice(2, 4)}`,
+          title: `${orig.title} (副本)`,
+          x: orig.x + 40,
+          y: orig.y + 40,
+          pinned: true,
+        };
+        slot.nodes.push(copyNode);
+        slot.dslSource = baseDsl
+          ? appendEntityToDsl(baseDsl, copyNode, slot.nodes)
+          : serializeSlotToDsl(slot);
+      });
+      set({ projects: next, selectedNodeId: copyId });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    disconnectNode(nodeId) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const removedIds = slot.edges
+          .filter((e) => e.from === nodeId || e.to === nodeId)
+          .map((e) => e.id);
+        const prevEdges = [...slot.edges];
+        const prevDsl = slot.dslSource;
+        slot.edges = slot.edges.filter((e) => e.from !== nodeId && e.to !== nodeId);
+
+        const patched =
+          prevDsl && removedIds.length > 0
+            ? deleteEdgesFromDsl(prevDsl, removedIds, slot.nodes, prevEdges)
+            : prevDsl;
+        slot.dslSource = patched ?? serializeSlotToDsl(slot);
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast('已断开该实体的全部关联连线');
+    },
+
+    toggleNodePinned(nodeId) {
+      let isNowPinned = false;
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const target = slot.nodes.find((n) => n.id === nodeId);
+        if (!target) return;
+        target.pinned = !target.pinned;
+        isNowPinned = !!target.pinned;
+      });
+      set({ projects: next });
+      void persist(next);
+      get().showToast(isNowPinned ? '已锁定节点坐标（增量布局保护）' : '已解除坐标锁定');
+    },
+
+    connectNodes(from, to, fromField, toField, sourcePort, targetPort) {
+      const edgeId = `e-${Date.now().toString(36)}`;
+      let added = false;
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const exists = slot.edges.some(
+          (e) =>
+            e.from === from &&
+            e.to === to &&
+            (e.fromField ?? '') === (fromField ?? '') &&
+            (e.toField ?? '') === (toField ?? '') &&
+            (e.sourcePort ?? '') === (sourcePort ?? '') &&
+            (e.targetPort ?? '') === (targetPort ?? '')
+        );
+        if (exists) return;
+        const isFieldLink = Boolean(fromField || toField);
+        const newEdge: RelationEdge = {
+          id: edgeId,
+          from,
+          to,
+          fromField,
+          toField,
+          sourcePort: isFieldLink ? undefined : sourcePort,
+          targetPort: isFieldLink ? undefined : targetPort,
+          label: isFieldLink ? '1 : N' : 'calls',
+          routing: isFieldLink ? 'orthogonal' : 'bezier',
+        };
+        const prevDsl = slot.dslSource;
+        const prevEdges = [...slot.edges];
+        slot.edges.push(newEdge);
+        const patched = prevDsl ? appendEdgeToDsl(prevDsl, newEdge, slot.nodes, prevEdges) : null;
+        slot.dslSource = patched ?? serializeSlotToDsl(slot);
+        added = true;
+      });
+      if (!added) {
+        get().showToast('该端口对之间已存在相同连线');
+        return;
+      }
+      set({ projects: next, selectedEdgeId: edgeId, selectedNodeId: null });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    updateEdge(edgeId, patch) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const target = slot.edges.find((e) => e.id === edgeId);
+        if (!target) return;
+        const prevEdge = { ...target };
+        const prevEdges = slot.edges.map((e) => (e.id === edgeId ? prevEdge : e));
+        Object.assign(target, patch);
+
+        const patched = slot.dslSource
+          ? patchEdgeInDsl(slot.dslSource, target, slot.nodes, prevEdges, prevEdge)
+          : null;
+        slot.dslSource = patched ?? serializeSlotToDsl(slot);
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    updateEdgeWaypoints(edgeId, waypoints) {
+      // Pure geometry edit: preserves .arch DSL source untouched
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const target = slot.edges.find((e) => e.id === edgeId);
+        if (!target) return;
+        target.waypoints = waypoints && waypoints.length > 0 ? waypoints : undefined;
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    toggleEdgeDashed(edgeId) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const target = slot.edges.find((e) => e.id === edgeId);
+        if (!target) return;
+        const prevEdge = { ...target };
+        const prevEdges = slot.edges.map((e) => (e.id === edgeId ? prevEdge : e));
+        target.dashed = !target.dashed;
+        const patched = slot.dslSource
+          ? patchEdgeInDsl(slot.dslSource, target, slot.nodes, prevEdges, prevEdge)
+          : null;
+        slot.dslSource = patched ?? serializeSlotToDsl(slot);
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    toggleEdgeRouting(edgeId) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const target = slot.edges.find((e) => e.id === edgeId);
+        if (!target) return;
+        const prevEdge = { ...target };
+        const prevEdges = slot.edges.map((e) => (e.id === edgeId ? prevEdge : e));
+        target.routing = target.routing === 'orthogonal' ? 'bezier' : 'orthogonal';
+        if (target.routing === 'bezier') target.waypoints = undefined;
+        const patched = slot.dslSource
+          ? patchEdgeInDsl(slot.dslSource, target, slot.nodes, prevEdges, prevEdge)
+          : null;
+        slot.dslSource = patched ?? serializeSlotToDsl(slot);
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    reverseEdge(edgeId) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const target = slot.edges.find((e) => e.id === edgeId);
+        if (!target) return;
+        const prevEdge = { ...target };
+        const prevEdges = slot.edges.map((e) => (e.id === edgeId ? prevEdge : e));
+        const tmp = target.from;
+        target.from = target.to;
+        target.to = tmp;
+        const tmpField = target.fromField;
+        target.fromField = target.toField;
+        target.toField = tmpField;
+        const tmpPort = target.sourcePort;
+        target.sourcePort = target.targetPort;
+        target.targetPort = tmpPort;
+        const patched = slot.dslSource
+          ? patchEdgeInDsl(slot.dslSource, target, slot.nodes, prevEdges, prevEdge)
+          : null;
+        slot.dslSource = patched ?? serializeSlotToDsl(slot);
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    deleteEdge(edgeId) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const prevEdges = [...slot.edges];
+        const prevDsl = slot.dslSource;
+        slot.edges = slot.edges.filter((e) => e.id !== edgeId);
+        const patched = prevDsl ? deleteEdgesFromDsl(prevDsl, [edgeId], slot.nodes, prevEdges) : null;
+        slot.dslSource = patched ?? serializeSlotToDsl(slot);
+      });
+      set({ projects: next, selectedEdgeId: null });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    addFreehandStroke(stroke) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        slot.freehand = [...(slot.freehand ?? []), stroke];
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    clearFreehandStrokes() {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        slot.freehand = [];
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast('已清空当前画布手绘笔迹（Ctrl+Z 可撤销）');
+    },
+
+    toggleNodeCollapse(nodeId) {
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const n = slot.nodes.find((item) => item.id === nodeId);
+        if (n && isCollapsibleEntity(n)) n.collapsed = !n.collapsed;
+      });
+      set({ projects: next });
+      void persist(next);
+    },
+
+    cycleDensity() {
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
+      if (!active) return;
+      const collapsible = active.slot.nodes.filter(isCollapsibleEntity);
+      if (collapsible.length === 0) return;
+
+      const allCollapsed = collapsible.every((n) => !!n.collapsed);
+      const allExpanded = collapsible.every((n) => !n.collapsed);
+
+      let nextExpandMode: CanvasExpandMode = get().expandMode;
+      let setCollapsedTo: boolean | null = null;
+
+      if (allCollapsed) {
+        nextExpandMode = 'full';
+        setCollapsedTo = false;
+        get().showToast('已切换为「完整展开」卡片视图');
+      } else if (allExpanded && nextExpandMode !== 'related') {
+        nextExpandMode = 'related';
+        get().showToast('已切换为「仅关联字段」视图');
+      } else {
+        nextExpandMode = 'full';
+        setCollapsedTo = true;
+        get().showToast('已收起卡片轮廓，适合俯瞰全局');
+      }
+
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        if (setCollapsedTo !== null) {
+          slot.nodes.forEach((n) => {
+            if (isCollapsibleEntity(n)) n.collapsed = setCollapsedTo!;
+          });
+        }
+      });
+      set({ projects: next, expandMode: nextExpandMode });
+      void persist(next);
+    },
+
+    toggleCompactMode() {
+      const next = !get().compactMode;
+      set({ compactMode: next });
+      get().showToast(
+        next ? '已切换至精简模式：仅显示图标、标签与名称' : '已切换至完整卡片模式'
+      );
+    },
+
+    async runAutoLayout(respectPinned = false) {
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
+      if (!active) return;
+      const result = await computeAutoLayout(active.slot.nodes, active.slot.edges, {
+        direction: 'RIGHT',
+        respectPinned,
+      });
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        slot.nodes = result.nodes;
+        slot.edges = result.edges;
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast(respectPinned ? '已完成增量布局（保留已锁定节点）' : '已完成 ELK 分层正交布局');
+    },
+
+    applyDslSource(source) {
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
+      if (!active) return;
+
+      const parsed = parseArchDsl(source, active.slot.nodes, active.slot.edges);
+      set({ dslDiagnostics: parsed.diagnostics });
+
+      if (parsed.diagnostics.some((d) => d.severity === 'error')) {
+        return;
+      }
+
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        slot.nodes = parsed.nodes;
+        slot.edges = parsed.edges;
+        slot.flows = parsed.flows;
+        slot.dslSource = source;
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    createLayerVersion(label) {
+      const next = get().projects.map((p) => {
+        if (p.id !== get().activeProjectId) return p;
+        const copy = clone(p);
+        const active = getActiveSlotFromProject(copy, get().activeLayerIndex);
+        if (!active) return p;
+        const versions = active.layer.versions ?? [];
+        versions.unshift({
+          id: `ver-${Date.now()}`,
+          name: label || `快照 v${versions.length + 1}`,
+          createdAt: Date.now(),
+          nodeCount: active.slot.nodes.length,
+          edgeCount: active.slot.edges.length,
+          snapshot: {
+            id: active.slot.id,
+            name: active.slot.name,
+            engine: active.slot.engine,
+            nodes: clone(active.slot.nodes),
+            edges: clone(active.slot.edges),
+            flows: clone(active.slot.flows),
+          },
+        });
+        active.layer.versions = versions;
+        return copy;
+      });
+      set({ projects: next });
+      void persist(next);
+      get().showToast('已保存当前层版本快照');
+    },
+
+    restoreLayerVersion(versionId) {
+      const next = get().projects.map((p) => {
+        if (p.id !== get().activeProjectId) return p;
+        const copy = clone(p);
+        const active = getActiveSlotFromProject(copy, get().activeLayerIndex);
+        if (!active) return p;
+        const snap = active.layer.versions?.find((v) => v.id === versionId)?.snapshot;
+        if (!snap) return p;
+        active.slot.nodes = clone(snap.nodes);
+        active.slot.edges = clone(snap.edges);
+        active.slot.flows = clone(snap.flows);
+        active.slot.dslSource = serializeSlotToDsl(active.slot);
+        return copy;
+      });
+      set({ projects: next, selectedNodeId: null, selectedEdgeId: null });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast('已恢复选定快照（支持 Ctrl+Z 撤销）');
+    },
+
+    undo() {
+      const { history, historyIndex } = get();
+      if (historyIndex <= 0) return;
+      const target = history[historyIndex - 1];
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        slot.nodes = clone(target.nodes);
+        slot.edges = clone(target.edges);
+        slot.freehand = clone(target.freehand ?? []);
+        slot.dslSource = target.dslSource;
+      });
+      set({ projects: next, historyIndex: historyIndex - 1 });
+      void persist(next);
+    },
+
+    redo() {
+      const { history, historyIndex } = get();
+      if (historyIndex >= history.length - 1) return;
+      const target = history[historyIndex + 1];
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        slot.nodes = clone(target.nodes);
+        slot.edges = clone(target.edges);
+        slot.freehand = clone(target.freehand ?? []);
+        slot.dslSource = target.dslSource;
+      });
+      set({ projects: next, historyIndex: historyIndex + 1 });
+      void persist(next);
+    },
+
+    toggleSimulation() {
+      const currentlyOn = get().simulating;
+      if (currentlyOn) {
+        set({ simulating: false, isFlowPlaying: false, flowStepIndex: -1 });
+        return;
+      }
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
+      const firstFlow = active?.slot.flows?.[0] ?? null;
+      set({
+        simulating: true,
+        activeFlowId: firstFlow?.id ?? null,
+        flowStepIndex: firstFlow ? 0 : -1,
+        isFlowPlaying: false,
+      });
+      get().showToast(
+        firstFlow ? `已启动链路演播：${firstFlow.name}` : '已启动全图拓扑脉冲校验'
+      );
+    },
+
+    selectFlow(flowId) {
+      set({ activeFlowId: flowId, flowStepIndex: 0, isFlowPlaying: false });
+    },
+
+    stepFlow(delta) {
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
+      const flows = active?.slot.flows ?? [];
+      const flow = flows.find((f) => f.id === get().activeFlowId) ?? flows[0];
+      if (!flow || flow.steps.length === 0) return;
+      const len = flow.steps.length;
+      const curr = get().flowStepIndex;
+      const nextIdx = curr < 0 ? 0 : (curr + delta + len) % len;
+      set({ flowStepIndex: nextIdx });
+    },
+
+    toggleFlowAutoPlay() {
+      set({ isFlowPlaying: !get().isFlowPlaying });
+    },
+
+    resetFlowStep() {
+      set({ flowStepIndex: -1, isFlowPlaying: false });
+    },
+
+    stopSimulation() {
+      set({ simulating: false, isFlowPlaying: false, flowStepIndex: -1 });
+    },
+  };
+});
+
+export type { EdgeRoutingMode };

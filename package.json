@@ -1,0 +1,18 @@
+{
+  "name": "devdraw-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevDraw · 研绘 — 面向开发与架构师的图码双向推演画布",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @devdraw/desktop dev",
+    "dev:tauri": "pnpm --filter @devdraw/desktop tauri:dev",
+    "build": "pnpm --filter @devdraw/core build && pnpm --filter @devdraw/canvas build && pnpm --filter @devdraw/desktop build",
+    "build:tauri": "pnpm --filter @devdraw/desktop tauri:build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @devdraw/core test"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

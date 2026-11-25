@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@devdraw/core": ["../../packages/core/src/index.ts"],
+      "@devdraw/canvas": ["../../packages/canvas/src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

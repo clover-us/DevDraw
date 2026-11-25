@@ -1,0 +1,138 @@
+/* DevDraw · 研绘 主题令牌（暗夜紫墨 / 晴昼白板整壳同步） */
+
+:root {
+  --dd-bg-base: #110e17;
+  --dd-bg-shell: #16121e;
+  --dd-bg-panel: #15111d;
+  --dd-bg-elevated: #1b1625;
+  --dd-border-subtle: rgba(255, 255, 255, 0.07);
+  --dd-border-strong: rgba(255, 255, 255, 0.14);
+  --dd-text-primary: #f3f1f8;
+  --dd-text-secondary: #a1a1aa;
+  --dd-text-muted: #71717a;
+  --dd-dot-color: rgba(167, 139, 250, 0.18);
+  --dd-accent: #7c5cff;
+}
+
+.devdraw-light {
+  --dd-bg-base: #f3f5f9;
+  --dd-bg-shell: #ffffff;
+  --dd-bg-panel: #f8fafc;
+  --dd-bg-elevated: #ffffff;
+  --dd-border-subtle: rgba(15, 23, 42, 0.08);
+  --dd-border-strong: rgba(15, 23, 42, 0.16);
+  --dd-text-primary: #0f172a;
+  --dd-text-secondary: #475569;
+  --dd-text-muted: #94a3b8;
+  --dd-dot-color: #cbd5e1;
+  --dd-accent: #6d28d9;
+}
+
+.devdraw-stage {
+  background-color: var(--dd-bg-base);
+}
+
+/* 连线流动粒子脉冲动画 */
+@keyframes ddEdgeFlow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+.dd-edge-flow {
+  stroke-dasharray: 5 13;
+  stroke-linecap: round;
+  animation: ddEdgeFlow 1.4s linear infinite;
+  pointer-events: none;
+}
+
+.dd-edge-flow-sim {
+  stroke-dasharray: 6 10;
+  stroke-linecap: round;
+  animation: ddEdgeFlow 0.65s linear infinite;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dd-edge-flow,
+  .dd-edge-flow-sim {
+    animation: none;
+  }
+}
+
+/* 隐藏 React Flow 默认 Attribution（独立开源桌面端） */
+.react-flow__attribution {
+  display: none !important;
+}
+
+.react-flow__node {
+  cursor: grab;
+}
+
+.react-flow__node:active {
+  cursor: grabbing;
+}
+
+.react-flow__handle {
+  width: 9px !important;
+  height: 9px !important;
+  border-width: 1.5px !important;
+  z-index: 30 !important;
+  cursor: crosshair !important;
+  transition: opacity 0.15s ease, box-shadow 0.14s ease, background-color 0.14s ease;
+}
+
+/* 扩大隐形抓取热区到 ~20px，避免 9px 小点难按中导致误拖节点 */
+.react-flow__handle::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 9999px;
+}
+
+/* 绝不覆盖 transform（React Flow 靠 transform: translate(-50%,-50%) 居中端口） */
+.react-flow__handle:hover {
+  opacity: 1 !important;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.35);
+}
+
+/* 正在拖拽连线时，画布上所有可接入端口全部清晰显现 */
+.dd-connecting .react-flow__handle,
+.react-flow__handle.connectingto,
+.react-flow__handle.connectingfrom,
+.react-flow__handle.valid {
+  opacity: 1 !important;
+}
+
+.react-flow__handle.connectingto {
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.45);
+}
+
+/* 俯视图（MiniMap）：纯通透圆角卡片，去掉白底与内框遮罩，仅保留实体块与选中高光 */
+.react-flow__minimap {
+  overflow: hidden !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.react-flow__minimap-svg {
+  width: 100% !important;
+  height: 100% !important;
+  background: transparent !important;
+  display: block;
+}
+
+.react-flow__minimap-mask {
+  display: none !important;
+}
+
+.devdraw-light .react-flow__minimap {
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.1);
+}
+
+.react-flow__minimap-node {
+  transition: fill 0.16s ease, stroke 0.16s ease, filter 0.16s ease;
+}
+
+.react-flow__minimap-node.selected {
+  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.85));
+}
