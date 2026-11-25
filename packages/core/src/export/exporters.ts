@@ -6,7 +6,7 @@ import type {
   RelationEdge,
   SemanticColor,
 } from '../types';
-import { getAnnotationKind, isCollapsibleEntity } from '../primitives';
+import { getAnnotationKind, isCollapsibleEntity, isGroupEntity } from '../primitives';
 
 function sanitizeMermaidText(value: string): string {
   return String(value || '')
@@ -360,8 +360,28 @@ export function exportSlotToSvg(
     })
     .join('\n');
 
-  // 3. Nodes layer
+  // 3. Group boundary containers (rendered behind edges & regular nodes)
+  const groupCards = nodes
+    .filter((n) => isGroupEntity(n))
+    .map((n) => {
+      const b = boxes.get(n.id)!;
+      const mergedStyle: EntityVisualStyle = {
+        ...(kindStyles?.[n.kind] ?? {}),
+        ...(n.customStyle ?? {}),
+      };
+      const colorKey: SemanticColor = mergedStyle.color ?? n.color ?? 'violet';
+      const tone = SVG_ACCENT_MAP[colorKey] ?? SVG_ACCENT_MAP.violet;
+      return `  <g transform="translate(${Math.round(b.x)}, ${Math.round(b.y)})">
+    <rect width="${b.w}" height="${b.h}" rx="18" fill="${tone.badgeBg}" fill-opacity="0.35" stroke="${tone.border}" stroke-width="1.6" stroke-dasharray="7 5"/>
+    <text x="16" y="24" fill="${tone.accent}" font-size="10" font-weight="600" font-family="JetBrains Mono, monospace">${escapeXml(truncateText(n.tag, 28))}</text>
+    <text x="16" y="42" fill="${titleColor}" font-size="12.5" font-weight="600" font-family="Inter, Noto Sans SC, sans-serif">${escapeXml(truncateText(n.title, 36))}</text>
+  </g>`;
+    })
+    .join('\n');
+
+  // 4. Nodes layer (regular entities & annotations)
   const nodeCards = nodes
+    .filter((n) => !isGroupEntity(n))
     .map((n) => {
       const b = boxes.get(n.id)!;
       const isAnn = Boolean(getAnnotationKind(n));
@@ -434,6 +454,7 @@ ${bodySvg}
   </defs>
   <rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="${bg}"/>
   <rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="url(#ddDotGrid)"/>
+${groupCards}
 ${freehandSvg}
 ${edgeLines}
 ${nodeCards}

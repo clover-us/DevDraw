@@ -275,6 +275,16 @@ export const REASONING_ANNOTATION_ITEMS: PrimitiveItem[] = [
   },
 ];
 
+export const GROUP_CONTAINER_ITEM: PrimitiveItem = {
+  kind: 'group',
+  icon: 'layers',
+  colorClass: 'text-violet-300',
+  defaultColor: 'violet',
+  label: '分组容器 / 边界',
+  badge: 'Group / VPC',
+  desc: '半透明架构分组边界框（VPC / 可用区 / 限界上下文），可拖拽调整尺寸并框选包裹多个实体。',
+};
+
 export const ALL_PRIMITIVES: PrimitiveItem[] = [
   ...SYSTEM_ARCH_ITEMS,
   ...DATA_MODELING_RELATIONAL_ITEMS,
@@ -284,7 +294,12 @@ export const ALL_PRIMITIVES: PrimitiveItem[] = [
   ...DAG_ITEMS,
   ...DDD_ITEMS,
   ...REASONING_ANNOTATION_ITEMS,
+  GROUP_CONTAINER_ITEM,
 ];
+
+export function isGroupEntity(node: Pick<EntityNode, 'kind'> | null | undefined): boolean {
+  return Boolean(node && node.kind === 'group');
+}
 
 export function findPrimitiveByKind(kind: string): PrimitiveItem | undefined {
   if (kind === 'er_table') return DATA_MODELING_RELATIONAL_ITEMS[0];

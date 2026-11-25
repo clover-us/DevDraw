@@ -26,6 +26,7 @@ import {
 import {
   findPrimitiveByKind,
   getPaletteConfigForTemplate,
+  GROUP_CONTAINER_ITEM,
   REASONING_ANNOTATION_ITEMS,
   type PrimitiveItem,
   type SemanticColor,
@@ -252,13 +253,13 @@ export const LeftSidebar: React.FC = () => {
                   );
                 })}
 
-                {/* Universal Reasoning Annotations */}
+                {/* Universal Reasoning Annotations & Group Boundary */}
                 <div className="pt-2 border-t border-[var(--dd-border-subtle)] space-y-1">
                   <div className="px-1 flex items-center justify-between text-[10px] font-mono text-[var(--dd-text-muted)] uppercase">
-                    <span>研思推演标注</span>
-                    <span>支持绑定实体</span>
+                    <span>分组容器与研思标注</span>
+                    <span>全层通用</span>
                   </div>
-                  {REASONING_ANNOTATION_ITEMS.filter(matchItem).map((ann) => {
+                  {[GROUP_CONTAINER_ITEM, ...REASONING_ANNOTATION_ITEMS].filter(matchItem).map((ann) => {
                     const tone = PALETTE_COLOR_MAP[ann.defaultColor] ?? PALETTE_COLOR_MAP.amber;
                     const AnnIcon = ENTITY_ICON_MAP[ann.icon] || Box;
                     return (
@@ -537,6 +538,8 @@ export const LeftSidebar: React.FC = () => {
 
               <div className="p-3 rounded-xl bg-white/[0.02] border border-[var(--dd-border-subtle)] text-[11px] text-[var(--dd-text-secondary)] space-y-1.5">
                 <div className="font-medium text-[var(--dd-text-primary)]">常用快捷键</div>
+                <div className="flex justify-between"><span>全局命令面板</span><span className="font-mono">Ctrl+K</span></div>
+                <div className="flex justify-between"><span>框选多选实体</span><span className="font-mono">Shift+拖拽</span></div>
                 <div className="flex justify-between"><span>选择 / 连线 / 落绘</span><span className="font-mono">V / L / P</span></div>
                 <div className="flex justify-between"><span>图码双向分屏</span><span className="font-mono">Ctrl+\</span></div>
                 <div className="flex justify-between"><span>ELK 自动布局</span><span className="font-mono">Ctrl+L</span></div>

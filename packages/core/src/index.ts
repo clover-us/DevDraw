@@ -3,6 +3,7 @@ export * from './primitives';
 export * from './presets';
 export * from './dsl/parser';
 export * from './layout/elkAdapter';
+export * from './layout/align';
 export * from './export/exporters';
 export * from './import/importers';
 export * from './workspace/workspaceCodec';

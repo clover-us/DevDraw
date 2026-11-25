@@ -11,6 +11,7 @@ import { RightInspector } from './components/RightInspector';
 import { ExportModal } from './components/ExportModal';
 import { ImportModal } from './components/ImportModal';
 import { CrossLayerRefModal } from './components/CrossLayerRefModal';
+import { CommandPalette } from './components/CommandPalette';
 import { StyleCustomizerModal } from './components/StyleCustomizerModal';
 
 export const App: React.FC = () => {
@@ -20,7 +21,10 @@ export const App: React.FC = () => {
     activeLayerIndex,
     activeTool,
     selectedNodeId,
+    selectedNodeIds,
     selectedEdgeId,
+    focusNodeRequest,
+    commandPaletteOpen,
     inspectorOpen,
     theme,
     expandMode,
@@ -37,16 +41,24 @@ export const App: React.FC = () => {
     hydrate,
     setTool,
     selectNode,
+    selectNodes,
     selectEdge,
     openNodeInspector,
     openEdgeInspector,
     closeInspector,
     openStyleModal,
     moveNode,
+    moveNodes,
+    resizeNode,
     duplicateNode,
     toggleNodePinned,
     disconnectNode,
     deleteNode,
+    deleteNodes,
+    alignSelectedNodes,
+    distributeSelectedNodes,
+    groupSelectedNodes,
+    setCommandPaletteOpen,
     connectNodes,
     updateEdge,
     updateEdgeWaypoints,
@@ -100,6 +112,11 @@ export const App: React.FC = () => {
           target.isContentEditable ||
           !!target.closest('.cm-editor'));
 
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen(!commandPaletteOpen);
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
         e.preventDefault();
         toggleDslSplit();
@@ -142,7 +159,10 @@ export const App: React.FC = () => {
           selectEdge(null);
         }
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedNodeId) {
+        if (selectedNodeIds.length > 1) {
+          e.preventDefault();
+          deleteNodes(selectedNodeIds);
+        } else if (selectedNodeId) {
           e.preventDefault();
           deleteNode(selectedNodeId);
         } else if (selectedEdgeId) {
@@ -163,17 +183,21 @@ export const App: React.FC = () => {
     activeProjectId,
     activeTool,
     selectedNodeId,
+    selectedNodeIds,
     selectedEdgeId,
+    commandPaletteOpen,
     inspectorOpen,
     simulating,
     flowPickEdgeMode,
     setTool,
     setFlowPickEdgeMode,
+    setCommandPaletteOpen,
     selectNode,
     selectEdge,
     closeInspector,
     addNodeFromPrimitive,
     deleteNode,
+    deleteNodes,
     deleteEdge,
     toggleDslSplit,
     runAutoLayout,
@@ -221,7 +245,9 @@ export const App: React.FC = () => {
               activeSubCanvasIndex={active.layer.activeChildIndex ?? 0}
               activeTool={activeTool}
               selectedNodeId={selectedNodeId}
+              selectedNodeIds={selectedNodeIds}
               selectedEdgeId={selectedEdgeId}
+              focusNodeRequest={focusNodeRequest}
               theme={theme}
               expandMode={expandMode}
               compactMode={compactMode}
@@ -235,11 +261,18 @@ export const App: React.FC = () => {
               kindStyles={project.kindStyles}
               onSetTool={setTool}
               onSelectNode={selectNode}
+              onSelectNodes={selectNodes}
               onSelectEdge={selectEdge}
               onOpenNodeInspector={openNodeInspector}
               onOpenEdgeInspector={openEdgeInspector}
               onCustomizeNodeStyle={(nodeId) => openStyleModal(nodeId)}
               onNodeDragStop={moveNode}
+              onNodesDragStop={moveNodes}
+              onResizeNode={resizeNode}
+              onAlignNodes={alignSelectedNodes}
+              onDistributeNodes={distributeSelectedNodes}
+              onGroupSelectedNodes={groupSelectedNodes}
+              onDeleteSelectedNodes={() => deleteNodes(selectedNodeIds)}
               onConnectNodes={connectNodes}
               onDropPrimitive={addNodeFromPrimitive}
               onDuplicateNode={duplicateNode}
@@ -283,6 +316,7 @@ export const App: React.FC = () => {
       <ExportModal />
       <ImportModal />
       <CrossLayerRefModal />
+      <CommandPalette />
       <StyleCustomizerModal />
 
       {toastMessage && (

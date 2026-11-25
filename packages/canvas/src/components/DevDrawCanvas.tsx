@@ -6,6 +6,7 @@ import {
   ConnectionMode,
   MiniMap,
   ReactFlow,
+  SelectionMode,
   useReactFlow,
   type Connection,
   type NodeChange,
@@ -13,10 +14,19 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignHorizontalSpaceAround,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalSpaceAround,
   ChevronsUpDown,
   Database,
   Expand,
   GitCommitHorizontal,
+  Group,
   LayoutGrid,
   ListFilter,
   ListOrdered,
@@ -28,14 +38,18 @@ import {
   Plus,
   Sun,
   Table2,
+  Trash2,
   X,
   Zap,
 } from 'lucide-react';
 import {
   isCollapsibleEntity,
+  isGroupEntity,
+  type AlignDirection,
   type CanvasExpandMode,
   type CanvasSlot,
   type CanvasToolMode,
+  type DistributeAxis,
   type EdgeWaypoint,
   type EntityNode,
   type EntityVisualStyle,
@@ -87,7 +101,9 @@ export interface DevDrawCanvasProps {
   activeSubCanvasIndex?: number;
   activeTool: CanvasToolMode;
   selectedNodeId: string | null;
+  selectedNodeIds?: string[];
   selectedEdgeId: string | null;
+  focusNodeRequest?: { nodeId: string; nonce: number } | null;
   theme: 'dark' | 'light';
   expandMode: CanvasExpandMode;
   compactMode: boolean;
@@ -101,11 +117,18 @@ export interface DevDrawCanvasProps {
   kindStyles?: Record<string, EntityVisualStyle>;
   onSetTool: (tool: CanvasToolMode) => void;
   onSelectNode: (nodeId: string | null) => void;
+  onSelectNodes?: (nodeIds: string[]) => void;
   onSelectEdge: (edgeId: string | null) => void;
   onOpenNodeInspector: (nodeId: string) => void;
   onOpenEdgeInspector: (edgeId: string) => void;
   onCustomizeNodeStyle: (nodeId: string) => void;
   onNodeDragStop: (nodeId: string, x: number, y: number) => void;
+  onNodesDragStop?: (updates: Array<{ id: string; x: number; y: number }>) => void;
+  onResizeNode?: (nodeId: string, x: number, y: number, w: number, h: number) => void;
+  onAlignNodes?: (direction: AlignDirection) => void;
+  onDistributeNodes?: (axis: DistributeAxis) => void;
+  onGroupSelectedNodes?: () => void;
+  onDeleteSelectedNodes?: () => void;
   onConnectNodes: (
     from: string,
     to: string,
@@ -155,7 +178,9 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
   activeSubCanvasIndex = 0,
   activeTool,
   selectedNodeId,
+  selectedNodeIds = [],
   selectedEdgeId,
+  focusNodeRequest,
   theme,
   expandMode,
   compactMode,
@@ -169,11 +194,18 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
   kindStyles,
   onSetTool,
   onSelectNode,
+  onSelectNodes,
   onSelectEdge,
   onOpenNodeInspector,
   onOpenEdgeInspector,
   onCustomizeNodeStyle,
   onNodeDragStop,
+  onNodesDragStop,
+  onResizeNode,
+  onAlignNodes,
+  onDistributeNodes,
+  onGroupSelectedNodes,
+  onDeleteSelectedNodes,
   onConnectNodes,
   onDropPrimitive,
   onDuplicateNode,
@@ -208,8 +240,18 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
   onFlowPickEdge,
   onCancelFlowPickEdge,
 }) => {
-  const { zoomIn, zoomOut, fitView, screenToFlowPosition } = useReactFlow();
+  const { zoomIn, zoomOut, fitView, setCenter, screenToFlowPosition } = useReactFlow();
   const isLight = theme === 'light';
+
+  // Smoothly pan & focus viewport when a node is jumped to via Command Palette (Ctrl+K)
+  useEffect(() => {
+    if (!focusNodeRequest) return;
+    const target = slot.nodes.find((n) => n.id === focusNodeRequest.nodeId);
+    if (!target) return;
+    const cx = target.x + (target.w ?? 248) / 2;
+    const cy = target.y + (target.h ?? 96) / 2;
+    void setCenter(cx, cy, { zoom: 1.05, duration: 320 });
+  }, [focusNodeRequest, slot.nodes, setCenter]);
 
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -281,6 +323,12 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
     return map;
   }, [slot.nodes, expandMode, relatedFieldsByNode]);
 
+  const selectedIdSet = useMemo(() => {
+    const s = new Set<string>(selectedNodeIds);
+    if (selectedNodeId) s.add(selectedNodeId);
+    return s;
+  }, [selectedNodeId, selectedNodeIds]);
+
   const computedNodes: DevDrawFlowNode[] = useMemo(
     () =>
       slot.nodes.map((entity) => {
@@ -289,11 +337,14 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
           flowState =
             activeStep.from === entity.id || activeStep.to === entity.id ? 'active' : 'dimmed';
         }
+        const isGroup = isGroupEntity(entity);
         return {
           id: entity.id,
           type: 'devdraw',
           position: { x: entity.x, y: entity.y },
-          selected: entity.id === selectedNodeId || entity.id === connectSourceId,
+          zIndex: isGroup ? -1 : 1,
+          style: isGroup ? { width: entity.w ?? 420, height: entity.h ?? 280 } : undefined,
+          selected: selectedIdSet.has(entity.id) || entity.id === connectSourceId,
           data: {
             entity,
             kindStyle: kindStyles?.[entity.kind],
@@ -304,13 +355,14 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
             flowState,
             onToggleCollapse: onToggleNodeCollapse,
             onDrillDown,
+            onResizeNode,
           },
         };
       }),
     [
       slot.nodes,
       kindStyles,
-      selectedNodeId,
+      selectedIdSet,
       connectSourceId,
       theme,
       expandMode,
@@ -319,6 +371,7 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
       activeStep,
       onToggleNodeCollapse,
       onDrillDown,
+      onResizeNode,
     ]
   );
 
@@ -460,12 +513,17 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
     ({ nodes, edges }: OnSelectionChangeParams) => {
       if (activeTool !== 'select') return;
       if (nodes.length > 0) {
-        onSelectNode(nodes[0].id);
+        const ids = nodes.map((n) => n.id);
+        if (onSelectNodes) {
+          onSelectNodes(ids);
+        } else {
+          onSelectNode(ids[0]);
+        }
       } else if (edges.length > 0) {
         onSelectEdge(edges[0].id);
       }
     },
-    [activeTool, onSelectNode, onSelectEdge]
+    [activeTool, onSelectNode, onSelectNodes, onSelectEdge]
   );
 
   const handlePaneContextMenu = useCallback(
@@ -586,11 +644,25 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
         onPaneContextMenu={handlePaneContextMenu}
         onNodeContextMenu={handleNodeContextMenu}
         onEdgeContextMenu={handleEdgeContextMenu}
-        onNodeDragStop={(_, node) =>
-          onNodeDragStop(node.id, Math.round(node.position.x), Math.round(node.position.y))
-        }
+        onNodeDragStop={(_, node, draggedNodes) => {
+          const list = draggedNodes && draggedNodes.length > 0 ? draggedNodes : [node];
+          if (onNodesDragStop && list.length > 1) {
+            onNodesDragStop(
+              list.map((n) => ({
+                id: n.id,
+                x: Math.round(n.position.x),
+                y: Math.round(n.position.y),
+              }))
+            );
+          } else {
+            onNodeDragStop(node.id, Math.round(node.position.x), Math.round(node.position.y));
+          }
+        }}
         onConnect={handleConnect}
         onSelectionChange={handleSelectionChange}
+        multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
+        selectionKeyCode="Shift"
+        selectionMode={SelectionMode.Partial}
         onPaneClick={() => {
           setContextMenu(null);
           setEditingEdgeId(null);
@@ -722,6 +794,111 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
         onResetEdgeWaypoints={(edgeId) => onUpdateEdgeWaypoints(edgeId, undefined)}
         onDeleteEdge={onDeleteEdge}
       />
+
+      {/* Multi-selection Alignment, Distribution & Group Floating Toolbar */}
+      {!flowPickEdgeMode && activeTool === 'select' && selectedNodeIds.length >= 2 && (
+        <div
+          className={`absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 px-2.5 py-1.5 rounded-2xl border backdrop-blur-xl shadow-2xl text-xs select-none ${
+            isLight
+              ? 'bg-white/95 border-slate-200 text-slate-700'
+              : 'bg-[#171220]/94 border-violet-400/35 text-zinc-200'
+          }`}
+        >
+          <span className="px-1.5 py-0.5 rounded-md bg-violet-500/20 text-violet-300 font-mono text-[10.5px] whitespace-nowrap">
+            已选 {selectedNodeIds.length} 项
+          </span>
+          <div className="h-3.5 w-px bg-white/10 mx-0.5" />
+          <button
+            type="button"
+            onClick={() => onAlignNodes?.('left')}
+            title="左对齐"
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+          >
+            <AlignStartVertical className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onAlignNodes?.('center-x')}
+            title="水平居中对齐"
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+          >
+            <AlignCenterVertical className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onAlignNodes?.('right')}
+            title="右对齐"
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+          >
+            <AlignEndVertical className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onAlignNodes?.('top')}
+            title="顶部对齐"
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+          >
+            <AlignStartHorizontal className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onAlignNodes?.('center-y')}
+            title="垂直居中对齐"
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+          >
+            <AlignCenterHorizontal className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onAlignNodes?.('bottom')}
+            title="底部对齐"
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+          >
+            <AlignEndHorizontal className="w-3.5 h-3.5" />
+          </button>
+
+          {selectedNodeIds.length >= 3 && (
+            <>
+              <div className="h-3.5 w-px bg-white/10 mx-0.5" />
+              <button
+                type="button"
+                onClick={() => onDistributeNodes?.('horizontal')}
+                title="水平等距分布"
+                className="p-1.5 rounded-lg hover:bg-white/10 text-sky-400 transition-colors"
+              >
+                <AlignHorizontalSpaceAround className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onDistributeNodes?.('vertical')}
+                title="垂直等距分布"
+                className="p-1.5 rounded-lg hover:bg-white/10 text-sky-400 transition-colors"
+              >
+                <AlignVerticalSpaceAround className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+
+          <div className="h-3.5 w-px bg-white/10 mx-0.5" />
+          <button
+            type="button"
+            onClick={() => onGroupSelectedNodes?.()}
+            title="用分组边界框包裹选中实体"
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 text-[11px] font-medium whitespace-nowrap transition-colors"
+          >
+            <Group className="w-3.5 h-3.5" />
+            <span>建组</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onDeleteSelectedNodes?.()}
+            title="批量删除选中实体 (Del)"
+            className="p-1.5 rounded-lg hover:bg-rose-500/20 text-rose-400 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Flow Edge-Pick Mode Floating Hint Pill */}
       {flowPickEdgeMode && (

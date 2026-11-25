@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
+import { Handle, NodeResizer, Position, type NodeProps, type Node } from '@xyflow/react';
 import {
   Activity,
   AlertTriangle,
@@ -68,6 +68,7 @@ import {
   findPrimitiveByKind,
   getAnnotationKind,
   isCollapsibleEntity,
+  isGroupEntity,
   type CanvasExpandMode,
   type EntityNode,
   type EntityVisualStyle,
@@ -102,6 +103,7 @@ export interface DevDrawFlowNodeData extends Record<string, unknown> {
   flowState?: 'idle' | 'active' | 'dimmed';
   onToggleCollapse?: (nodeId: string) => void;
   onDrillDown?: (node: EntityNode) => void;
+  onResizeNode?: (nodeId: string, x: number, y: number, w: number, h: number) => void;
 }
 
 export type DevDrawFlowNode = Node<DevDrawFlowNodeData, 'devdraw'>;
@@ -276,11 +278,13 @@ export const DevDrawNodeComponent = memo(function DevDrawNodeComponent({
     flowState = 'idle',
     onToggleCollapse,
     onDrillDown,
+    onResizeNode,
   } = data;
 
   const isLight = theme === 'light';
   const annKind = getAnnotationKind(entity);
   const isRef = entity.kind === 'store_ref' || !!entity.ref;
+  const isGroup = isGroupEntity(entity);
   const collapsible = isCollapsibleEntity(entity);
   const isCollapsed = collapsible && !!entity.collapsed;
 
@@ -339,6 +343,67 @@ export const DevDrawNodeComponent = memo(function DevDrawNodeComponent({
       : effectiveRadius === '2xl'
         ? 'rounded-2xl'
         : 'rounded-[10px]';
+
+  // Dedicated Group / Boundary Container rendering (VPC / AZ / Bounded Context)
+  if (isGroup) {
+    const groupTone = isLight ? palette.calloutLight : palette.calloutDark;
+    return (
+      <div
+        className={`relative w-full h-full min-w-[240px] min-h-[160px] rounded-2xl border-2 border-dashed transition-colors ${groupTone} ${
+          selected ? 'ring-2 ring-sky-400/70 !border-sky-400/80' : ''
+        }`}
+      >
+        <NodeResizer
+          isVisible={Boolean(selected)}
+          minWidth={240}
+          minHeight={160}
+          lineStyle={{ borderColor: '#38bdf8', borderWidth: 1 }}
+          handleStyle={{
+            width: 8,
+            height: 8,
+            borderRadius: 3,
+            backgroundColor: '#38bdf8',
+            border: '1px solid #0f172a',
+          }}
+          onResizeEnd={(_event, params) => {
+            onResizeNode?.(
+              entity.id,
+              Math.round(params.x),
+              Math.round(params.y),
+              Math.round(params.width),
+              Math.round(params.height)
+            );
+          }}
+        />
+        <div className="px-3.5 py-2.5 flex items-center gap-2 pointer-events-none select-none">
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold ${
+              isLight ? palette.tagLight : palette.tagDark
+            }`}
+          >
+            <Layers className="w-3 h-3" />
+            <span>{entity.tag || 'GROUP'}</span>
+          </span>
+          <span
+            className={`text-xs font-semibold truncate ${
+              isLight ? 'text-slate-700' : 'text-zinc-200'
+            }`}
+          >
+            {entity.title}
+          </span>
+          {entity.note && (
+            <span
+              className={`text-[10.5px] truncate ${
+                isLight ? 'text-slate-500' : 'text-zinc-400'
+              }`}
+            >
+              · {entity.note}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const allFields = entity.fields ?? [];
   const visibleFields =

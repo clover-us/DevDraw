@@ -1,12 +1,15 @@
 import { create } from 'zustand';
 import {
+  alignNodes,
   appendEdgeToDsl,
   appendEntityToDsl,
   buildScenePresetForTemplate,
   computeAutoLayout,
+  computeGroupBoundsForNodes,
   createDefaultProjects,
   deleteEdgesFromDsl,
   deleteEntityFromDsl,
+  distributeNodes,
   findPrimitiveByKind,
   importDevDrawJson,
   importSqlDdlToSlot,
@@ -17,10 +20,12 @@ import {
   sanitizeDslId,
   serializeSlotToDsl,
   syncFlowsInDsl,
+  type AlignDirection,
   type CanvasExpandMode,
   type CanvasSlot,
   type CanvasToolMode,
   type CrossLayerRef,
+  type DistributeAxis,
   type DslDiagnostic,
   type EdgeRoutingMode,
   type EdgeWaypoint,
@@ -55,7 +60,9 @@ interface WorkbenchState {
   activeProjectId: string | null;
   activeLayerIndex: number;
   selectedNodeId: string | null;
+  selectedNodeIds: string[];
   selectedEdgeId: string | null;
+  focusNodeRequest: { nodeId: string; nonce: number } | null;
   inspectorOpen: boolean;
   activeTool: CanvasToolMode;
   leftTab: LeftActivityTab | null;
@@ -74,10 +81,11 @@ interface WorkbenchState {
   isFlowPlaying: boolean;
   flowPickEdgeMode: boolean;
 
-  // Export, Import, Cross-Ref & Style Customizer Modals
+  // Export, Import, Cross-Ref, Command Palette & Style Customizer Modals
   exportModalOpen: boolean;
   importModalOpen: boolean;
   crossRefModalOpen: boolean;
+  commandPaletteOpen: boolean;
   styleModalOpen: boolean;
   styleTargetNodeId: string | null;
 
@@ -116,6 +124,8 @@ interface WorkbenchState {
   renameSubCanvas: (layerIndex: number, subIndex: number, name: string) => void;
   deleteSubCanvas: (layerIndex: number, subIndex: number) => void;
   setCrossRefModalOpen: (open: boolean) => void;
+  setCommandPaletteOpen: (open: boolean) => void;
+  focusNode: (nodeId: string) => void;
   addCrossLayerRefNode: (ref: CrossLayerRef, x?: number, y?: number) => boolean;
   drillToNodeTarget: (node: EntityNode) => void;
 
@@ -140,14 +150,21 @@ interface WorkbenchState {
 
   // Canvas editing
   selectNode: (nodeId: string | null, openInspector?: boolean) => void;
+  selectNodes: (nodeIds: string[]) => void;
   selectEdge: (edgeId: string | null, openInspector?: boolean) => void;
   openNodeInspector: (nodeId: string) => void;
   openEdgeInspector: (edgeId: string) => void;
   closeInspector: () => void;
   addNodeFromPrimitive: (kind: string, x: number, y: number) => void;
   moveNode: (nodeId: string, x: number, y: number) => void;
+  moveNodes: (updates: Array<{ id: string; x: number; y: number }>) => void;
+  resizeNode: (nodeId: string, x: number, y: number, w: number, h: number) => void;
   updateNode: (nodeId: string, patch: Partial<EntityNode>) => void;
   deleteNode: (nodeId: string) => void;
+  deleteNodes: (nodeIds: string[]) => void;
+  alignSelectedNodes: (direction: AlignDirection) => void;
+  distributeSelectedNodes: (axis: DistributeAxis) => void;
+  groupSelectedNodes: () => void;
   duplicateNode: (nodeId: string) => void;
   disconnectNode: (nodeId: string) => void;
   toggleNodePinned: (nodeId: string) => void;
@@ -295,7 +312,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     activeProjectId: null,
     activeLayerIndex: 0,
     selectedNodeId: null,
+    selectedNodeIds: [],
     selectedEdgeId: null,
+    focusNodeRequest: null,
     inspectorOpen: false,
     activeTool: 'select',
     leftTab: null,
@@ -315,6 +334,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     exportModalOpen: false,
     importModalOpen: false,
     crossRefModalOpen: false,
+    commandPaletteOpen: false,
     styleModalOpen: false,
     styleTargetNodeId: null,
 
@@ -892,6 +912,19 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       set({ crossRefModalOpen: open });
     },
 
+    setCommandPaletteOpen(open) {
+      set({ commandPaletteOpen: open });
+    },
+
+    focusNode(nodeId) {
+      set({
+        selectedNodeId: nodeId,
+        selectedNodeIds: [nodeId],
+        selectedEdgeId: null,
+        focusNodeRequest: { nodeId, nonce: Date.now() },
+      });
+    },
+
     addCrossLayerRefNode(ref, x, y) {
       const { activeProjectId, activeLayerIndex, projects } = get();
       const proj = projects.find((p) => p.id === activeProjectId);
@@ -1261,6 +1294,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     selectNode(nodeId, openInspector) {
       set((state) => ({
         selectedNodeId: nodeId,
+        selectedNodeIds: nodeId ? [nodeId] : [],
         selectedEdgeId: null,
         inspectorOpen:
           nodeId === null
@@ -1271,10 +1305,27 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       }));
     },
 
+    selectNodes(nodeIds) {
+      const unique = Array.from(new Set(nodeIds));
+      set((state) => {
+        const same =
+          unique.length === state.selectedNodeIds.length &&
+          unique.every((id, i) => id === state.selectedNodeIds[i]);
+        if (same) return state;
+        return {
+          selectedNodeIds: unique,
+          selectedNodeId: unique[0] ?? null,
+          selectedEdgeId: null,
+          inspectorOpen: unique.length === 1 ? state.inspectorOpen : false,
+        };
+      });
+    },
+
     selectEdge(edgeId, openInspector) {
       set((state) => ({
         selectedEdgeId: edgeId,
         selectedNodeId: null,
+        selectedNodeIds: [],
         inspectorOpen:
           edgeId === null
             ? false
@@ -1322,6 +1373,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         kv: isKv ? { ttl: '3600s', policy: 'allkeys-lru' } : undefined,
         x,
         y,
+        w: kind === 'group' ? 440 : undefined,
+        h: kind === 'group' ? 280 : undefined,
         pinned: true,
       };
 
@@ -1333,10 +1386,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           : serializeSlotToDsl(slot);
       });
       const prevRecent = get().recentKinds.filter((k) => k !== kind);
-      const nextRecent = ['assumption', 'decision', 'note'].includes(kind)
+      const nextRecent = ['assumption', 'decision', 'note', 'group'].includes(kind)
         ? get().recentKinds
         : [kind, ...prevRecent].slice(0, 5);
-      set({ projects: next, selectedNodeId: id, selectedEdgeId: null, recentKinds: nextRecent });
+      set({
+        projects: next,
+        selectedNodeId: id,
+        selectedNodeIds: [id],
+        selectedEdgeId: null,
+        recentKinds: nextRecent,
+      });
       pushHistoryForCurrent(next);
       void persist(next);
     },
@@ -1348,6 +1407,41 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         if (target) {
           target.x = x;
           target.y = y;
+          target.pinned = true;
+        }
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    moveNodes(updates) {
+      if (updates.length === 0) return;
+      const byId = new Map(updates.map((u) => [u.id, u]));
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        for (const node of slot.nodes) {
+          const u = byId.get(node.id);
+          if (u) {
+            node.x = u.x;
+            node.y = u.y;
+            node.pinned = true;
+          }
+        }
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    resizeNode(nodeId, x, y, w, h) {
+      // Pure geometry edit — preserves .arch DSL untouched
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const target = slot.nodes.find((n) => n.id === nodeId);
+        if (target) {
+          target.x = x;
+          target.y = y;
+          target.w = w;
+          target.h = h;
           target.pinned = true;
         }
       });
@@ -1434,12 +1528,115 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         const patched = prevDsl ? deleteEntityFromDsl(prevDsl, nodeId, prevNodes, prevEdges) : null;
         slot.dslSource = patched ?? serializeSlotToDsl(slot);
       });
+      const remainingSelected = get().selectedNodeIds.filter((id) => id !== nodeId);
       set({
         projects: next,
-        selectedNodeId: get().selectedNodeId === nodeId ? null : get().selectedNodeId,
+        selectedNodeId: remainingSelected[0] ?? null,
+        selectedNodeIds: remainingSelected,
       });
       pushHistoryForCurrent(next);
       void persist(next);
+    },
+
+    deleteNodes(nodeIds) {
+      const idSet = new Set(nodeIds);
+      if (idSet.size === 0) return;
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        let currentDsl = slot.dslSource;
+        let currentNodes = [...slot.nodes];
+        let currentEdges = [...slot.edges];
+
+        for (const id of idSet) {
+          if (currentDsl) {
+            const patched = deleteEntityFromDsl(currentDsl, id, currentNodes, currentEdges);
+            currentDsl = patched ?? undefined;
+          }
+          currentNodes = currentNodes.filter((n) => n.id !== id);
+          currentEdges = currentEdges.filter((e) => e.from !== id && e.to !== id);
+        }
+
+        currentNodes.forEach((n) => {
+          if (n.linkNodeId && idSet.has(n.linkNodeId)) n.linkNodeId = null;
+        });
+
+        slot.nodes = currentNodes;
+        slot.edges = currentEdges;
+        slot.dslSource = currentDsl ?? serializeSlotToDsl(slot);
+      });
+      set({
+        projects: next,
+        selectedNodeId: null,
+        selectedNodeIds: [],
+        inspectorOpen: false,
+      });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast(`已批量删除 ${idSet.size} 个实体（Ctrl+Z 可撤销）`);
+    },
+
+    alignSelectedNodes(direction) {
+      const ids = get().selectedNodeIds;
+      if (ids.length < 2) return;
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        slot.nodes = alignNodes(slot.nodes, ids, direction);
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+    },
+
+    distributeSelectedNodes(axis) {
+      const ids = get().selectedNodeIds;
+      if (ids.length < 3) return;
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        slot.nodes = distributeNodes(slot.nodes, ids, axis);
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast(axis === 'horizontal' ? '已完成水平等距分布' : '已完成垂直等距分布');
+    },
+
+    groupSelectedNodes() {
+      const ids = get().selectedNodeIds;
+      if (ids.length === 0) return;
+      let createdId: string | null = null;
+      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+        const bounds = computeGroupBoundsForNodes(slot.nodes, ids, 36);
+        if (!bounds) return;
+        createdId = `grp-${Date.now().toString(36)}`;
+        const groupCount = slot.nodes.filter((n) => n.kind === 'group').length + 1;
+        const groupNode: EntityNode = {
+          id: createdId,
+          dslId: `group_${groupCount}_${Math.random().toString(36).slice(2, 4)}`,
+          kind: 'group',
+          title: `架构分组边界 ${groupCount}`,
+          tag: 'GROUP · BOUNDARY',
+          note: 'VPC / 限界上下文边界',
+          color: 'violet',
+          icon: 'layers',
+          x: bounds.x,
+          y: bounds.y,
+          w: bounds.w,
+          h: bounds.h,
+          pinned: true,
+        };
+        const baseDsl = slot.dslSource;
+        slot.nodes.unshift(groupNode);
+        slot.dslSource = baseDsl
+          ? appendEntityToDsl(baseDsl, groupNode, slot.nodes)
+          : serializeSlotToDsl(slot);
+      });
+      if (!createdId) return;
+      set({
+        projects: next,
+        selectedNodeId: createdId,
+        selectedNodeIds: [createdId],
+        selectedEdgeId: null,
+      });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast('已创建分组容器包裹选中实体（选中边角可拖拽缩放）');
     },
 
     duplicateNode(nodeId) {

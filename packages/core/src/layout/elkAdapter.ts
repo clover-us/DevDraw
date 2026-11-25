@@ -1,6 +1,6 @@
 import ELK, { type ElkNode } from 'elkjs/lib/elk.bundled.js';
 import type { EntityNode, RelationEdge } from '../types';
-import { getAnnotationKind, isCollapsibleEntity } from '../primitives';
+import { getAnnotationKind, isCollapsibleEntity, isGroupEntity } from '../primitives';
 
 export interface AutoLayoutOptions {
   direction?: 'RIGHT' | 'DOWN';
@@ -58,9 +58,11 @@ export async function computeAutoLayout(
 ): Promise<AutoLayoutResult> {
   const { direction = 'RIGHT', respectPinned = false, nodeSpacing = 56 } = options;
 
+  const groupNodes = nodes.filter((n) => isGroupEntity(n));
+  const groupIds = new Set(groupNodes.map((n) => n.id));
   const linkedAnnotations = nodes.filter((n) => !!getAnnotationKind(n) && !!n.linkNodeId);
   const linkedAnnIds = new Set(linkedAnnotations.map((n) => n.id));
-  const primaryNodes = nodes.filter((n) => !linkedAnnIds.has(n.id));
+  const primaryNodes = nodes.filter((n) => !linkedAnnIds.has(n.id) && !groupIds.has(n.id));
   const primaryIds = new Set(primaryNodes.map((n) => n.id));
 
   const primaryEdges = edges.filter((e) => primaryIds.has(e.from) && primaryIds.has(e.to));
@@ -180,6 +182,9 @@ export async function computeAutoLayout(
     });
   }
 
+  // Keep group boundary frames preserved underneath laid-out entities
+  const finalNodes: EntityNode[] = [...groupNodes.map((g) => ({ ...g })), ...nextNodes];
+
   const nextEdges: RelationEdge[] = edges.map((e) => {
     const waypoints = waypointsMap.get(e.id);
     if (!respectPinned) {
@@ -193,5 +198,5 @@ export async function computeAutoLayout(
     return waypoints ? { ...e, waypoints } : { ...e };
   });
 
-  return { nodes: nextNodes, edges: nextEdges };
+  return { nodes: finalNodes, edges: nextEdges };
 }

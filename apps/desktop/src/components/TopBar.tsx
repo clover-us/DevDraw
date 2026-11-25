@@ -10,6 +10,7 @@ import {
   Play,
   Redo2,
   RefreshCw,
+  Search,
   Share,
   Square,
   Undo2,
@@ -46,6 +47,7 @@ export const TopBar: React.FC = () => {
     toggleSimulation,
     setExportModalOpen,
     setImportModalOpen,
+    setCommandPaletteOpen,
   } = useWorkbenchStore();
 
   const project = projects.find((p) => p.id === activeProjectId);
@@ -222,6 +224,16 @@ export const TopBar: React.FC = () => {
         data-tauri-drag-region
         className="flex-1 min-w-0 flex items-center justify-end gap-1.5"
       >
+        <button
+          type="button"
+          onClick={() => setCommandPaletteOpen(true)}
+          title="全局命令面板与实体搜索定位 (Ctrl+K)"
+          className="h-7 flex items-center gap-1 px-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.09] border border-[var(--dd-border-subtle)] text-[var(--dd-text-secondary)] hover:text-violet-300 text-[11px] font-mono whitespace-nowrap shrink-0 transition-colors"
+        >
+          <Search className="w-3.5 h-3.5 shrink-0" />
+          <span className="hidden 2xl:inline">Ctrl+K</span>
+        </button>
+
         <div className="flex items-center gap-0.5 shrink-0">
           <button
             type="button"
