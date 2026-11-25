@@ -11,8 +11,10 @@ import {
   Link2,
   Moon,
   Plus,
+  RefreshCw,
   Route,
   Search,
+  Settings,
   Share,
   Sun,
   Wand2,
@@ -51,6 +53,8 @@ export const CommandPalette: React.FC = () => {
     setImportModalOpen,
     setExportModalOpen,
     copyAiPromptContext,
+    openSettingsModal,
+    checkForUpdates,
     toggleTheme,
   } = useWorkbenchStore();
 
@@ -169,6 +173,28 @@ export const CommandPalette: React.FC = () => {
         run: () => setExportModalOpen(true),
       },
       {
+        id: 'act-settings',
+        category: '快捷操作',
+        title: '打开应用设置',
+        subtitle: '画布偏好、本地目录同步与自动更新',
+        shortcut: 'Ctrl+,',
+        icon: Settings,
+        keywords: 'settings preferences config 设置 偏好 更新',
+        run: () => openSettingsModal('general'),
+      },
+      {
+        id: 'act-check-update',
+        category: '快捷操作',
+        title: '检查软件更新',
+        subtitle: '连接 GitHub Releases 检测最新 DevDraw 版本',
+        icon: RefreshCw,
+        keywords: 'update upgrade release 检查 更新 升级 版本',
+        run: () => {
+          openSettingsModal('updates');
+          void checkForUpdates(false);
+        },
+      },
+      {
         id: 'act-theme',
         category: '快捷操作',
         title: theme === 'dark' ? '切换至晴昼白板画布' : '切换至暗夜紫墨画布',
@@ -256,6 +282,8 @@ export const CommandPalette: React.FC = () => {
     setImportModalOpen,
     setExportModalOpen,
     copyAiPromptContext,
+    openSettingsModal,
+    checkForUpdates,
     toggleTheme,
   ]);
 

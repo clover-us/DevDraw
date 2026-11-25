@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   Copy,
@@ -7,11 +7,13 @@ import {
   FolderOpen,
   GitBranch,
   LayoutTemplate,
+  Menu,
   MoreVertical,
   Network,
   Plus,
   RefreshCw,
   Search,
+  Settings,
   Trash2,
   Unlink,
   X,
@@ -19,8 +21,9 @@ import {
   Database,
 } from 'lucide-react';
 import { LAYER_TEMPLATES, type LayerTemplateName, type ProjectCategory } from '@devdraw/core';
-import { storageAdapter, supportsLocalDirectoryPicker } from '../storage/adapter';
+import { isTauriRuntime, storageAdapter, supportsLocalDirectoryPicker } from '../storage/adapter';
 import { useWorkbenchStore } from '../store/useWorkbenchStore';
+import { APP_VERSION } from '../utils/updater';
 import { WindowControls } from './WindowControls';
 
 function formatWorkspaceFolderName(path: string): string {
@@ -41,6 +44,10 @@ export const LauncherView: React.FC = () => {
     reloadWorkspaceFolder,
     unbindWorkspaceFolder,
     setImportModalOpen,
+    openSettingsModal,
+    resetDemoWorkspace,
+    updateCheckState,
+    updateInfo,
   } = useWorkbenchStore();
 
   const canPickFolder = supportsLocalDirectoryPicker();
@@ -48,9 +55,35 @@ export const LauncherView: React.FC = () => {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<ProjectCategory>('personal');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [appMenuOpen, setAppMenuOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [selectedTemplates, setSelectedTemplates] = useState<LayerTemplateName[]>(['系统架构拓扑']);
+
+  // Ctrl+N shortcut on launcher to create a blank project
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const inInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+      if (inInput) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        createProject('未命名项目', ['空白项目']);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [createProject]);
+
+  const handleExitApp = async () => {
+    setAppMenuOpen(false);
+    if (isTauriRuntime()) {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().close();
+    } else {
+      window.close();
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -86,7 +119,10 @@ export const LauncherView: React.FC = () => {
   return (
     <div
       className="relative min-h-screen w-full flex flex-col bg-[#14111a] text-zinc-100 overflow-y-auto"
-      onClick={() => setOpenMenuId(null)}
+      onClick={() => {
+        setOpenMenuId(null);
+        setAppMenuOpen(false);
+      }}
     >
       {/* Atmospheric Spotlight */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
@@ -97,11 +133,126 @@ export const LauncherView: React.FC = () => {
       {/* Top Window Bar (Frameless Custom Titlebar) */}
       <header
         data-tauri-drag-region
-        className="relative z-20 h-11 px-4 flex items-center justify-between border-b border-white/[0.05] bg-[#131019]/75 backdrop-blur-md select-none"
+        className="relative z-30 h-11 px-3 sm:px-4 flex items-center justify-between border-b border-white/[0.05] bg-[#131019]/75 backdrop-blur-md select-none"
       >
-        <div data-tauri-drag-region className="flex items-center gap-2 text-xs text-zinc-400 font-mono">
-          <span className="w-2 h-2 rounded-full bg-violet-400 pointer-events-none" />
-          <span className="pointer-events-none">DevDraw Studio</span>
+        <div className="flex items-center gap-2.5">
+          {/* Top-left Hamburger Application Menu */}
+          <div className="relative" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => {
+                setOpenMenuId(null);
+                setAppMenuOpen((v) => !v);
+              }}
+              title="应用菜单与设置"
+              className={`relative w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                appMenuOpen
+                  ? 'bg-white/[0.1] text-white'
+                  : 'text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.07]'
+              }`}
+            >
+              <Menu className="w-4 h-4" />
+              {updateCheckState === 'available' && (
+                <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              )}
+            </button>
+
+            {appMenuOpen && (
+              <div className="absolute left-0 top-full mt-2 w-60 rounded-2xl bg-[#1a1524]/98 border border-white/12 shadow-[0_20px_50px_rgba(0,0,0,0.65)] backdrop-blur-xl py-1.5 z-50 text-[13px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAppMenuOpen(false);
+                    createProject('未命名项目', ['空白项目']);
+                  }}
+                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/[0.07] text-zinc-100 transition-colors"
+                >
+                  <span>新建空白项目</span>
+                  <span className="text-[11px] font-mono text-zinc-500">Ctrl+N</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAppMenuOpen(false);
+                    setCreateModalOpen(true);
+                  }}
+                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/[0.07] text-zinc-100 transition-colors"
+                >
+                  <span>从模板新建</span>
+                  <span className="text-[11px] font-mono text-zinc-500">
+                    {LAYER_TEMPLATES.length} 套模板
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAppMenuOpen(false);
+                    setImportModalOpen(true);
+                  }}
+                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/[0.07] text-zinc-100 transition-colors"
+                >
+                  <span>导入本地项目...</span>
+                </button>
+
+                <div className="my-1.5 border-t border-white/[0.07]" />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAppMenuOpen(false);
+                    void openWorkspaceFolder();
+                  }}
+                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/[0.07] text-zinc-100 transition-colors"
+                >
+                  <span>打开本地工作区目录</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAppMenuOpen(false);
+                    openSettingsModal(updateCheckState === 'available' ? 'updates' : 'general');
+                  }}
+                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/[0.07] text-zinc-100 transition-colors"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Settings className="w-3.5 h-3.5 text-violet-400" />
+                    <span>设置</span>
+                    {updateCheckState === 'available' && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-mono">
+                        新版本
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[11px] font-mono text-zinc-500">Ctrl+,</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAppMenuOpen(false);
+                    resetDemoWorkspace();
+                  }}
+                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/[0.07] text-zinc-200 transition-colors"
+                >
+                  <span>重置演示工作区数据</span>
+                </button>
+
+                <div className="my-1.5 border-t border-white/[0.07]" />
+
+                <button
+                  type="button"
+                  onClick={() => void handleExitApp()}
+                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-rose-500/15 text-rose-400 transition-colors"
+                >
+                  <span>退出桌面端</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div data-tauri-drag-region className="flex items-center gap-2 text-xs text-zinc-400 font-mono">
+            <span className="w-2 h-2 rounded-full bg-violet-400 pointer-events-none" />
+            <span className="pointer-events-none">DevDraw Studio</span>
+          </div>
         </div>
 
         <div
@@ -113,9 +264,23 @@ export const LauncherView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2.5">
-          <span data-tauri-drag-region className="text-[11px] font-mono text-zinc-500">
-            v0.2.0
-          </span>
+          {updateCheckState === 'available' && updateInfo && (
+            <button
+              type="button"
+              onClick={() => openSettingsModal('updates')}
+              className="px-2 py-0.5 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/35 text-[10.5px] font-mono text-emerald-300 transition-colors"
+            >
+              发现新版本 v{updateInfo.latestVersion}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => openSettingsModal('updates')}
+            title="查看版本信息与检查更新"
+            className="text-[11px] font-mono text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            v{APP_VERSION}
+          </button>
           <WindowControls variant="launcher" />
         </div>
       </header>

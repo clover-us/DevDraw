@@ -13,6 +13,7 @@ import { ExportModal } from './components/ExportModal';
 import { ImportModal } from './components/ImportModal';
 import { CrossLayerRefModal } from './components/CrossLayerRefModal';
 import { CommandPalette } from './components/CommandPalette';
+import { SettingsModal } from './components/SettingsModal';
 import { StyleCustomizerModal } from './components/StyleCustomizerModal';
 
 export const App: React.FC = () => {
@@ -26,6 +27,8 @@ export const App: React.FC = () => {
     selectedEdgeId,
     focusNodeRequest,
     commandPaletteOpen,
+    settingsModalOpen,
+    appSettings,
     inspectorOpen,
     theme,
     expandMode,
@@ -64,6 +67,8 @@ export const App: React.FC = () => {
     distributeSelectedNodes,
     groupSelectedNodes,
     setCommandPaletteOpen,
+    openSettingsModal,
+    closeSettingsModal,
     connectNodes,
     updateEdge,
     updateEdgeWaypoints,
@@ -103,7 +108,12 @@ export const App: React.FC = () => {
 
   // Watch bound local workspace directory for external IDE / Git / AI edits and hot-reload
   useEffect(() => {
-    if (!activeProjectForWatch || !activeWorkspacePath || !storageAdapter.watchWorkspaceDirectory) {
+    if (
+      !appSettings.autoReloadWorkspace ||
+      !activeProjectForWatch ||
+      !activeWorkspacePath ||
+      !storageAdapter.watchWorkspaceDirectory
+    ) {
       return;
     }
     let disposed = false;
@@ -124,14 +134,32 @@ export const App: React.FC = () => {
       disposed = true;
       stopWatch?.();
     };
-  }, [activeProjectId, activeWorkspacePath, reloadWorkspaceFolder]);
+  }, [
+    appSettings.autoReloadWorkspace,
+    activeProjectId,
+    activeWorkspacePath,
+    reloadWorkspaceFolder,
+  ]);
 
   // Auto-play timer for Step-by-step Flow playback
   useEffect(() => {
     if (!simulating || !isFlowPlaying) return;
-    const id = setInterval(() => stepFlow(1), 1600);
+    const id = setInterval(() => stepFlow(1), appSettings.flowAutoPlayIntervalMs);
     return () => clearInterval(id);
-  }, [simulating, isFlowPlaying, stepFlow]);
+  }, [simulating, isFlowPlaying, stepFlow, appSettings.flowAutoPlayIntervalMs]);
+
+  // Global Ctrl+, shortcut for Settings (works in both Launcher and Workbench)
+  useEffect(() => {
+    const onSettingsKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+        e.preventDefault();
+        if (settingsModalOpen) closeSettingsModal();
+        else openSettingsModal('general');
+      }
+    };
+    window.addEventListener('keydown', onSettingsKey);
+    return () => window.removeEventListener('keydown', onSettingsKey);
+  }, [settingsModalOpen, openSettingsModal, closeSettingsModal]);
 
   // Global keyboard shortcuts (V/L/P modes, A/D/T annotations, Esc, Delete, Ctrl+\, Ctrl+L, Ctrl+Z/Y)
   useEffect(() => {
@@ -261,6 +289,7 @@ export const App: React.FC = () => {
       <>
         <LauncherView />
         <ImportModal />
+        <SettingsModal />
         {toastMessage && (
           <div className="fixed top-[56px] right-4 z-50 px-3.5 py-2 rounded-xl bg-[#1b1625]/95 border border-violet-400/35 text-xs text-zinc-100 shadow-2xl backdrop-blur-md">
             {toastMessage}
@@ -364,6 +393,7 @@ export const App: React.FC = () => {
       <ImportModal />
       <CrossLayerRefModal />
       <CommandPalette />
+      <SettingsModal />
       <StyleCustomizerModal />
 
       {toastMessage && (

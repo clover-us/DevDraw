@@ -1,7 +1,9 @@
 import {
   createDefaultProjects,
+  DEFAULT_APP_SETTINGS,
   deserializeWorkspaceFilesToProject,
   serializeProjectToWorkspaceFiles,
+  type AppSettings,
   type ProjectDocument,
   type StorageAdapter,
   type WorkspaceDiagnostic,
@@ -9,6 +11,7 @@ import {
 
 const PROJECTS_KEY = 'devdraw_studio_projects_v1';
 const THEME_KEY = 'devdraw_canvas_theme_v1';
+const SETTINGS_KEY = 'devdraw_app_settings_v1';
 
 export function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -218,6 +221,29 @@ export const storageAdapter: StorageAdapter = {
   async saveTheme(theme: 'dark' | 'light'): Promise<void> {
     try {
       localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      // Ignore quota errors
+    }
+  },
+
+  async loadSettings(): Promise<AppSettings> {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          return { ...DEFAULT_APP_SETTINGS, ...parsed };
+        }
+      }
+    } catch {
+      // Fallback to default settings
+    }
+    return { ...DEFAULT_APP_SETTINGS };
+  },
+
+  async saveSettings(settings: AppSettings): Promise<void> {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch {
       // Ignore quota errors
     }

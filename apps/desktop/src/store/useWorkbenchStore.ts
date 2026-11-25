@@ -8,6 +8,7 @@ import {
   computeAutoLayout,
   computeGroupBoundsForNodes,
   createDefaultProjects,
+  DEFAULT_APP_SETTINGS,
   deleteEdgesFromDsl,
   deleteEntityFromDsl,
   distributeNodes,
@@ -23,6 +24,7 @@ import {
   serializeSlotToDsl,
   syncFlowsInDsl,
   type AlignDirection,
+  type AppSettings,
   type CanvasExpandMode,
   type CanvasSlot,
   type CanvasToolMode,
@@ -45,8 +47,15 @@ import {
   type SubCanvasEngine,
 } from '@devdraw/core';
 import { storageAdapter } from '../storage/adapter';
+import {
+  checkForAppUpdate,
+  downloadAndInstallUpdate,
+  type UpdateCheckResult,
+} from '../utils/updater';
 
 export type LeftActivityTab = 'palette' | 'layers' | 'flows' | 'dsl' | 'tools' | 'versions';
+export type SettingsTab = 'general' | 'workspace' | 'flow' | 'updates';
+export type UpdateCheckState = 'idle' | 'checking' | 'available' | 'up-to-date' | 'error';
 export type SaveState = 'saved' | 'saving' | 'error';
 
 interface HistoryEntry {
@@ -83,13 +92,22 @@ interface WorkbenchState {
   isFlowPlaying: boolean;
   flowPickEdgeMode: boolean;
 
-  // Export, Import, Cross-Ref, Command Palette & Style Customizer Modals
+  // Export, Import, Cross-Ref, Command Palette, Settings & Style Customizer Modals
   exportModalOpen: boolean;
   importModalOpen: boolean;
   crossRefModalOpen: boolean;
   commandPaletteOpen: boolean;
+  settingsModalOpen: boolean;
+  settingsInitialTab: SettingsTab;
   styleModalOpen: boolean;
   styleTargetNodeId: string | null;
+
+  // Persistent App Settings & Auto-Update state
+  appSettings: AppSettings;
+  updateCheckState: UpdateCheckState;
+  updateInfo: UpdateCheckResult | null;
+  updateError: string | null;
+  updateInstalling: boolean;
 
   // Undo/Redo per active slot
   history: HistoryEntry[];
@@ -128,6 +146,13 @@ interface WorkbenchState {
   deleteSubCanvas: (layerIndex: number, subIndex: number) => void;
   setCrossRefModalOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
+  openSettingsModal: (tab?: SettingsTab) => void;
+  closeSettingsModal: () => void;
+  updateAppSettings: (patch: Partial<AppSettings>) => void;
+  resetAppSettings: () => void;
+  resetDemoWorkspace: () => void;
+  checkForUpdates: (silent?: boolean) => Promise<void>;
+  installAvailableUpdate: () => Promise<void>;
   focusNode: (nodeId: string) => void;
   addCrossLayerRefNode: (ref: CrossLayerRef, x?: number, y?: number) => boolean;
   drillToNodeTarget: (node: EntityNode) => void;
@@ -283,6 +308,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       storageAdapter.syncWorkspaceDirectory
     ) {
       if (workspaceSyncTimer) clearTimeout(workspaceSyncTimer);
+      const delayMs = get().appSettings.workspaceSyncDelayMs ?? 240;
       workspaceSyncTimer = setTimeout(async () => {
         try {
           const synced = await storageAdapter.syncWorkspaceDirectory!(targetProject);
@@ -290,7 +316,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         } catch {
           set({ saveState: 'error' });
         }
-      }, 240);
+      }, delayMs);
       return;
     }
 
@@ -343,8 +369,16 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     importModalOpen: false,
     crossRefModalOpen: false,
     commandPaletteOpen: false,
+    settingsModalOpen: false,
+    settingsInitialTab: 'general',
     styleModalOpen: false,
     styleTargetNodeId: null,
+
+    appSettings: { ...DEFAULT_APP_SETTINGS },
+    updateCheckState: 'idle',
+    updateInfo: null,
+    updateError: null,
+    updateInstalling: false,
 
     history: [],
     historyIndex: -1,
@@ -352,11 +386,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     clipboard: null,
 
     async hydrate() {
-      const [projects, theme] = await Promise.all([
+      const [projects, theme, appSettings] = await Promise.all([
         storageAdapter.loadProjects(),
         storageAdapter.loadTheme(),
+        storageAdapter.loadSettings ? storageAdapter.loadSettings() : Promise.resolve({ ...DEFAULT_APP_SETTINGS }),
       ]);
-      set({ projects, theme });
+      set({ projects, theme, appSettings });
+      if (appSettings.autoCheckUpdates) {
+        void get().checkForUpdates(true);
+      }
     },
 
     showToast(msg) {
@@ -932,6 +970,90 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
     setCommandPaletteOpen(open) {
       set({ commandPaletteOpen: open });
+    },
+
+    openSettingsModal(tab = 'general') {
+      set({ settingsModalOpen: true, settingsInitialTab: tab });
+    },
+
+    closeSettingsModal() {
+      set({ settingsModalOpen: false });
+    },
+
+    updateAppSettings(patch) {
+      const next = { ...get().appSettings, ...patch };
+      set({ appSettings: next });
+      void storageAdapter.saveSettings?.(next);
+    },
+
+    resetAppSettings() {
+      const fresh = { ...DEFAULT_APP_SETTINGS };
+      set({ appSettings: fresh });
+      void storageAdapter.saveSettings?.(fresh);
+      get().showToast('已恢复全部默认设置');
+    },
+
+    resetDemoWorkspace() {
+      const defaults = createDefaultProjects();
+      set({
+        projects: defaults,
+        activeProjectId: null,
+        selectedNodeId: null,
+        selectedNodeIds: [],
+        selectedEdgeId: null,
+        inspectorOpen: false,
+      });
+      void persist(defaults, null);
+      get().showToast('已重置演示工作区数据');
+    },
+
+    async checkForUpdates(silent = false) {
+      if (get().updateCheckState === 'checking') return;
+      set({ updateCheckState: 'checking', updateError: null });
+      try {
+        const channel = get().appSettings.updateChannel;
+        const result = await checkForAppUpdate(channel);
+        const stampedSettings = { ...get().appSettings, lastUpdateCheckAt: Date.now() };
+        set({
+          appSettings: stampedSettings,
+          updateCheckState: result.status,
+          updateInfo: result,
+          updateError: null,
+        });
+        void storageAdapter.saveSettings?.(stampedSettings);
+
+        if (result.status === 'available') {
+          get().showToast(`发现新版本 v${result.latestVersion}，可在「设置 → 自动更新」中一键升级`);
+        } else if (!silent) {
+          get().showToast(`当前已是最新版本 (v${result.currentVersion})`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '检查更新失败，请稍后重试';
+        set({ updateCheckState: 'error', updateError: msg });
+        if (!silent) {
+          get().showToast(msg);
+        }
+      }
+    },
+
+    async installAvailableUpdate() {
+      const info = get().updateInfo;
+      if (!info?.installerAsset) {
+        get().showToast('当前发布页未找到适用的 Windows 安装包，请手动前往下载');
+        return;
+      }
+      set({ updateInstalling: true, updateError: null });
+      try {
+        get().showToast(`正在下载 ${info.installerAsset.name}...`);
+        await downloadAndInstallUpdate(info.installerAsset);
+        get().showToast('安装包已启动，请按向导完成更新');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '下载或启动安装程序失败';
+        set({ updateError: msg });
+        get().showToast(msg);
+      } finally {
+        set({ updateInstalling: false });
+      }
     },
 
     focusNode(nodeId) {
@@ -1967,7 +2089,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           sourcePort: isFieldLink ? undefined : sourcePort,
           targetPort: isFieldLink ? undefined : targetPort,
           label: isFieldLink ? '1 : N' : 'calls',
-          routing: isFieldLink ? 'orthogonal' : 'bezier',
+          routing: isFieldLink ? 'orthogonal' : get().appSettings.defaultEdgeRouting,
         };
         const prevDsl = slot.dslSource;
         const prevEdges = [...slot.edges];
@@ -2166,7 +2288,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
       if (!active) return;
       const result = await computeAutoLayout(active.slot.nodes, active.slot.edges, {
-        direction: 'RIGHT',
+        direction: get().appSettings.defaultLayoutDirection,
         respectPinned,
       });
       const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {

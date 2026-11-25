@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -253,6 +254,80 @@ fn save_export_file(path: String, bytes: Vec<u8>) -> Result<(), String> {
     fs::write(target, bytes).map_err(|e| format!("Failed to write export file: {e}"))
 }
 
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("Only http/https URLs are allowed".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {e}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {e}"))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn download_and_launch_installer(url: String, file_name: String) -> Result<String, String> {
+    const ALLOWED_PREFIX: &str = "https://github.com/clover-us/DevDraw/releases/download/";
+    if !url.starts_with(ALLOWED_PREFIX) {
+        return Err("仅允许从官方 DevDraw GitHub Releases 下载安装包".to_string());
+    }
+    let safe_name = Path::new(&file_name)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "非法安装包文件名".to_string())?;
+    if !(safe_name.ends_with(".exe") || safe_name.ends_with(".msi")) {
+        return Err("仅支持 .exe 或 .msi 安装包".to_string());
+    }
+
+    let update_dir = std::env::temp_dir().join("DevDraw-updates");
+    fs::create_dir_all(&update_dir).map_err(|e| format!("创建临时更新目录失败: {e}"))?;
+    let target_path = update_dir.join(safe_name);
+    let target_str = target_path.to_string_lossy().to_string();
+
+    let output = Command::new("curl.exe")
+        .args(["-fsSL", "-L", "-o", &target_str, &url])
+        .output()
+        .map_err(|e| format!("调用下载工具失败: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("下载安装包失败: {}", stderr.trim()));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if safe_name.ends_with(".msi") {
+            Command::new("msiexec")
+                .args(["/i", &target_str])
+                .spawn()
+                .map_err(|e| format!("启动 MSI 安装程序失败: {e}"))?;
+        } else {
+            Command::new(&target_path)
+                .spawn()
+                .map_err(|e| format!("启动安装程序失败: {e}"))?;
+        }
+    }
+
+    Ok(target_str)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -265,7 +340,9 @@ pub fn run() {
             write_workspace_files,
             watch_workspace_dir,
             unwatch_workspace_dir,
-            save_export_file
+            save_export_file,
+            open_external_url,
+            download_and_launch_installer
         ])
         .run(tauri::generate_context!())
         .expect("error while running DevDraw desktop application");

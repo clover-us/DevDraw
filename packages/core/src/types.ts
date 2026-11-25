@@ -247,6 +247,29 @@ export interface LayoutDocument {
 
 export type ProjectCategory = 'personal' | 'team' | 'archived';
 
+export interface AppSettings {
+  autoCheckUpdates: boolean;
+  updateChannel: 'stable' | 'prerelease';
+  defaultLayoutDirection: 'RIGHT' | 'DOWN';
+  defaultEdgeRouting: EdgeRoutingMode;
+  autoReloadWorkspace: boolean;
+  workspaceSyncDelayMs: 240 | 600 | 1200;
+  dslCursorSync: boolean;
+  flowAutoPlayIntervalMs: 1000 | 1600 | 2500 | 3500;
+  lastUpdateCheckAt?: number;
+}
+
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  autoCheckUpdates: true,
+  updateChannel: 'stable',
+  defaultLayoutDirection: 'RIGHT',
+  defaultEdgeRouting: 'bezier',
+  autoReloadWorkspace: true,
+  workspaceSyncDelayMs: 240,
+  dslCursorSync: true,
+  flowAutoPlayIntervalMs: 1600,
+};
+
 export interface ProjectDocument {
   id: string;
   title: string;
@@ -272,6 +295,8 @@ export interface StorageAdapter {
   saveProjects(projects: ProjectDocument[]): Promise<boolean>;
   loadTheme(): Promise<'dark' | 'light'>;
   saveTheme(theme: 'dark' | 'light'): Promise<void>;
+  loadSettings?(): Promise<AppSettings>;
+  saveSettings?(settings: AppSettings): Promise<void>;
   exportWorkspaceDirectory?(project: ProjectDocument, rootDir: string): Promise<void>;
   openWorkspaceDirectory?(): Promise<{
     project: ProjectDocument;

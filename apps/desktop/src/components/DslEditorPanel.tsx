@@ -29,6 +29,7 @@ export const DslEditorPanel: React.FC = () => {
     dslSplitOpen,
     dslDiagnostics,
     theme,
+    appSettings,
     applyDslSource,
     copyAiPromptContext,
     selectNode,
@@ -53,11 +54,13 @@ export const DslEditorPanel: React.FC = () => {
   const cmRef = useRef<ReactCodeMirrorRef | null>(null);
   const isEditorDrivenSelectionRef = useRef(false);
 
-  // Keep latest nodes/edges in refs so CodeMirror extensions stay referentially stable
+  // Keep latest nodes/edges/settings in refs so CodeMirror extensions stay referentially stable
   const latestNodesRef = useRef(active?.slot.nodes ?? []);
   const latestEdgesRef = useRef(active?.slot.edges ?? []);
+  const dslCursorSyncRef = useRef(appSettings.dslCursorSync);
   latestNodesRef.current = active?.slot.nodes ?? [];
   latestEdgesRef.current = active?.slot.edges ?? [];
+  dslCursorSyncRef.current = appSettings.dslCursorSync;
 
   // Sync canonical store DSL -> local draft ONLY when changed externally or slot switches
   useEffect(() => {
@@ -107,6 +110,7 @@ export const DslEditorPanel: React.FC = () => {
 
   const extensions = useMemo(() => {
     const cursorSyncListener = EditorView.updateListener.of((update: ViewUpdate) => {
+      if (!dslCursorSyncRef.current) return;
       if (!update.selectionSet || update.docChanged) return;
       // Only trigger canvas selection on user pointer/keyboard cursor moves
       const isUserEvent = update.transactions.some(
