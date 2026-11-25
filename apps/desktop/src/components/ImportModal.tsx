@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Database, FileJson, Sparkles, Upload, X } from 'lucide-react';
+import { Database, Download, FileJson, Sparkles, X } from 'lucide-react';
 import { importSqlDdlToSlot } from '@devdraw/core';
 import { useWorkbenchStore } from '../store/useWorkbenchStore';
 
@@ -97,7 +97,7 @@ export const ImportModal: React.FC = () => {
         <div className="px-5 py-3.5 border-b border-white/[0.06] flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300">
-              <Upload className="w-4 h-4" />
+              <Download className="w-4 h-4" />
             </div>
             <div>
               <h3 className="text-sm font-semibold text-white">导入 SQL DDL / DevDraw JSON</h3>
@@ -166,7 +166,7 @@ export const ImportModal: React.FC = () => {
                 onClick={() => fileInputRef.current?.click()}
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.09] border border-white/10 text-[11px] text-emerald-300"
               >
-                <Upload className="w-3 h-3" />
+                <Download className="w-3 h-3" />
                 <span>选择 .json 文件</span>
               </button>
             </>

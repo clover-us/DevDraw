@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   ArrowLeft,
   Code2,
+  Download,
   FolderGit2,
   FolderSync,
   GitCommitHorizontal,
@@ -14,7 +15,6 @@ import {
   Share,
   Square,
   Undo2,
-  Upload,
 } from 'lucide-react';
 import { isTauriRuntime, storageAdapter } from '../storage/adapter';
 import { useWorkbenchStore } from '../store/useWorkbenchStore';
@@ -291,7 +291,7 @@ export const TopBar: React.FC = () => {
           title="导入 SQL DDL 或 DevDraw JSON"
           className="h-7 flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.09] border border-[var(--dd-border-subtle)] text-[var(--dd-text-secondary)] hover:text-[var(--dd-text-primary)] text-xs font-medium whitespace-nowrap shrink-0 transition-colors"
         >
-          <Upload className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+          <Download className="w-3.5 h-3.5 text-sky-400 shrink-0" />
           <span className="hidden xl:inline">导入</span>
         </button>
 

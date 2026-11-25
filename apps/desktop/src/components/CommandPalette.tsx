@@ -3,6 +3,7 @@ import {
   Box,
   Code2,
   CornerDownLeft,
+  Download,
   Group,
   Layers,
   LayoutGrid,
@@ -13,7 +14,6 @@ import {
   Search,
   Share,
   Sun,
-  Upload,
   Wand2,
 } from 'lucide-react';
 import { ALL_PRIMITIVES, findPrimitiveByKind } from '@devdraw/core';
@@ -145,7 +145,7 @@ export const CommandPalette: React.FC = () => {
         id: 'act-import',
         category: '快捷操作',
         title: '导入 SQL DDL / DevDraw JSON',
-        icon: Upload,
+        icon: Download,
         keywords: 'import sql ddl json 导入 建表',
         run: () => setImportModalOpen(true),
       },
