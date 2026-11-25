@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   applyNodeChanges,
   Background,
@@ -258,6 +258,13 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
   const [editingEdgeId, setEditingEdgeId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuTarget | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const groupDragRef = useRef<{
+    groupId: string;
+    startX: number;
+    startY: number;
+    children: Array<{ id: string; startX: number; startY: number }>;
+  } | null>(null);
 
   useEffect(() => {
     const syncFs = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -644,7 +651,68 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
         onPaneContextMenu={handlePaneContextMenu}
         onNodeContextMenu={handleNodeContextMenu}
         onEdgeContextMenu={handleEdgeContextMenu}
+        onNodeDragStart={(event, node) => {
+          groupDragRef.current = null;
+          if (!isGroupEntity(node.data.entity) || event.altKey) return;
+          const gx = node.position.x;
+          const gy = node.position.y;
+          const gw = node.data.entity.w ?? 420;
+          const gh = node.data.entity.h ?? 280;
+          const carried: Array<{ id: string; startX: number; startY: number }> = [];
+          for (const candidate of localNodes) {
+            if (candidate.id === node.id || isGroupEntity(candidate.data.entity)) continue;
+            const cw = candidate.data.entity.w ?? 248;
+            const ch = candidate.data.entity.h ?? 96;
+            const cx = candidate.position.x + cw / 2;
+            const cy = candidate.position.y + ch / 2;
+            if (cx >= gx && cx <= gx + gw && cy >= gy && cy <= gy + gh) {
+              carried.push({
+                id: candidate.id,
+                startX: candidate.position.x,
+                startY: candidate.position.y,
+              });
+            }
+          }
+          if (carried.length > 0) {
+            groupDragRef.current = {
+              groupId: node.id,
+              startX: gx,
+              startY: gy,
+              children: carried,
+            };
+          }
+        }}
+        onNodeDrag={(_event, node) => {
+          const drag = groupDragRef.current;
+          if (!drag || drag.groupId !== node.id) return;
+          const dx = node.position.x - drag.startX;
+          const dy = node.position.y - drag.startY;
+          const childOffsetMap = new Map(
+            drag.children.map((c) => [c.id, { x: c.startX + dx, y: c.startY + dy }])
+          );
+          setLocalNodes((prev) =>
+            prev.map((n) => {
+              const moved = childOffsetMap.get(n.id);
+              return moved ? { ...n, position: moved } : n;
+            })
+          );
+        }}
         onNodeDragStop={(_, node, draggedNodes) => {
+          const drag = groupDragRef.current;
+          groupDragRef.current = null;
+          if (drag && drag.groupId === node.id && onNodesDragStop) {
+            const dx = node.position.x - drag.startX;
+            const dy = node.position.y - drag.startY;
+            onNodesDragStop([
+              { id: node.id, x: Math.round(node.position.x), y: Math.round(node.position.y) },
+              ...drag.children.map((c) => ({
+                id: c.id,
+                x: Math.round(c.startX + dx),
+                y: Math.round(c.startY + dy),
+              })),
+            ]);
+            return;
+          }
           const list = draggedNodes && draggedNodes.length > 0 ? draggedNodes : [node];
           if (onNodesDragStop && list.length > 1) {
             onNodesDragStop(

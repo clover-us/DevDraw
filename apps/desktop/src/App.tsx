@@ -42,6 +42,9 @@ export const App: React.FC = () => {
     setTool,
     selectNode,
     selectNodes,
+    selectAllNodes,
+    copySelectedNodes,
+    pasteClipboard,
     selectEdge,
     openNodeInspector,
     openEdgeInspector,
@@ -135,6 +138,17 @@ export const App: React.FC = () => {
       } else if ((e.ctrlKey || e.metaKey) && lower === 'y') {
         e.preventDefault();
         redo();
+      } else if ((e.ctrlKey || e.metaKey) && lower === 'a') {
+        e.preventDefault();
+        selectAllNodes();
+      } else if ((e.ctrlKey || e.metaKey) && lower === 'c') {
+        if (selectedNodeId || selectedNodeIds.length > 0) {
+          e.preventDefault();
+          copySelectedNodes();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && lower === 'v') {
+        e.preventDefault();
+        pasteClipboard();
       } else if (!e.ctrlKey && !e.metaKey && !e.altKey && lower === 'v') {
         setTool('select');
       } else if (!e.ctrlKey && !e.metaKey && !e.altKey && lower === 'l') {
@@ -193,6 +207,9 @@ export const App: React.FC = () => {
     setFlowPickEdgeMode,
     setCommandPaletteOpen,
     selectNode,
+    selectAllNodes,
+    copySelectedNodes,
+    pasteClipboard,
     selectEdge,
     closeInspector,
     addNodeFromPrimitive,

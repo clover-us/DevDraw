@@ -3,7 +3,9 @@ import { ExternalLink, Link2, PanelRightClose, Plus, Trash2 } from 'lucide-react
 import {
   getAnnotationKind,
   isCollapsibleEntity,
+  type EntityStatus,
   type ErField,
+  type NodeLinks,
 } from '@devdraw/core';
 import { getActiveSlotFromProject, useWorkbenchStore } from '../store/useWorkbenchStore';
 
@@ -115,12 +117,57 @@ export const RightInspector: React.FC = () => {
                 <input
                   type="text"
                   value={node.tech ?? ''}
-                  onChange={(e) => updateNode(node.id, { tech: e.target.value })}
+                  onChange={(e) => updateNode(node.id, { tech: e.target.value || undefined })}
                   placeholder="Go / gRPC"
                   className="w-full h-8 px-2.5 rounded-lg bg-black/20 border border-[var(--dd-border-subtle)] focus:border-violet-400 focus:outline-none font-mono"
                 />
               </div>
             </div>
+
+            {!isAnnotation && (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="block text-[11px] text-[var(--dd-text-secondary)]">演进状态</label>
+                    <select
+                      value={node.status ?? ''}
+                      onChange={(e) =>
+                        updateNode(node.id, {
+                          status: (e.target.value || undefined) as EntityStatus | undefined,
+                        })
+                      }
+                      className="w-full h-8 px-2 rounded-lg bg-black/20 border border-[var(--dd-border-subtle)] focus:border-violet-400 focus:outline-none"
+                    >
+                      <option value="">默认</option>
+                      <option value="active">已上线 (active)</option>
+                      <option value="planned">规划中 (planned)</option>
+                      <option value="deprecated">将下线 (deprecated)</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[11px] text-[var(--dd-text-secondary)]">负责人 / 团队</label>
+                    <input
+                      type="text"
+                      value={node.owner ?? ''}
+                      onChange={(e) => updateNode(node.id, { owner: e.target.value || undefined })}
+                      placeholder="@core-team"
+                      className="w-full h-8 px-2.5 rounded-lg bg-black/20 border border-[var(--dd-border-subtle)] focus:border-violet-400 focus:outline-none font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[11px] text-[var(--dd-text-secondary)]">一句话摘要 (Summary)</label>
+                  <input
+                    type="text"
+                    value={node.summary ?? ''}
+                    onChange={(e) => updateNode(node.id, { summary: e.target.value || undefined })}
+                    placeholder="用于 ADR 文档清单展示的核心职责概括"
+                    className="w-full h-8 px-2.5 rounded-lg bg-black/20 border border-[var(--dd-border-subtle)] focus:border-violet-400 focus:outline-none"
+                  />
+                </div>
+              </>
+            )}
 
             {/* Reasoning Annotation: Linked Entity */}
             {isAnnotation && (
@@ -289,6 +336,57 @@ export const RightInspector: React.FC = () => {
               />
             </div>
 
+            {!isAnnotation && (
+              <div className="space-y-1.5 pt-1 border-t border-[var(--dd-border-subtle)]">
+                <label className="block text-[11px] text-[var(--dd-text-secondary)]">
+                  关联文档与仓库链接 (同步到 .arch)
+                </label>
+                {(
+                  [
+                    { key: 'repo', label: 'Repo', placeholder: 'https://github.com/...' },
+                    { key: 'docs', label: 'Docs', placeholder: '设计文档 / Wiki URL' },
+                    { key: 'adr', label: 'ADR', placeholder: 'ADR-001 或链接' },
+                    { key: 'dashboard', label: 'Dash', placeholder: 'Grafana / 监控面板 URL' },
+                  ] as Array<{ key: keyof NodeLinks; label: string; placeholder: string }>
+                ).map((item) => {
+                  const val = node.links?.[item.key] ?? '';
+                  return (
+                    <div key={item.key} className="flex items-center gap-1.5">
+                      <span className="w-10 text-[10px] font-mono text-[var(--dd-text-muted)] shrink-0">
+                        {item.label}
+                      </span>
+                      <input
+                        type="text"
+                        value={val}
+                        onChange={(e) => {
+                          const nextVal = e.target.value.trim();
+                          const nextLinks: NodeLinks = { ...(node.links ?? {}) };
+                          if (nextVal) nextLinks[item.key] = nextVal;
+                          else delete nextLinks[item.key];
+                          updateNode(node.id, {
+                            links: Object.keys(nextLinks).length > 0 ? nextLinks : undefined,
+                          });
+                        }}
+                        placeholder={item.placeholder}
+                        className="flex-1 min-w-0 h-7 px-2 rounded bg-black/20 border border-[var(--dd-border-subtle)] focus:border-violet-400 focus:outline-none font-mono text-[10.5px]"
+                      />
+                      {/^https?:\/\//i.test(val) && (
+                        <a
+                          href={val}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="打开链接"
+                          className="p-1 rounded text-violet-400 hover:bg-white/[0.08] shrink-0"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="pt-2 border-t border-[var(--dd-border-subtle)] flex items-center gap-2">
               <button
                 type="button"
@@ -369,6 +467,72 @@ export const RightInspector: React.FC = () => {
                   虚线异步 (~&gt;)
                 </button>
               </div>
+            </div>
+
+            <div className="space-y-2 pt-1 border-t border-[var(--dd-border-subtle)]">
+              <label className="block text-[11px] text-[var(--dd-text-secondary)]">
+                韧性契约 (Resilience · 同步到 .arch)
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <span className="block text-[10px] font-mono text-[var(--dd-text-muted)]">超时 Timeout</span>
+                  <input
+                    type="text"
+                    value={edge.resilience?.timeout ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value.trim();
+                      const nextRes = { ...(edge.resilience ?? {}), timeout: val || undefined };
+                      const hasAny = Boolean(
+                        nextRes.timeout || typeof nextRes.retry === 'number' || nextRes.circuitBreaker
+                      );
+                      updateEdge(edge.id, { resilience: hasAny ? nextRes : undefined });
+                    }}
+                    placeholder="3s / 500ms"
+                    className="w-full h-7 px-2 rounded bg-black/20 border border-[var(--dd-border-subtle)] focus:border-sky-400 focus:outline-none font-mono text-[11px]"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <span className="block text-[10px] font-mono text-[var(--dd-text-muted)]">重试 Retry</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={edge.resilience?.retry ?? ''}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const num = raw === '' ? undefined : Math.max(0, Number(raw));
+                      const nextRes = { ...(edge.resilience ?? {}), retry: num };
+                      const hasAny = Boolean(
+                        nextRes.timeout || typeof nextRes.retry === 'number' || nextRes.circuitBreaker
+                      );
+                      updateEdge(edge.id, { resilience: hasAny ? nextRes : undefined });
+                    }}
+                    placeholder="3"
+                    className="w-full h-7 px-2 rounded bg-black/20 border border-[var(--dd-border-subtle)] focus:border-sky-400 focus:outline-none font-mono text-[11px]"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const nextCb = !edge.resilience?.circuitBreaker;
+                  const nextRes = { ...(edge.resilience ?? {}), circuitBreaker: nextCb || undefined };
+                  const hasAny = Boolean(
+                    nextRes.timeout || typeof nextRes.retry === 'number' || nextRes.circuitBreaker
+                  );
+                  updateEdge(edge.id, { resilience: hasAny ? nextRes : undefined });
+                }}
+                className={`w-full py-1.5 px-2.5 rounded-lg border text-[11px] flex items-center justify-between transition-colors ${
+                  edge.resilience?.circuitBreaker
+                    ? 'bg-emerald-500/18 border-emerald-400/45 text-emerald-300'
+                    : 'bg-white/[0.04] border-[var(--dd-border-subtle)] text-[var(--dd-text-secondary)]'
+                }`}
+              >
+                <span>熔断保护 (Circuit Breaker)</span>
+                <span className="font-mono text-[10px]">
+                  {edge.resilience?.circuitBreaker ? '已启用' : '未启用'}
+                </span>
+              </button>
             </div>
 
             <div className="space-y-1.5">

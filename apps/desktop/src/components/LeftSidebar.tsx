@@ -539,7 +539,9 @@ export const LeftSidebar: React.FC = () => {
               <div className="p-3 rounded-xl bg-white/[0.02] border border-[var(--dd-border-subtle)] text-[11px] text-[var(--dd-text-secondary)] space-y-1.5">
                 <div className="font-medium text-[var(--dd-text-primary)]">常用快捷键</div>
                 <div className="flex justify-between"><span>全局命令面板</span><span className="font-mono">Ctrl+K</span></div>
+                <div className="flex justify-between"><span>全选 / 复制 / 粘贴</span><span className="font-mono">Ctrl+A / C / V</span></div>
                 <div className="flex justify-between"><span>框选多选实体</span><span className="font-mono">Shift+拖拽</span></div>
+                <div className="flex justify-between"><span>仅移动分组边框</span><span className="font-mono">Alt+拖拽分组</span></div>
                 <div className="flex justify-between"><span>选择 / 连线 / 落绘</span><span className="font-mono">V / L / P</span></div>
                 <div className="flex justify-between"><span>图码双向分屏</span><span className="font-mono">Ctrl+\</span></div>
                 <div className="flex justify-between"><span>ELK 自动布局</span><span className="font-mono">Ctrl+L</span></div>

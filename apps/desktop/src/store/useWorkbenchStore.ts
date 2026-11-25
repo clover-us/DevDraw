@@ -93,6 +93,7 @@ interface WorkbenchState {
   history: HistoryEntry[];
   historyIndex: number;
   recentKinds: string[];
+  clipboard: { nodes: EntityNode[]; edges: RelationEdge[]; pasteCount: number } | null;
 
   // Actions
   hydrate: () => Promise<void>;
@@ -151,6 +152,9 @@ interface WorkbenchState {
   // Canvas editing
   selectNode: (nodeId: string | null, openInspector?: boolean) => void;
   selectNodes: (nodeIds: string[]) => void;
+  selectAllNodes: () => void;
+  copySelectedNodes: () => void;
+  pasteClipboard: () => void;
   selectEdge: (edgeId: string | null, openInspector?: boolean) => void;
   openNodeInspector: (nodeId: string) => void;
   openEdgeInspector: (edgeId: string) => void;
@@ -341,6 +345,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     history: [],
     historyIndex: -1,
     recentKinds: [],
+    clipboard: null,
 
     async hydrate() {
       const [projects, theme] = await Promise.all([
@@ -1319,6 +1324,129 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           inspectorOpen: unique.length === 1 ? state.inspectorOpen : false,
         };
       });
+    },
+
+    selectAllNodes() {
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
+      if (!active || active.slot.nodes.length === 0) return;
+      const allIds = active.slot.nodes.map((n) => n.id);
+      set({
+        selectedNodeIds: allIds,
+        selectedNodeId: allIds[0] ?? null,
+        selectedEdgeId: null,
+        inspectorOpen: false,
+      });
+      get().showToast(`已全选当前画布 ${allIds.length} 个实体`);
+    },
+
+    copySelectedNodes() {
+      const { projects, activeProjectId, activeLayerIndex, selectedNodeId, selectedNodeIds } = get();
+      const proj = projects.find((p) => p.id === activeProjectId);
+      const active = getActiveSlotFromProject(proj, activeLayerIndex);
+      if (!active) return;
+
+      const ids = selectedNodeIds.length > 0 ? selectedNodeIds : selectedNodeId ? [selectedNodeId] : [];
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+
+      const copiedNodes = active.slot.nodes.filter((n) => idSet.has(n.id)).map((n) => clone(n));
+      const copiedEdges = active.slot.edges
+        .filter((e) => idSet.has(e.from) && idSet.has(e.to))
+        .map((e) => clone(e));
+
+      if (copiedNodes.length === 0) return;
+      set({ clipboard: { nodes: copiedNodes, edges: copiedEdges, pasteCount: 0 } });
+      get().showToast(
+        copiedEdges.length > 0
+          ? `已复制 ${copiedNodes.length} 个实体与 ${copiedEdges.length} 条内部连线（支持跨层粘贴）`
+          : `已复制 ${copiedNodes.length} 个实体（支持跨层 Ctrl+V 粘贴）`
+      );
+    },
+
+    pasteClipboard() {
+      const { clipboard, projects, activeProjectId, activeLayerIndex } = get();
+      if (!clipboard || clipboard.nodes.length === 0 || !activeProjectId) return;
+
+      const nextPasteCount = clipboard.pasteCount + 1;
+      const offset = nextPasteCount * 44;
+      const stamp = Date.now().toString(36);
+      const idMap = new Map<string, string>();
+      const pastedIds: string[] = [];
+
+      const next = mutateActiveSlot(projects, activeProjectId, activeLayerIndex, (slot) => {
+        const usedDslIds = new Set(slot.nodes.map((n) => n.dslId || n.id));
+        const newNodes: EntityNode[] = clipboard.nodes.map((orig, idx) => {
+          const newId = `n-${stamp}-${idx}-${Math.random().toString(36).slice(2, 4)}`;
+          idMap.set(orig.id, newId);
+          pastedIds.push(newId);
+
+          const baseDsl = sanitizeDslId(`${orig.dslId || orig.id}_copy`, `node_copy_${idx + 1}`);
+          let candidate = baseDsl;
+          let suffix = 2;
+          while (usedDslIds.has(candidate)) {
+            candidate = `${baseDsl}_${suffix++}`;
+          }
+          usedDslIds.add(candidate);
+
+          return {
+            ...clone(orig),
+            id: newId,
+            dslId: candidate,
+            x: Math.round(orig.x + offset),
+            y: Math.round(orig.y + offset),
+            pinned: true,
+          };
+        });
+
+        // Remap internal annotation linkNodeId references
+        for (const n of newNodes) {
+          if (n.linkNodeId && idMap.has(n.linkNodeId)) {
+            n.linkNodeId = idMap.get(n.linkNodeId)!;
+          }
+        }
+
+        const newEdges: RelationEdge[] = clipboard.edges
+          .filter((e) => idMap.has(e.from) && idMap.has(e.to))
+          .map((e, idx) => ({
+            ...clone(e),
+            id: `e-${stamp}-${idx}-${Math.random().toString(36).slice(2, 4)}`,
+            from: idMap.get(e.from)!,
+            to: idMap.get(e.to)!,
+            waypoints: e.waypoints?.map((wp) => ({
+              x: Math.round(wp.x + offset),
+              y: Math.round(wp.y + offset),
+            })),
+          }));
+
+        let currentDsl = slot.dslSource;
+        for (const n of newNodes) {
+          slot.nodes.push(n);
+          if (currentDsl) {
+            currentDsl = appendEntityToDsl(currentDsl, n, slot.nodes);
+          }
+        }
+        for (const e of newEdges) {
+          const prevEdges = [...slot.edges];
+          slot.edges.push(e);
+          if (currentDsl) {
+            currentDsl = appendEdgeToDsl(currentDsl, e, slot.nodes, prevEdges) ?? undefined;
+          }
+        }
+        slot.dslSource = currentDsl ?? serializeSlotToDsl(slot);
+      });
+
+      set({
+        projects: next,
+        clipboard: { ...clipboard, pasteCount: nextPasteCount },
+        selectedNodeIds: pastedIds,
+        selectedNodeId: pastedIds[0] ?? null,
+        selectedEdgeId: null,
+        inspectorOpen: false,
+      });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast(`已粘贴 ${pastedIds.length} 个实体（Ctrl+Z 可撤销）`);
     },
 
     selectEdge(edgeId, openInspector) {
