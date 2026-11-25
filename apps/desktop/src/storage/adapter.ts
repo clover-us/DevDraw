@@ -53,6 +53,29 @@ export function supportsLocalDirectoryPicker(): boolean {
  * Tauri desktop mode persists paths directly via `project.workspacePath`.
  */
 const browserDirHandles = new Map<string, FsDirectoryHandleLike>();
+let lastBrowserSelfWriteAt = 0;
+
+async function snapshotBrowserDirectoryFingerprint(
+  dirHandle: FsDirectoryHandleLike,
+  prefix = ''
+): Promise<string> {
+  const entries: string[] = [];
+  for await (const [name, handle] of dirHandle.entries()) {
+    if (name === '.git' || name === 'node_modules' || name === 'target') continue;
+    const rel = prefix ? `${prefix}/${name}` : name;
+    if (handle.kind === 'directory') {
+      entries.push(await snapshotBrowserDirectoryFingerprint(handle, rel));
+    } else if (
+      name.endsWith('.arch') ||
+      name === 'project.json' ||
+      name === '.arch-layout.json'
+    ) {
+      const file = await handle.getFile();
+      entries.push(`${rel}:${file.size}:${file.lastModified}`);
+    }
+  }
+  return entries.sort().join('|');
+}
 
 async function readBrowserDirectoryFiles(
   dirHandle: FsDirectoryHandleLike,
@@ -81,6 +104,7 @@ async function writeBrowserDirectoryFiles(
   rootHandle: FsDirectoryHandleLike,
   files: Record<string, string>
 ): Promise<void> {
+  lastBrowserSelfWriteAt = Date.now();
   const expectedLayerFiles = new Set<string>();
 
   for (const [relPath, content] of Object.entries(files)) {
@@ -102,7 +126,7 @@ async function writeBrowserDirectoryFiles(
     await writable.close();
   }
 
-  // Clean up orphaned layers/*.arch files
+    // Clean up orphaned layers/*.arch files
   try {
     const layersDir = await rootHandle.getDirectoryHandle('layers');
     for await (const [name, handle] of layersDir.entries()) {
@@ -113,6 +137,7 @@ async function writeBrowserDirectoryFiles(
   } catch {
     // layers/ directory may not exist yet
   }
+  lastBrowserSelfWriteAt = Date.now();
 }
 
 async function readTauriWorkspaceFiles(rootDir: string): Promise<Record<string, string>> {
@@ -295,6 +320,61 @@ export const storageAdapter: StorageAdapter = {
     if (!handle) return false;
     await writeBrowserDirectoryFiles(handle, files);
     return true;
+  },
+
+  async watchWorkspaceDirectory(
+    project: ProjectDocument,
+    onExternalChange: () => void
+  ): Promise<() => void> {
+    if (!project.workspacePath) return () => {};
+
+    if (isTauriRuntime()) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const { listen } = await import('@tauri-apps/api/event');
+
+      const unlisten = await listen<string>('workspace-changed', (event) => {
+        if (event.payload === project.workspacePath) {
+          onExternalChange();
+        }
+      });
+
+      try {
+        await invoke('watch_workspace_dir', { root: project.workspacePath });
+      } catch {
+        unlisten();
+        return () => {};
+      }
+
+      return () => {
+        unlisten();
+        void invoke('unwatch_workspace_dir');
+      };
+    }
+
+    const handle = browserDirHandles.get(project.id);
+    if (!handle) return () => {};
+
+    let stopped = false;
+    let prev = await snapshotBrowserDirectoryFingerprint(handle);
+    const timer = window.setInterval(async () => {
+      if (stopped) return;
+      try {
+        const next = await snapshotBrowserDirectoryFingerprint(handle);
+        if (next !== prev) {
+          prev = next;
+          if (Date.now() - lastBrowserSelfWriteAt > 1500) {
+            onExternalChange();
+          }
+        }
+      } catch {
+        // Ignore transient permission or read errors
+      }
+    }, 1200);
+
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
   },
 
   async exportWorkspaceDirectory(project: ProjectDocument, rootDir: string): Promise<void> {

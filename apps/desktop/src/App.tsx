@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { DevDrawCanvas } from '@devdraw/canvas';
 import { getActiveSlotFromProject, useWorkbenchStore } from './store/useWorkbenchStore';
+import { storageAdapter } from './storage/adapter';
 import { LauncherView } from './components/LauncherView';
 import { TopBar } from './components/TopBar';
 import { LayerTabsBar } from './components/LayerTabsBar';
@@ -39,6 +40,7 @@ export const App: React.FC = () => {
     recentKinds,
     toastMessage,
     hydrate,
+    reloadWorkspaceFolder,
     setTool,
     selectNode,
     selectNodes,
@@ -95,6 +97,34 @@ export const App: React.FC = () => {
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  const activeProjectForWatch = projects.find((p) => p.id === activeProjectId);
+  const activeWorkspacePath = activeProjectForWatch?.workspacePath;
+
+  // Watch bound local workspace directory for external IDE / Git / AI edits and hot-reload
+  useEffect(() => {
+    if (!activeProjectForWatch || !activeWorkspacePath || !storageAdapter.watchWorkspaceDirectory) {
+      return;
+    }
+    let disposed = false;
+    let stopWatch: (() => void) | undefined;
+
+    void storageAdapter
+      .watchWorkspaceDirectory(activeProjectForWatch, () => {
+        if (!disposed) {
+          void reloadWorkspaceFolder(activeProjectForWatch.id, true);
+        }
+      })
+      .then((cleanup) => {
+        if (disposed) cleanup();
+        else stopWatch = cleanup;
+      });
+
+    return () => {
+      disposed = true;
+      stopWatch?.();
+    };
+  }, [activeProjectId, activeWorkspacePath, reloadWorkspaceFolder]);
 
   // Auto-play timer for Step-by-step Flow playback
   useEffect(() => {

@@ -283,6 +283,10 @@ export interface StorageAdapter {
     diagnostics: Array<{ file: string; line: number; message: string; severity: 'error' | 'warning' }>;
   } | null>;
   syncWorkspaceDirectory?(project: ProjectDocument): Promise<boolean>;
+  watchWorkspaceDirectory?(
+    project: ProjectDocument,
+    onExternalChange: () => void
+  ): Promise<() => void>;
   unbindWorkspaceDirectory?(projectId: string): void;
   hasWorkspaceBinding?(project: ProjectDocument): boolean;
 }

@@ -110,7 +110,7 @@ interface WorkbenchState {
   // Three-layer Git-friendly local directory workspace
   openWorkspaceFolder: () => Promise<void>;
   bindActiveProjectToFolder: () => Promise<void>;
-  reloadWorkspaceFolder: (projectId?: string) => Promise<void>;
+  reloadWorkspaceFolder: (projectId?: string, fromWatcher?: boolean) => Promise<void>;
   unbindWorkspaceFolder: (projectId?: string) => void;
 
   // Layer & sub-canvas
@@ -547,7 +547,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       }
     },
 
-    async reloadWorkspaceFolder(projectId) {
+    async reloadWorkspaceFolder(projectId, fromWatcher = false) {
       const targetId = projectId ?? get().activeProjectId;
       const proj = get().projects.find((p) => p.id === targetId);
       if (!proj || !storageAdapter.reloadWorkspaceDirectory) return;
@@ -555,7 +555,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       try {
         const result = await storageAdapter.reloadWorkspaceDirectory(proj);
         if (!result) {
-          get().showToast('目录句柄未授权，请重新绑定或打开本地工作区');
+          if (!fromWatcher) {
+            get().showToast('目录句柄未授权，请重新绑定或打开本地工作区');
+          }
           return;
         }
         const { project: reloaded, diagnostics } = result;
@@ -581,6 +583,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           set({
             activeLayerIndex: safeLayerIdx,
             selectedNodeId: null,
+            selectedNodeIds: [],
             selectedEdgeId: null,
             dslDiagnostics: diagnostics
               .filter((d) => !active || d.file.includes(active.slot.id))
@@ -591,13 +594,19 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         }
 
         get().showToast(
-          diagnostics.length > 0
-            ? `已从磁盘重载（含 ${diagnostics.length} 条 DSL 提示）`
-            : '已从磁盘重新加载最新 .arch 与布局文件'
+          fromWatcher
+            ? diagnostics.length > 0
+              ? `检测到外部目录变更，已热更新（含 ${diagnostics.length} 条 DSL 提示）`
+              : '检测到外部文件变更，画布已实时热更新'
+            : diagnostics.length > 0
+              ? `已从磁盘重载（含 ${diagnostics.length} 条 DSL 提示）`
+              : '已从磁盘重新加载最新 .arch 与布局文件'
         );
       } catch (err) {
-        const message = err instanceof Error ? err.message : '从磁盘重新加载失败';
-        get().showToast(message);
+        if (!fromWatcher) {
+          const message = err instanceof Error ? err.message : '从磁盘重新加载失败';
+          get().showToast(message);
+        }
       }
     },
 
