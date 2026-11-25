@@ -1,5 +1,12 @@
-import type { CanvasSlot, EntityNode, RelationEdge } from '../types';
-import { getAnnotationKind } from '../primitives';
+import type {
+  CanvasSlot,
+  EntityNode,
+  EntityVisualStyle,
+  PortSide,
+  RelationEdge,
+  SemanticColor,
+} from '../types';
+import { getAnnotationKind, isCollapsibleEntity } from '../primitives';
 
 function sanitizeMermaidText(value: string): string {
   return String(value || '')
@@ -130,26 +137,116 @@ export function exportSlotToMermaid(slot: CanvasSlot): string {
   return lines.join('\n');
 }
 
+const SVG_ACCENT_MAP: Record<SemanticColor, { accent: string; badgeBg: string; border: string }> = {
+  violet: { accent: '#a78bfa', badgeBg: 'rgba(139,92,246,0.16)', border: 'rgba(167,139,250,0.42)' },
+  sky: { accent: '#38bdf8', badgeBg: 'rgba(56,189,248,0.16)', border: 'rgba(56,189,248,0.42)' },
+  emerald: { accent: '#34d399', badgeBg: 'rgba(52,211,153,0.16)', border: 'rgba(52,211,153,0.42)' },
+  amber: { accent: '#fbbf24', badgeBg: 'rgba(251,191,36,0.16)', border: 'rgba(251,191,36,0.42)' },
+  rose: { accent: '#fb7185', badgeBg: 'rgba(251,113,133,0.16)', border: 'rgba(251,113,133,0.42)' },
+  slate: { accent: '#94a3b8', badgeBg: 'rgba(148,163,184,0.16)', border: 'rgba(148,163,184,0.38)' },
+};
+
+interface SvgBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  headerH: number;
+  fieldRowH: number;
+  fields: NonNullable<EntityNode['fields']>;
+}
+
+function pickAutoPorts(a: SvgBox, b: SvgBox): { src: PortSide; dst: PortSide } {
+  const dx = b.x + b.w / 2 - (a.x + a.w / 2);
+  const dy = b.y + b.h / 2 - (a.y + a.h / 2);
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? { src: 'right', dst: 'left' } : { src: 'left', dst: 'right' };
+  }
+  return dy >= 0 ? { src: 'bottom', dst: 'top' } : { src: 'top', dst: 'bottom' };
+}
+
+function getPortPoint(box: SvgBox, side: PortSide, fieldName?: string): { x: number; y: number } {
+  if (fieldName && box.fields.length > 0) {
+    const idx = box.fields.findIndex((f) => f.name === fieldName);
+    if (idx >= 0) {
+      const fy = box.y + box.headerH + idx * box.fieldRowH + box.fieldRowH / 2;
+      return { x: side === 'left' ? box.x : box.x + box.w, y: fy };
+    }
+  }
+  switch (side) {
+    case 'top':
+      return { x: box.x + box.w / 2, y: box.y };
+    case 'bottom':
+      return { x: box.x + box.w / 2, y: box.y + box.h };
+    case 'left':
+      return { x: box.x, y: box.y + box.h / 2 };
+    case 'right':
+    default:
+      return { x: box.x + box.w, y: box.y + box.h / 2 };
+  }
+}
+
+function truncateText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, Math.max(0, maxChars - 1)) + '…';
+}
+
 /**
- * Export standalone SVG with tight world-space bounding box.
+ * High-fidelity standalone SVG exporter:
+ * - Semantic color accents, customStyle / kindStyles borders & accent bars
+ * - Full ER / Redis field schema rows (PK/FK/UK badges, types, TTL)
+ * - Accurate port attachment sides, orthogonal waypoints, bezier curves & pill labels
+ * - Freehand sketch strokes and tight world-space bounding box
  */
-export function exportSlotToSvg(slot: CanvasSlot, theme: 'dark' | 'light' = 'dark'): string {
-  const { nodes, edges } = slot;
-  const boxes = new Map<string, { x: number; y: number; w: number; h: number }>();
+export function exportSlotToSvg(
+  slot: CanvasSlot,
+  theme: 'dark' | 'light' = 'dark',
+  kindStyles?: Record<string, EntityVisualStyle>
+): string {
+  const { nodes, edges, freehand } = slot;
+  const boxes = new Map<string, SvgBox>();
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
 
+  const trackPoint = (x: number, y: number) => {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  };
+
   for (const n of nodes) {
-    const w = n.w ?? 232;
-    const h = n.h ?? (n.fields?.length && !n.collapsed ? 80 + n.fields.length * 24 : 92);
-    boxes.set(n.id, { x: n.x, y: n.y, w, h });
-    minX = Math.min(minX, n.x);
-    minY = Math.min(minY, n.y);
-    maxX = Math.max(maxX, n.x + w);
-    maxY = Math.max(maxY, n.y + h);
+    const showFields = isCollapsibleEntity(n) && !n.collapsed && (n.fields?.length ?? 0) > 0;
+    const fields = showFields ? n.fields!.slice(0, 12) : [];
+    const headerH = n.kv?.ttl || n.tech || n.spec ? 76 : 64;
+    const fieldRowH = 24;
+    const w = n.w ?? (showFields ? 268 : 244);
+    const computedH = showFields
+      ? headerH + fields.length * fieldRowH + 12
+      : n.note
+        ? 98
+        : 84;
+    const h = n.h ?? computedH;
+
+    boxes.set(n.id, { x: n.x, y: n.y, w, h, headerH, fieldRowH, fields });
+    trackPoint(n.x, n.y);
+    trackPoint(n.x + w, n.y + h);
   }
+
+  for (const e of edges) {
+    for (const wp of e.waypoints ?? []) {
+      trackPoint(wp.x, wp.y);
+    }
+  }
+
+  for (const stroke of freehand ?? []) {
+    for (const pt of stroke.points) {
+      trackPoint(pt.x, pt.y);
+    }
+  }
+
   if (!Number.isFinite(minX)) {
     minX = 0;
     minY = 0;
@@ -163,58 +260,289 @@ export function exportSlotToSvg(slot: CanvasSlot, theme: 'dark' | 'light' = 'dar
   const vw = Math.max(360, Math.round(maxX - minX + pad * 2));
   const vh = Math.max(200, Math.round(maxY - minY + pad * 2));
 
-  const bg = theme === 'light' ? '#f3f5f9' : '#110e17';
-  const cardBg = theme === 'light' ? '#ffffff' : '#1b1625';
-  const cardBorder = theme === 'light' ? '#cbd5e1' : 'rgba(255,255,255,0.14)';
-  const titleColor = theme === 'light' ? '#0f172a' : '#f4f4f5';
-  const subColor = theme === 'light' ? '#475569' : '#a1a1aa';
+  const isLight = theme === 'light';
+  const bg = isLight ? '#f3f5f9' : '#110e17';
+  const gridDot = isLight ? 'rgba(100,116,139,0.22)' : 'rgba(167,139,250,0.16)';
+  const cardBg = isLight ? '#ffffff' : '#1b1625';
+  const cardHeaderDivider = isLight ? '#e2e8f0' : 'rgba(255,255,255,0.08)';
+  const titleColor = isLight ? '#0f172a' : '#f4f4f5';
+  const subColor = isLight ? '#475569' : '#a1a1aa';
+  const fieldTypeColor = isLight ? '#64748b' : '#94a3b8';
+  const pillBg = isLight ? '#ffffff' : '#181322';
+  const pillBorder = isLight ? '#cbd5e1' : 'rgba(167,139,250,0.35)';
 
+  // 1. Freehand sketch layer
+  const freehandSvg = (freehand ?? [])
+    .filter((s) => s.points.length >= 2)
+    .map((s) => {
+      const pts = s.points.map((p) => `${Math.round(p.x)},${Math.round(p.y)}`).join(' ');
+      return `  <polyline points="${pts}" fill="none" stroke="${escapeXml(s.color)}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>`;
+    })
+    .join('\n');
+
+  // 2. Edges layer
   const edgeLines = edges
     .map((e: RelationEdge) => {
       const a = boxes.get(e.from);
       const b = boxes.get(e.to);
       if (!a || !b) return '';
-      const x1 = a.x + a.w;
-      const y1 = a.y + a.h / 2;
-      const x2 = b.x;
-      const y2 = b.y + b.h / 2;
-      const mx = (x1 + x2) / 2;
-      const d =
-        e.routing === 'orthogonal'
-          ? `M ${x1} ${y1} L ${mx} ${y1} L ${mx} ${y2} L ${x2} ${y2}`
-          : `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+
+      const auto = pickAutoPorts(a, b);
+      const srcSide = e.sourcePort ?? auto.src;
+      const dstSide = e.targetPort ?? auto.dst;
+      const p1 = getPortPoint(a, srcSide, e.fromField);
+      const p2 = getPortPoint(b, dstSide, e.toField);
+
+      let d: string;
+      let labelX: number;
+      let labelY: number;
+
+      if (e.waypoints && e.waypoints.length > 0) {
+        const pts = [p1, ...e.waypoints, p2];
+        d = pts
+          .map((pt, idx) => `${idx === 0 ? 'M' : 'L'} ${Math.round(pt.x)} ${Math.round(pt.y)}`)
+          .join(' ');
+        const mid = pts[Math.floor(pts.length / 2)];
+        const prev = pts[Math.max(0, Math.floor(pts.length / 2) - 1)];
+        labelX = (mid.x + prev.x) / 2;
+        labelY = (mid.y + prev.y) / 2;
+      } else if (e.routing === 'orthogonal') {
+        const mx = Math.round((p1.x + p2.x) / 2);
+        const my = Math.round((p1.y + p2.y) / 2);
+        if (srcSide === 'top' || srcSide === 'bottom') {
+          d = `M ${Math.round(p1.x)} ${Math.round(p1.y)} L ${Math.round(p1.x)} ${my} L ${Math.round(p2.x)} ${my} L ${Math.round(p2.x)} ${Math.round(p2.y)}`;
+          labelX = mx;
+          labelY = my;
+        } else {
+          d = `M ${Math.round(p1.x)} ${Math.round(p1.y)} L ${mx} ${Math.round(p1.y)} L ${mx} ${Math.round(p2.y)} L ${Math.round(p2.x)} ${Math.round(p2.y)}`;
+          labelX = mx;
+          labelY = my;
+        }
+      } else {
+        const offset = Math.max(48, Math.hypot(p2.x - p1.x, p2.y - p1.y) * 0.35);
+        const c1 =
+          srcSide === 'left'
+            ? { x: p1.x - offset, y: p1.y }
+            : srcSide === 'top'
+              ? { x: p1.x, y: p1.y - offset }
+              : srcSide === 'bottom'
+                ? { x: p1.x, y: p1.y + offset }
+                : { x: p1.x + offset, y: p1.y };
+        const c2 =
+          dstSide === 'right'
+            ? { x: p2.x + offset, y: p2.y }
+            : dstSide === 'top'
+              ? { x: p2.x, y: p2.y - offset }
+              : dstSide === 'bottom'
+                ? { x: p2.x, y: p2.y + offset }
+                : { x: p2.x - offset, y: p2.y };
+        d = `M ${Math.round(p1.x)} ${Math.round(p1.y)} C ${Math.round(c1.x)} ${Math.round(c1.y)}, ${Math.round(c2.x)} ${Math.round(c2.y)}, ${Math.round(p2.x)} ${Math.round(p2.y)}`;
+        labelX = (p1.x + p2.x) / 2;
+        labelY = (p1.y + p2.y) / 2;
+      }
+
+      const strokeColor = e.dashed ? '#f59e0b' : '#8b5cf6';
+      const markerId = e.dashed ? 'ddArrowAmber' : 'ddArrow';
       const dash = e.dashed ? ' stroke-dasharray="6 5"' : '';
-      const labelSvg = e.label
-        ? `<text x="${mx}" y="${(y1 + y2) / 2 - 8}" text-anchor="middle" fill="${subColor}" font-size="11" font-family="JetBrains Mono, monospace">${escapeXml(e.label)}</text>`
-        : '';
-      return `  <path d="${d}" fill="none" stroke="#8b5cf6" stroke-width="1.8"${dash} marker-end="url(#ddArrow)"/>\n  ${labelSvg}`;
+      const labelText = [e.protocol, e.label].filter(Boolean).join(' · ');
+
+      let labelSvg = '';
+      if (labelText) {
+        const pillW = Math.min(220, Math.max(46, labelText.length * 7.2 + 18));
+        const rx = Math.round(labelX - pillW / 2);
+        const ry = Math.round(labelY - 11);
+        labelSvg = `  <g>
+    <rect x="${rx}" y="${ry}" width="${Math.round(pillW)}" height="20" rx="10" fill="${pillBg}" stroke="${pillBorder}" stroke-width="1"/>
+    <text x="${Math.round(labelX)}" y="${Math.round(labelY + 3)}" text-anchor="middle" fill="${isLight ? '#334155' : '#e4e4e7'}" font-size="10.5" font-family="JetBrains Mono, Consolas, monospace">${escapeXml(truncateText(labelText, 28))}</text>
+  </g>`;
+      }
+      return `  <path d="${d}" fill="none" stroke="${strokeColor}" stroke-width="1.8"${dash} marker-end="url(#${markerId})"/>\n${labelSvg}`;
     })
     .join('\n');
 
+  // 3. Nodes layer
   const nodeCards = nodes
     .map((n) => {
       const b = boxes.get(n.id)!;
-      const isAnn = !!getAnnotationKind(n);
-      const dash = isAnn ? ' stroke-dasharray="5 4"' : '';
-      return `  <g transform="translate(${b.x}, ${b.y})">
-    <rect width="${b.w}" height="${b.h}" rx="14" fill="${cardBg}" stroke="${cardBorder}" stroke-width="1.2"${dash}/>
-    <text x="14" y="24" fill="#a78bfa" font-size="10" font-family="JetBrains Mono, monospace">${escapeXml(n.tag)}</text>
-    <text x="14" y="46" fill="${titleColor}" font-size="13.5" font-weight="600" font-family="Inter, Noto Sans SC, sans-serif">${escapeXml(n.title)}</text>
-    ${n.note ? `<text x="14" y="68" fill="${subColor}" font-size="11" font-family="Inter, Noto Sans SC, sans-serif">${escapeXml(n.note.slice(0, 32))}</text>` : ''}
+      const isAnn = Boolean(getAnnotationKind(n));
+      const mergedStyle: EntityVisualStyle = {
+        ...(kindStyles?.[n.kind] ?? {}),
+        ...(n.customStyle ?? {}),
+      };
+      const colorKey: SemanticColor = mergedStyle.color ?? n.color ?? 'sky';
+      const tone = SVG_ACCENT_MAP[colorKey] ?? SVG_ACCENT_MAP.sky;
+      const rx = mergedStyle.radius === 'md' ? 8 : mergedStyle.radius === '2xl' ? 18 : 13;
+      const strokeWidth = mergedStyle.borderStyle === 'none' ? 0 : 1.3;
+      const dash = isAnn || mergedStyle.borderStyle === 'dashed' ? ' stroke-dasharray="5 4"' : '';
+      const stroke = isLight ? tone.border : tone.border;
+
+      const accentBarSvg =
+        mergedStyle.accentBar === 'top'
+          ? `    <rect x="0" y="0" width="${b.w}" height="4" rx="2" fill="${tone.accent}"/>`
+          : mergedStyle.accentBar === 'left' || (!mergedStyle.accentBar && !isAnn)
+            ? `    <rect x="0" y="10" width="3.5" height="${Math.max(16, b.h - 20)}" rx="2" fill="${tone.accent}"/>`
+            : '';
+
+      const metaLine = [n.tech, n.spec, n.kv?.ttl ? `TTL ${n.kv.ttl}` : undefined]
+        .filter(Boolean)
+        .join(' · ');
+
+      let bodySvg = '';
+      if (b.fields.length > 0) {
+        const rows = b.fields
+          .map((f, idx) => {
+            const ry = b.headerH + idx * b.fieldRowH;
+            const keyColor =
+              f.key === 'PK' ? '#fbbf24' : f.key === 'FK' ? '#38bdf8' : f.key === 'UK' ? '#a78bfa' : '';
+            const keyBadge = f.key
+              ? `<text x="14" y="${ry + 16}" fill="${keyColor}" font-size="9.5" font-weight="700" font-family="JetBrains Mono, monospace">${escapeXml(f.key)}</text>`
+              : '';
+            const nameX = f.key ? 38 : 14;
+            return `    <line x1="10" y1="${ry}" x2="${b.w - 10}" y2="${ry}" stroke="${cardHeaderDivider}" stroke-width="0.8"/>
+    ${keyBadge}
+    <text x="${nameX}" y="${ry + 16}" fill="${titleColor}" font-size="11" font-family="JetBrains Mono, monospace">${escapeXml(truncateText(f.name, 20))}</text>
+    <text x="${b.w - 14}" y="${ry + 16}" text-anchor="end" fill="${fieldTypeColor}" font-size="10" font-family="JetBrains Mono, monospace">${escapeXml(truncateText(f.type, 14))}</text>`;
+          })
+          .join('\n');
+        bodySvg = rows;
+      } else if (n.note) {
+        bodySvg = `    <text x="14" y="${metaLine ? 84 : 74}" fill="${subColor}" font-size="11" font-family="Inter, Noto Sans SC, sans-serif">${escapeXml(truncateText(n.note, 34))}</text>`;
+      }
+
+      return `  <g transform="translate(${Math.round(b.x)}, ${Math.round(b.y)})">
+    <rect width="${b.w}" height="${b.h}" rx="${rx}" fill="${cardBg}" stroke="${stroke}" stroke-width="${strokeWidth}"${dash}/>
+${accentBarSvg}
+    <text x="14" y="23" fill="${tone.accent}" font-size="10" font-weight="600" font-family="JetBrains Mono, monospace">${escapeXml(truncateText(n.tag, 28))}</text>
+    <text x="14" y="45" fill="${titleColor}" font-size="13.5" font-weight="600" font-family="Inter, Noto Sans SC, sans-serif">${escapeXml(truncateText(n.title, 26))}</text>
+    ${metaLine ? `<text x="14" y="63" fill="${tone.accent}" opacity="0.85" font-size="10" font-family="JetBrains Mono, monospace">${escapeXml(truncateText(metaLine, 34))}</text>` : ''}
+${bodySvg}
   </g>`;
     })
     .join('\n');
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vx} ${vy} ${vw} ${vh}" width="${vw}" height="${vh}">
   <defs>
+    <pattern id="ddDotGrid" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1" fill="${gridDot}"/>
+    </pattern>
     <marker id="ddArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b5cf6"/>
     </marker>
+    <marker id="ddArrowAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b"/>
+    </marker>
   </defs>
   <rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="${bg}"/>
+  <rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="url(#ddDotGrid)"/>
+${freehandSvg}
 ${edgeLines}
 ${nodeCards}
 </svg>`;
+}
+
+/**
+ * Generate a clean RFC / ADR Markdown engineering document combining:
+ * - Embedded Mermaid topology / ER diagram
+ * - Component & Schema inventory tables
+ * - Reasoning Annotations (`assumption` / `decision` / `note`)
+ * - Step-by-step Flow scripts with latency & rationale
+ */
+export function exportSlotToMarkdownAdr(slot: CanvasSlot, projectTitle: string): string {
+  const mainNodes = slot.nodes.filter((n) => !getAnnotationKind(n));
+  const annotations = slot.nodes.filter((n) => Boolean(getAnnotationKind(n)));
+  const nodeById = new Map(slot.nodes.map((n) => [n.id, n]));
+  const lines: string[] = [];
+
+  lines.push(`# ${projectTitle} — ${slot.name}`);
+  lines.push('');
+  lines.push(
+    `> 由 **DevDraw · 研绘** 导出 · 共 ${mainNodes.length} 个核心实体、${slot.edges.length} 条拓扑关系、${annotations.length} 条研思标注。`
+  );
+  lines.push('');
+
+  lines.push('## 1. 架构 / 模型视图');
+  lines.push('');
+  lines.push('```mermaid');
+  lines.push(exportSlotToMermaid(slot));
+  lines.push('```');
+  lines.push('');
+
+  if (mainNodes.length > 0) {
+    lines.push('## 2. 核心实体清单');
+    lines.push('');
+    lines.push('| 实体名称 | 类型标签 | 技术栈 / 规格 | 状态 / 负责人 | 说明 |');
+    lines.push('| --- | --- | --- | --- | --- |');
+    for (const n of mainNodes) {
+      const spec = [n.tech, n.spec, n.complexity, n.kv?.ttl ? `TTL ${n.kv.ttl}` : undefined]
+        .filter(Boolean)
+        .join(' · ') || '-';
+      const meta = [n.status, n.owner].filter(Boolean).join(' / ') || '-';
+      const note = (n.summary || n.note || '-').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+      lines.push(`| **${n.title}** | \`${n.tag}\` | ${spec} | ${meta} | ${note} |`);
+    }
+    lines.push('');
+  }
+
+  const schemaNodes = mainNodes.filter((n) => n.fields && n.fields.length > 0);
+  if (schemaNodes.length > 0) {
+    lines.push('## 3. 数据表与键空间 Schema');
+    lines.push('');
+    for (const n of schemaNodes) {
+      lines.push(`### ${n.title} (\`${n.tag}\`)`);
+      if (n.note) lines.push(`> ${n.note}`);
+      lines.push('');
+      lines.push('| 键 | 字段名 | 类型 | 备注 |');
+      lines.push('| --- | --- | --- | --- |');
+      for (const f of n.fields ?? []) {
+        lines.push(`| ${f.key ? `\`${f.key}\`` : '-'} | \`${f.name}\` | \`${f.type}\` | ${f.note || '-'} |`);
+      }
+      lines.push('');
+    }
+  }
+
+  if (annotations.length > 0) {
+    const sectionNum = schemaNodes.length > 0 ? 4 : 3;
+    lines.push(`## ${sectionNum}. 研思推演记录（ADR / 假设 / 笔记）`);
+    lines.push('');
+    const kindLabel: Record<string, string> = {
+      assumption: '推演假设 (Assumption)',
+      decision: '架构决策 (Decision)',
+      note: '推演笔记 (Note)',
+    };
+    for (const ann of annotations) {
+      const kind = getAnnotationKind(ann) ?? 'note';
+      const target = ann.linkNodeId ? nodeById.get(ann.linkNodeId) : undefined;
+      const targetSuffix = target ? ` → 关联 **${target.title}**` : '';
+      lines.push(`- **[${kindLabel[kind]}] ${ann.title}**${targetSuffix}`);
+      if (ann.note) {
+        lines.push(`  - ${ann.note.replace(/\r?\n/g, '\n  - ')}`);
+      }
+    }
+    lines.push('');
+  }
+
+  if (slot.flows && slot.flows.length > 0) {
+    const baseNum = 3 + (schemaNodes.length > 0 ? 1 : 0) + (annotations.length > 0 ? 1 : 0);
+    lines.push(`## ${baseNum}. 动态推演链路`);
+    lines.push('');
+    for (const flow of slot.flows) {
+      lines.push(`### ${flow.name}`);
+      if (flow.description) lines.push(`> ${flow.description}`);
+      lines.push('');
+      lines.push('| 步骤 | 链路 | 说明 | 耗时 | 推演依据 |');
+      lines.push('| --- | --- | --- | --- | --- |');
+      for (const step of flow.steps) {
+        const fromName = nodeById.get(step.from)?.title ?? step.from;
+        const toName = nodeById.get(step.to)?.title ?? step.to;
+        lines.push(
+          `| ${step.order}${step.parallel ? ' (并行)' : ''} | ${fromName} → ${toName} | ${step.label} | ${step.latency || '-'} | ${step.rationale || '-'} |`
+        );
+      }
+      lines.push('');
+    }
+  }
+
+  return lines.join('\n').trimEnd() + '\n';
 }
 
 export function exportSlotToJson(slot: CanvasSlot): string {

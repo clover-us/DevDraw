@@ -13,6 +13,7 @@ import {
   Search,
   Trash2,
   Unlink,
+  Upload,
   X,
   Check,
   Database,
@@ -39,6 +40,7 @@ export const LauncherView: React.FC = () => {
     openWorkspaceFolder,
     reloadWorkspaceFolder,
     unbindWorkspaceFolder,
+    setImportModalOpen,
   } = useWorkbenchStore();
 
   const canPickFolder = supportsLocalDirectoryPicker();
@@ -235,6 +237,15 @@ export const LauncherView: React.FC = () => {
             >
               <FolderOpen className="w-3.5 h-3.5 text-emerald-400" />
               <span>打开本地目录</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setImportModalOpen(true)}
+              title="从 SQL CREATE TABLE 或 DevDraw JSON 快速导入项目"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.07] text-zinc-200 transition-colors"
+            >
+              <Upload className="w-3.5 h-3.5 text-sky-400" />
+              <span>导入 SQL / JSON</span>
             </button>
             <button
               type="button"

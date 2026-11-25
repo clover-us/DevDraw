@@ -8,6 +8,8 @@ import {
   deleteEdgesFromDsl,
   deleteEntityFromDsl,
   findPrimitiveByKind,
+  importDevDrawJson,
+  importSqlDdlToSlot,
   isCollapsibleEntity,
   parseArchDsl,
   patchEdgeInDsl,
@@ -64,8 +66,9 @@ interface WorkbenchState {
   flowStepIndex: number;
   isFlowPlaying: boolean;
 
-  // Export & Style Customizer Modals
+  // Export, Import & Style Customizer Modals
   exportModalOpen: boolean;
+  importModalOpen: boolean;
   styleModalOpen: boolean;
   styleTargetNodeId: string | null;
 
@@ -103,6 +106,12 @@ interface WorkbenchState {
   toggleLeftTab: (tab: LeftActivityTab) => void;
   toggleDslSplit: () => void;
   setExportModalOpen: (open: boolean) => void;
+  setImportModalOpen: (open: boolean) => void;
+  importSqlDdl: (sql: string, mode: 'append' | 'new-layer') => Promise<boolean>;
+  importJsonDocument: (
+    rawJson: string,
+    mode: 'replace-slot' | 'new-layer' | 'new-project'
+  ) => boolean;
   openStyleModal: (nodeId?: string | null) => void;
   closeStyleModal: () => void;
   updateNodeStyle: (nodeId: string, patch: Partial<EntityVisualStyle>) => void;
@@ -273,6 +282,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     flowStepIndex: -1,
     isFlowPlaying: false,
     exportModalOpen: false,
+    importModalOpen: false,
     styleModalOpen: false,
     styleTargetNodeId: null,
 
@@ -667,6 +677,189 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
 
     setExportModalOpen(open) {
       set({ exportModalOpen: open });
+    },
+
+    setImportModalOpen(open) {
+      set({ importModalOpen: open });
+    },
+
+    async importSqlDdl(sql, mode) {
+      const parsed = importSqlDdlToSlot(sql);
+      if (parsed.nodes.length === 0) {
+        get().showToast(parsed.warnings[0] || '未检测到有效的 CREATE TABLE 语句');
+        return false;
+      }
+
+      const laidOut = await computeAutoLayout(parsed.nodes, parsed.edges, {
+        direction: 'RIGHT',
+        respectPinned: false,
+      });
+
+      const activeProjId = get().activeProjectId;
+
+      // If triggered from Launcher (no active project), create a new Data Modeling project
+      if (!activeProjId) {
+        const slotId = `sql-er-${Date.now().toString(36)}`;
+        const erLayer: LayerDocument = {
+          id: slotId,
+          name: 'SQL 导入建模',
+          template: '数据建模',
+          engine: 'relational',
+          nodes: laidOut.nodes,
+          edges: laidOut.edges,
+          flows: [],
+        };
+        erLayer.dslSource = serializeSlotToDsl(erLayer);
+
+        const newProj: ProjectDocument = {
+          id: `p-${Date.now()}`,
+          title: `SQL ER 模型 (${parsed.tableCount} 表)`,
+          subtitle: `本地项目 · SQL DDL 导入 · ${parsed.tableCount} 张表`,
+          meta: '数据建模',
+          category: 'personal',
+          type: 'local',
+          icon: 'database',
+          layers: [erLayer],
+          updatedAt: Date.now(),
+        };
+        const next = [newProj, ...get().projects];
+        set({ projects: next });
+        void persist(next, null);
+        get().openProject(newProj.id);
+        get().showToast(`已导入 ${parsed.tableCount} 张表、${parsed.relationCount} 条外键关系`);
+        return true;
+      }
+
+      if (mode === 'new-layer') {
+        let newIdx = 0;
+        const next = get().projects.map((p) => {
+          if (p.id !== activeProjId) return p;
+          const copy = clone(p);
+          const layerId = `layer-sql-${Date.now().toString(36)}`;
+          const newLayer: LayerDocument = {
+            id: layerId,
+            name: `SQL 建模 (${parsed.tableCount} 表)`,
+            template: '数据建模',
+            engine: 'relational',
+            nodes: laidOut.nodes,
+            edges: laidOut.edges,
+            flows: [],
+          };
+          newLayer.dslSource = serializeSlotToDsl(newLayer);
+          copy.layers.push(newLayer);
+          copy.updatedAt = Date.now();
+          newIdx = copy.layers.length - 1;
+          return copy;
+        });
+        set({ projects: next });
+        void persist(next);
+        get().selectLayer(newIdx);
+        get().showToast(`已新建数据建模层：${parsed.tableCount} 张表、${parsed.relationCount} 条外键`);
+        return true;
+      }
+
+      // Append to active slot with offset so it doesn't overlap existing nodes
+      const next = mutateActiveSlot(get().projects, activeProjId, get().activeLayerIndex, (slot) => {
+        const maxY = slot.nodes.reduce((m, n) => Math.max(m, n.y + (n.h ?? 160)), 0);
+        const offsetY = slot.nodes.length > 0 ? maxY + 80 : 0;
+        const shiftedNodes = laidOut.nodes.map((n) => ({ ...n, y: n.y + offsetY }));
+        slot.nodes.push(...shiftedNodes);
+        slot.edges.push(...laidOut.edges);
+        slot.dslSource = serializeSlotToDsl(slot);
+      });
+      set({ projects: next });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast(`已追加 ${parsed.tableCount} 张数据表、${parsed.relationCount} 条外键关系`);
+      return true;
+    },
+
+    importJsonDocument(rawJson, mode) {
+      try {
+        const imported = importDevDrawJson(rawJson);
+
+        if (imported.kind === 'project') {
+          const newProj: ProjectDocument = {
+            ...clone(imported.project),
+            id: `p-imp-${Date.now().toString(36)}`,
+            workspacePath: undefined,
+            updatedAt: Date.now(),
+          };
+          const next = [newProj, ...get().projects];
+          set({ projects: next });
+          void persist(next, null);
+          get().openProject(newProj.id);
+          get().showToast(`已导入完整项目「${newProj.title}」`);
+          return true;
+        }
+
+        const slotData = clone(imported.slot);
+        slotData.dslSource = serializeSlotToDsl(slotData);
+        const activeProjId = get().activeProjectId;
+
+        if (!activeProjId || mode === 'new-project') {
+          const newLayer: LayerDocument = {
+            ...slotData,
+            id: `layer-imp-${Date.now().toString(36)}`,
+            template: '系统架构拓扑',
+          };
+          const newProj: ProjectDocument = {
+            id: `p-imp-${Date.now().toString(36)}`,
+            title: slotData.name || '导入的推演项目',
+            subtitle: `本地项目 · JSON 导入 · ${slotData.nodes.length} 实体`,
+            meta: 'JSON 导入',
+            category: 'personal',
+            type: 'local',
+            icon: 'network',
+            layers: [newLayer],
+            updatedAt: Date.now(),
+          };
+          const next = [newProj, ...get().projects];
+          set({ projects: next });
+          void persist(next, null);
+          get().openProject(newProj.id);
+          get().showToast(`已将 JSON 导入为新项目「${newProj.title}」`);
+          return true;
+        }
+
+        if (mode === 'new-layer') {
+          let newIdx = 0;
+          const next = get().projects.map((p) => {
+            if (p.id !== activeProjId) return p;
+            const copy = clone(p);
+            const newLayer: LayerDocument = {
+              ...slotData,
+              id: `layer-imp-${Date.now().toString(36)}`,
+              template: '系统架构拓扑',
+            };
+            copy.layers.push(newLayer);
+            copy.updatedAt = Date.now();
+            newIdx = copy.layers.length - 1;
+            return copy;
+          });
+          set({ projects: next });
+          void persist(next);
+          get().selectLayer(newIdx);
+          get().showToast(`已导入为新推演层「${slotData.name}」`);
+          return true;
+        }
+
+        const next = mutateActiveSlot(get().projects, activeProjId, get().activeLayerIndex, (slot) => {
+          slot.nodes = slotData.nodes;
+          slot.edges = slotData.edges;
+          slot.flows = slotData.flows ?? [];
+          slot.freehand = slotData.freehand;
+          slot.dslSource = slotData.dslSource;
+        });
+        set({ projects: next, selectedNodeId: null, selectedEdgeId: null });
+        pushHistoryForCurrent(next);
+        void persist(next);
+        get().showToast(`已导入 ${slotData.nodes.length} 个实体与 ${slotData.edges.length} 条连线（Ctrl+Z 可撤销）`);
+        return true;
+      } catch (err) {
+        get().showToast(err instanceof Error ? err.message : 'JSON 导入失败');
+        return false;
+      }
     },
 
     openStyleModal(nodeId = null) {

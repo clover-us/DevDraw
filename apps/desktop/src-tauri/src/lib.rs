@@ -114,6 +114,15 @@ fn write_workspace_files(root: String, files: BTreeMap<String, String>) -> Resul
     Ok(())
 }
 
+#[tauri::command]
+fn save_export_file(path: String, bytes: Vec<u8>) -> Result<(), String> {
+    let target = Path::new(&path);
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create parent dir: {e}"))?;
+    }
+    fs::write(target, bytes).map_err(|e| format!("Failed to write export file: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -122,7 +131,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_workspace_dir,
             write_workspace_file,
-            write_workspace_files
+            write_workspace_files,
+            save_export_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running DevDraw desktop application");

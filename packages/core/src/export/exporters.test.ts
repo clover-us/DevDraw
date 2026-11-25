@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   exportSlotToInteractiveHtml,
   exportSlotToJson,
+  exportSlotToMarkdownAdr,
   exportSlotToMermaid,
   exportSlotToSvg,
 } from './exporters';
@@ -121,5 +122,49 @@ describe('@devdraw/core multi-format exporters', () => {
     // Embedded JSON payload must escape `<` so `</script>` cannot break out of script tag
     expect(html).toContain('\\u003c/script>');
     expect(html).toContain('id="player"');
+  });
+
+  it('renders ER fields, custom styles, waypoints, and freehand strokes in upgraded SVG', () => {
+    const dataLayer = buildScenePresetForTemplate('数据建模');
+    const erSlot: CanvasSlot = {
+      ...dataLayer.children![0],
+      edges: [
+        {
+          ...dataLayer.children![0].edges[0],
+          waypoints: [
+            { x: 320, y: 120 },
+            { x: 350, y: 120 },
+          ],
+        },
+      ],
+      freehand: [
+        { id: 'f1', color: '#34d399', width: 2.5, points: [{ x: 10, y: 10 }, { x: 80, y: 40 }] },
+      ],
+    };
+
+    const svg = exportSlotToSvg(erSlot, 'dark', { er_main: { accentBar: 'top' } });
+    expect(svg).toContain('user_id');
+    expect(svg).toContain('BIGINT');
+    expect(svg).toContain('PK');
+    expect(svg).toContain('L 320 120 L 350 120');
+    expect(svg).toContain('<polyline points="10,10 80,40"');
+  });
+
+  it('exports Markdown / ADR engineering document with Mermaid, entities, annotations, and flows', () => {
+    const arch = buildScenePresetForTemplate('系统架构拓扑');
+    const slot: CanvasSlot = {
+      id: 'arch-md',
+      name: arch.name,
+      nodes: arch.nodes,
+      edges: arch.edges,
+      flows: arch.flows,
+    };
+
+    const md = exportSlotToMarkdownAdr(slot, '订单中心架构');
+    expect(md).toContain('# 订单中心架构 — 系统架构拓扑');
+    expect(md).toContain('```mermaid');
+    expect(md).toContain('## 2. 核心实体清单');
+    expect(md).toContain('研思推演记录');
+    expect(md).toContain('动态推演链路');
   });
 });

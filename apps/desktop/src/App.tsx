@@ -9,6 +9,7 @@ import { LeftSidebar } from './components/LeftSidebar';
 import { DslEditorPanel } from './components/DslEditorPanel';
 import { RightInspector } from './components/RightInspector';
 import { ExportModal } from './components/ExportModal';
+import { ImportModal } from './components/ImportModal';
 import { StyleCustomizerModal } from './components/StyleCustomizerModal';
 
 export const App: React.FC = () => {
@@ -179,6 +180,7 @@ export const App: React.FC = () => {
     return (
       <>
         <LauncherView />
+        <ImportModal />
         {toastMessage && (
           <div className="fixed top-[56px] right-4 z-50 px-3.5 py-2 rounded-xl bg-[#1b1625]/95 border border-violet-400/35 text-xs text-zinc-100 shadow-2xl backdrop-blur-md">
             {toastMessage}
@@ -266,6 +268,7 @@ export const App: React.FC = () => {
       </div>
 
       <ExportModal />
+      <ImportModal />
       <StyleCustomizerModal />
 
       {toastMessage && (

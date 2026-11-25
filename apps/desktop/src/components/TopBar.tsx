@@ -13,6 +13,7 @@ import {
   Share,
   Square,
   Undo2,
+  Upload,
 } from 'lucide-react';
 import { isTauriRuntime, storageAdapter } from '../storage/adapter';
 import { useWorkbenchStore } from '../store/useWorkbenchStore';
@@ -44,6 +45,7 @@ export const TopBar: React.FC = () => {
     toggleDslSplit,
     toggleSimulation,
     setExportModalOpen,
+    setImportModalOpen,
   } = useWorkbenchStore();
 
   const project = projects.find((p) => p.id === activeProjectId);
@@ -263,8 +265,18 @@ export const TopBar: React.FC = () => {
 
         <button
           type="button"
+          onClick={() => setImportModalOpen(true)}
+          title="导入 SQL DDL 或 DevDraw JSON"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.09] border border-[var(--dd-border-subtle)] text-[var(--dd-text-secondary)] hover:text-[var(--dd-text-primary)] text-xs font-medium transition-colors"
+        >
+          <Upload className="w-3.5 h-3.5 text-sky-400" />
+          <span className="hidden xl:inline">导入</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setExportModalOpen(true)}
-          title="导出推演产物 (Mermaid / SVG / JSON / 交互式 HTML)"
+          title="导出推演产物 (SVG / PNG / Markdown ADR / Mermaid / .arch / HTML)"
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition-colors"
         >
           <Share className="w-3.5 h-3.5" />
