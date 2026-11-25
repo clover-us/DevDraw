@@ -114,7 +114,7 @@ export const LauncherView: React.FC = () => {
 
         <div className="flex items-center gap-2.5">
           <span data-tauri-drag-region className="text-[11px] font-mono text-zinc-500">
-            v0.1.0
+            v0.2.0
           </span>
           <WindowControls variant="launcher" />
         </div>
