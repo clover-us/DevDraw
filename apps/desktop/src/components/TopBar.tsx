@@ -299,9 +299,9 @@ export const TopBar: React.FC = () => {
           type="button"
           onClick={() => setExportModalOpen(true)}
           title="导出推演产物 (SVG / PNG / Markdown ADR / Mermaid / .arch / HTML)"
-          className="h-7 flex items-center gap-1.5 px-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium whitespace-nowrap shrink-0 transition-colors"
+          className="h-7 flex items-center gap-1.5 px-2.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.09] border border-[var(--dd-border-subtle)] text-[var(--dd-text-secondary)] hover:text-[var(--dd-text-primary)] text-xs font-medium whitespace-nowrap shrink-0 transition-colors"
         >
-          <Share className="w-3.5 h-3.5 shrink-0" />
+          <Share className="w-3.5 h-3.5 text-violet-400 shrink-0" />
           <span className="hidden md:inline">导出</span>
         </button>
 
