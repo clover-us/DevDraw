@@ -1,5 +1,5 @@
 import React from 'react';
-import { PanelRightClose, Plus, Trash2 } from 'lucide-react';
+import { ExternalLink, Link2, PanelRightClose, Plus, Trash2 } from 'lucide-react';
 import {
   getAnnotationKind,
   isCollapsibleEntity,
@@ -19,6 +19,7 @@ export const RightInspector: React.FC = () => {
     updateNode,
     duplicateNode,
     deleteNode,
+    drillToNodeTarget,
     updateEdge,
     updateEdgeWaypoints,
     reverseEdge,
@@ -144,29 +145,74 @@ export const RightInspector: React.FC = () => {
               </div>
             )}
 
-            {/* Cross-layer Drill-down Target */}
-            {!isAnnotation && project.layers.length > 1 && (
+            {/* Cross-layer Read-only Ref Source Banner */}
+            {node.ref && (
+              <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-400/30 space-y-2">
+                <div className="flex items-center justify-between text-[10px] font-mono text-violet-300">
+                  <span className="inline-flex items-center gap-1 uppercase">
+                    <Link2 className="w-3 h-3" />
+                    跨层只读引用锚点
+                  </span>
+                  <span>
+                    {project.layers.find((l) => l.id === node.ref?.layerId)?.name || node.ref.layerId}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => drillToNodeTarget(node)}
+                  className="w-full py-1.5 px-2.5 rounded-lg bg-violet-600/80 hover:bg-violet-500 text-white text-[11px] font-medium flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>跳转到源实体所在层</span>
+                </button>
+              </div>
+            )}
+
+            {/* Cross-layer Drill-down Target (supports both layers and nested sub-canvases) */}
+            {!isAnnotation && !node.ref && project.layers.length > 0 && (
               <div className="space-y-1">
                 <label className="block text-[11px] text-[var(--dd-text-secondary)]">
                   双击下钻目标视图
                 </label>
                 <select
-                  value={node.drillTarget?.layerId ?? ''}
-                  onChange={(e) =>
-                    updateNode(node.id, {
-                      drillTarget: e.target.value ? { layerId: e.target.value } : undefined,
-                    })
+                  value={
+                    node.drillTarget?.layerId
+                      ? node.drillTarget.subCanvasId
+                        ? `${node.drillTarget.layerId}::${node.drillTarget.subCanvasId}`
+                        : node.drillTarget.layerId
+                      : ''
                   }
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (!raw) {
+                      updateNode(node.id, { drillTarget: undefined });
+                      return;
+                    }
+                    const [layerId, subCanvasId] = raw.split('::');
+                    updateNode(node.id, {
+                      drillTarget: subCanvasId ? { layerId, subCanvasId } : { layerId },
+                    });
+                  }}
                   className="w-full h-8 px-2.5 rounded-lg bg-black/20 border border-[var(--dd-border-subtle)] focus:border-violet-400 focus:outline-none"
                 >
                   <option value="">无下钻绑定</option>
-                  {project.layers
-                    .filter((l) => l.id !== active.layer.id)
-                    .map((l) => (
+                  {project.layers.flatMap((l) => {
+                    if (l.children && l.children.length > 0) {
+                      return l.children
+                        .filter((sub) => !(l.id === active.layer.id && sub.id === active.slot.id))
+                        .map((sub) => (
+                          <option key={`${l.id}::${sub.id}`} value={`${l.id}::${sub.id}`}>
+                            {l.name} / {sub.name}
+                          </option>
+                        ));
+                    }
+                    if (l.id === active.layer.id) return [];
+                    return [
                       <option key={l.id} value={l.id}>
                         {l.name}
-                      </option>
-                    ))}
+                      </option>,
+                    ];
+                  })}
                 </select>
               </div>
             )}

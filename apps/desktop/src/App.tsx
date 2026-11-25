@@ -10,6 +10,7 @@ import { DslEditorPanel } from './components/DslEditorPanel';
 import { RightInspector } from './components/RightInspector';
 import { ExportModal } from './components/ExportModal';
 import { ImportModal } from './components/ImportModal';
+import { CrossLayerRefModal } from './components/CrossLayerRefModal';
 import { StyleCustomizerModal } from './components/StyleCustomizerModal';
 
 export const App: React.FC = () => {
@@ -269,6 +270,7 @@ export const App: React.FC = () => {
 
       <ExportModal />
       <ImportModal />
+      <CrossLayerRefModal />
       <StyleCustomizerModal />
 
       {toastMessage && (

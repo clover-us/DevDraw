@@ -10,12 +10,15 @@ import {
   History,
   Layers,
   LayoutGrid,
+  Link2,
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Plus,
   RotateCcw,
   Search,
+  Trash2,
   Wand2,
   Zap,
 } from 'lucide-react';
@@ -52,6 +55,10 @@ export const LeftSidebar: React.FC = () => {
     addNodeFromPrimitive,
     selectLayer,
     selectSubCanvas,
+    addSubCanvas,
+    renameSubCanvas,
+    deleteSubCanvas,
+    setCrossRefModalOpen,
     selectNode,
     openNodeInspector,
     runAutoLayout,
@@ -62,6 +69,8 @@ export const LeftSidebar: React.FC = () => {
 
   const [paletteQuery, setPaletteQuery] = useState('');
   const [hoveredItem, setHoveredItem] = useState<PrimitiveItem | null>(null);
+  const [renamingSubKey, setRenamingSubKey] = useState<string | null>(null);
+  const [subDraftName, setSubDraftName] = useState('');
 
   const project = projects.find((p) => p.id === activeProjectId);
   const active = getActiveSlotFromProject(project, activeLayerIndex);
@@ -316,33 +325,110 @@ export const LeftSidebar: React.FC = () => {
                       </button>
 
                       {/* Nested engine sub-canvases (e.g. 关系库 / 缓存 under 数据建模) */}
-                      {hasChildren && (
+                      {(hasChildren || l.template === '数据建模') && (
                         <div className="pl-3 ml-2 border-l border-[var(--dd-border-subtle)] space-y-0.5 pt-0.5">
-                          {l.children!.map((sub, subIdx) => {
+                          {(l.children ?? []).map((sub, subIdx) => {
                             const isCurrentSub = isCurrentLayer && subIdx === activeSubIdx;
                             const SubIcon = sub.engine === 'redis' ? Zap : Database;
+                            const subKey = `${l.id}:${sub.id}`;
+                            const isEditingSub = renamingSubKey === subKey;
                             return (
-                              <button
+                              <div
                                 key={sub.id}
-                                type="button"
-                                onClick={() => {
-                                  if (!isCurrentLayer) selectLayer(idx);
-                                  selectSubCanvas(subIdx);
-                                }}
-                                className={`w-full text-left px-2 py-1 rounded-md text-[11px] flex items-center justify-between gap-2 transition-colors ${
+                                className={`group flex items-center justify-between gap-1 rounded-md px-2 py-1 text-[11px] transition-colors ${
                                   isCurrentSub
                                     ? 'bg-violet-500/15 text-violet-300 font-medium'
                                     : 'text-[var(--dd-text-secondary)] hover:bg-white/[0.05] hover:text-[var(--dd-text-primary)]'
                                 }`}
                               >
-                                <span className="flex items-center gap-1.5 min-w-0">
-                                  <SubIcon className="w-3 h-3 shrink-0 opacity-80" />
-                                  <span className="truncate">{sub.name}</span>
-                                </span>
-                                <span className="text-[10px] font-mono opacity-70">{sub.nodes.length}</span>
-                              </button>
+                                {isEditingSub ? (
+                                  <input
+                                    autoFocus
+                                    value={subDraftName}
+                                    onChange={(e) => setSubDraftName(e.target.value)}
+                                    onBlur={() => {
+                                      if (subDraftName.trim()) {
+                                        renameSubCanvas(idx, subIdx, subDraftName.trim());
+                                      }
+                                      setRenamingSubKey(null);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        if (subDraftName.trim()) {
+                                          renameSubCanvas(idx, subIdx, subDraftName.trim());
+                                        }
+                                        setRenamingSubKey(null);
+                                      }
+                                      if (e.key === 'Escape') setRenamingSubKey(null);
+                                    }}
+                                    className="flex-1 min-w-0 px-1 py-0.5 rounded bg-black/30 border border-violet-400/60 outline-none text-[11px]"
+                                  />
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (!isCurrentLayer) selectLayer(idx);
+                                        selectSubCanvas(subIdx);
+                                      }}
+                                      onDoubleClick={() => {
+                                        setRenamingSubKey(subKey);
+                                        setSubDraftName(sub.name);
+                                      }}
+                                      className="flex-1 min-w-0 text-left flex items-center gap-1.5"
+                                    >
+                                      <SubIcon className="w-3 h-3 shrink-0 opacity-80" />
+                                      <span className="truncate">{sub.name}</span>
+                                    </button>
+                                    <div className="flex items-center gap-0.5 shrink-0">
+                                      <button
+                                        type="button"
+                                        title="重命名子画布"
+                                        onClick={() => {
+                                          setRenamingSubKey(subKey);
+                                          setSubDraftName(sub.name);
+                                        }}
+                                        className="opacity-0 group-hover:opacity-80 hover:!opacity-100 p-0.5 rounded hover:bg-white/10"
+                                      >
+                                        <Pencil className="w-2.5 h-2.5" />
+                                      </button>
+                                      {(l.children?.length ?? 0) > 1 && (
+                                        <button
+                                          type="button"
+                                          title="删除子画布"
+                                          onClick={() => deleteSubCanvas(idx, subIdx)}
+                                          className="opacity-0 group-hover:opacity-80 hover:!opacity-100 p-0.5 rounded hover:bg-rose-500/20 text-rose-400"
+                                        >
+                                          <Trash2 className="w-2.5 h-2.5" />
+                                        </button>
+                                      )}
+                                      <span className="text-[10px] font-mono opacity-70 pl-0.5">
+                                        {sub.nodes.length}
+                                      </span>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
                             );
                           })}
+                          <div className="flex items-center gap-1 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => addSubCanvas(idx, 'relational')}
+                              className="flex-1 inline-flex items-center justify-center gap-1 px-1.5 py-1 rounded bg-white/[0.03] hover:bg-white/[0.08] text-[10px] text-[var(--dd-text-muted)] hover:text-sky-300 transition-colors"
+                            >
+                              <Plus className="w-2.5 h-2.5" />
+                              <span>关系库</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => addSubCanvas(idx, 'redis')}
+                              className="flex-1 inline-flex items-center justify-center gap-1 px-1.5 py-1 rounded bg-white/[0.03] hover:bg-white/[0.08] text-[10px] text-[var(--dd-text-muted)] hover:text-rose-300 transition-colors"
+                            >
+                              <Plus className="w-2.5 h-2.5" />
+                              <span>缓存</span>
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -351,14 +437,19 @@ export const LeftSidebar: React.FC = () => {
               </div>
 
               <div className="pt-2 border-t border-[var(--dd-border-subtle)] flex-1 space-y-1">
-                <div className="flex items-center justify-between text-[10px] font-mono text-[var(--dd-text-muted)] uppercase">
+                <div className="flex items-center justify-between gap-1 text-[10px] font-mono text-[var(--dd-text-muted)] uppercase">
                   <span className="truncate">
-                    当前画布实体
-                    {active.layer.children && active.layer.children.length > 0
-                      ? ` · ${active.slot.name}`
-                      : ''}
+                    当前画布实体 ({active.slot.nodes.length})
                   </span>
-                  <span>{active.slot.nodes.length}</span>
+                  <button
+                    type="button"
+                    onClick={() => setCrossRefModalOpen(true)}
+                    title="从其他层引入只读引用锚点"
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-violet-500/15 hover:bg-violet-500/25 text-violet-300 normal-case shrink-0"
+                  >
+                    <Link2 className="w-2.5 h-2.5" />
+                    <span>跨层引用</span>
+                  </button>
                 </div>
                 {active.slot.nodes.map((node) => {
                   const prim = findPrimitiveByKind(node.kind);

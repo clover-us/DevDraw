@@ -14,10 +14,12 @@ import {
   parseArchDsl,
   patchEdgeInDsl,
   patchEntityInDsl,
+  sanitizeDslId,
   serializeSlotToDsl,
   type CanvasExpandMode,
   type CanvasSlot,
   type CanvasToolMode,
+  type CrossLayerRef,
   type DslDiagnostic,
   type EdgeRoutingMode,
   type EdgeWaypoint,
@@ -30,6 +32,7 @@ import {
   type ProjectDocument,
   type RelationEdge,
   type SemanticColor,
+  type SubCanvasEngine,
 } from '@devdraw/core';
 import { storageAdapter } from '../storage/adapter';
 
@@ -66,9 +69,10 @@ interface WorkbenchState {
   flowStepIndex: number;
   isFlowPlaying: boolean;
 
-  // Export, Import & Style Customizer Modals
+  // Export, Import, Cross-Ref & Style Customizer Modals
   exportModalOpen: boolean;
   importModalOpen: boolean;
+  crossRefModalOpen: boolean;
   styleModalOpen: boolean;
   styleTargetNodeId: string | null;
 
@@ -99,6 +103,15 @@ interface WorkbenchState {
   selectLayer: (index: number) => void;
   selectSubCanvas: (subIndex: number) => void;
   addLayer: (template: LayerTemplateName) => void;
+  renameLayer: (layerIndex: number, name: string) => void;
+  duplicateLayer: (layerIndex: number) => void;
+  deleteLayer: (layerIndex: number) => void;
+  reorderLayers: (fromIndex: number, toIndex: number) => void;
+  addSubCanvas: (layerIndex: number, engine: SubCanvasEngine, name?: string) => void;
+  renameSubCanvas: (layerIndex: number, subIndex: number, name: string) => void;
+  deleteSubCanvas: (layerIndex: number, subIndex: number) => void;
+  setCrossRefModalOpen: (open: boolean) => void;
+  addCrossLayerRefNode: (ref: CrossLayerRef, x?: number, y?: number) => boolean;
   drillToNodeTarget: (node: EntityNode) => void;
 
   // UI controls
@@ -283,6 +296,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     isFlowPlaying: false,
     exportModalOpen: false,
     importModalOpen: false,
+    crossRefModalOpen: false,
     styleModalOpen: false,
     styleTargetNodeId: null,
 
@@ -626,6 +640,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           ...buildScenePresetForTemplate(template),
         };
         copy.layers.push(newLayer);
+        copy.meta = copy.layers.map((l) => l.name).join(' + ');
+        copy.updatedAt = Date.now();
         newIndex = copy.layers.length - 1;
         return copy;
       });
@@ -633,6 +649,286 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       void persist(next);
       get().selectLayer(newIndex);
       get().showToast(`已新增推演层：${template}`);
+    },
+
+    renameLayer(layerIndex, name) {
+      const trimmed = name.trim();
+      const { activeProjectId, projects } = get();
+      if (!activeProjectId || !trimmed) return;
+      const next = projects.map((p) => {
+        if (p.id !== activeProjectId) return p;
+        const copy = clone(p);
+        const target = copy.layers[layerIndex];
+        if (!target) return p;
+        target.name = trimmed;
+        copy.meta = copy.layers.map((l) => l.name).join(' + ');
+        copy.updatedAt = Date.now();
+        return copy;
+      });
+      set({ projects: next });
+      void persist(next);
+      get().showToast(`已重命名推演层为「${trimmed}」`);
+    },
+
+    duplicateLayer(layerIndex) {
+      const { activeProjectId, projects } = get();
+      if (!activeProjectId) return;
+      let insertedIndex = layerIndex + 1;
+      const next = projects.map((p) => {
+        if (p.id !== activeProjectId) return p;
+        const copy = clone(p);
+        const origin = copy.layers[layerIndex];
+        if (!origin) return p;
+        const stamp = Date.now().toString(36);
+        const duplicated: LayerDocument = {
+          ...clone(origin),
+          id: `${origin.id}-copy-${stamp}`,
+          name: `${origin.name} (副本)`,
+          versions: [],
+        };
+        if (duplicated.children && duplicated.children.length > 0) {
+          duplicated.children = duplicated.children.map((sub, idx) => ({
+            ...sub,
+            id: `${sub.id}-copy-${stamp}-${idx}`,
+          }));
+        }
+        copy.layers.splice(layerIndex + 1, 0, duplicated);
+        copy.meta = copy.layers.map((l) => l.name).join(' + ');
+        copy.updatedAt = Date.now();
+        insertedIndex = layerIndex + 1;
+        return copy;
+      });
+      set({ projects: next });
+      void persist(next);
+      get().selectLayer(insertedIndex);
+      get().showToast('已复制推演层');
+    },
+
+    deleteLayer(layerIndex) {
+      const { activeProjectId, activeLayerIndex, projects } = get();
+      if (!activeProjectId) return;
+      const currentProj = projects.find((p) => p.id === activeProjectId);
+      if (!currentProj || currentProj.layers.length <= 1) {
+        get().showToast('项目至少保留 1 个推演层');
+        return;
+      }
+      const removedName = currentProj.layers[layerIndex]?.name ?? '推演层';
+      const next = projects.map((p) => {
+        if (p.id !== activeProjectId) return p;
+        const copy = clone(p);
+        copy.layers.splice(layerIndex, 1);
+        copy.meta = copy.layers.map((l) => l.name).join(' + ');
+        copy.updatedAt = Date.now();
+        return copy;
+      });
+      const nextActiveIdx =
+        activeLayerIndex > layerIndex
+          ? activeLayerIndex - 1
+          : Math.min(activeLayerIndex, currentProj.layers.length - 2);
+      set({ projects: next });
+      void persist(next);
+      get().selectLayer(Math.max(0, nextActiveIdx));
+      get().showToast(`已删除推演层「${removedName}」`);
+    },
+
+    reorderLayers(fromIndex, toIndex) {
+      const { activeProjectId, activeLayerIndex, projects } = get();
+      if (!activeProjectId || fromIndex === toIndex) return;
+      const proj = projects.find((p) => p.id === activeProjectId);
+      if (
+        !proj ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= proj.layers.length ||
+        toIndex >= proj.layers.length
+      ) {
+        return;
+      }
+      const activeLayerId = proj.layers[activeLayerIndex]?.id;
+      let nextActiveIdx = activeLayerIndex;
+      const next = projects.map((p) => {
+        if (p.id !== activeProjectId) return p;
+        const copy = clone(p);
+        const [moved] = copy.layers.splice(fromIndex, 1);
+        copy.layers.splice(toIndex, 0, moved);
+        copy.meta = copy.layers.map((l) => l.name).join(' + ');
+        copy.updatedAt = Date.now();
+        if (activeLayerId) {
+          const found = copy.layers.findIndex((l) => l.id === activeLayerId);
+          if (found >= 0) nextActiveIdx = found;
+        }
+        return copy;
+      });
+      set({ projects: next, activeLayerIndex: nextActiveIdx });
+      void persist(next);
+    },
+
+    addSubCanvas(layerIndex, engine, name) {
+      const { activeProjectId, projects } = get();
+      if (!activeProjectId) return;
+      let nextSubIndex = 0;
+      const defaultName = engine === 'redis' ? '缓存键空间' : '关系库模型';
+      const next = projects.map((p) => {
+        if (p.id !== activeProjectId) return p;
+        const copy = clone(p);
+        const layer = copy.layers[layerIndex];
+        if (!layer) return p;
+
+        if (!layer.children || layer.children.length === 0) {
+          // Promote existing layer content into the first child slot
+          const firstChild: CanvasSlot = {
+            id: `sub-${Date.now().toString(36)}-0`,
+            name: layer.engine === 'redis' ? '缓存' : '关系库',
+            engine: layer.engine ?? 'relational',
+            nodes: clone(layer.nodes),
+            edges: clone(layer.edges),
+            flows: clone(layer.flows ?? []),
+            freehand: clone(layer.freehand),
+            dslSource: layer.dslSource || serializeSlotToDsl(layer),
+          };
+          layer.children = [firstChild];
+        }
+
+        const count = layer.children.length + 1;
+        const slotName = (name || `${defaultName} ${count}`).trim();
+        const newSub: CanvasSlot = {
+          id: `sub-${engine}-${Date.now().toString(36)}`,
+          name: slotName,
+          engine,
+          nodes: [],
+          edges: [],
+          flows: [],
+          dslSource: `// DevDraw .arch — ${slotName}\n`,
+        };
+        layer.children.push(newSub);
+        nextSubIndex = layer.children.length - 1;
+        layer.activeChildIndex = nextSubIndex;
+        copy.updatedAt = Date.now();
+        return copy;
+      });
+      set({ projects: next });
+      void persist(next);
+      if (get().activeLayerIndex !== layerIndex) {
+        get().selectLayer(layerIndex);
+      }
+      get().selectSubCanvas(nextSubIndex);
+      get().showToast(`已新增子画布（${engine === 'redis' ? 'Redis 缓存' : '关系库'}）`);
+    },
+
+    renameSubCanvas(layerIndex, subIndex, name) {
+      const trimmed = name.trim();
+      const { activeProjectId, projects } = get();
+      if (!activeProjectId || !trimmed) return;
+      const next = projects.map((p) => {
+        if (p.id !== activeProjectId) return p;
+        const copy = clone(p);
+        const sub = copy.layers[layerIndex]?.children?.[subIndex];
+        if (!sub) return p;
+        sub.name = trimmed;
+        copy.updatedAt = Date.now();
+        return copy;
+      });
+      set({ projects: next });
+      void persist(next);
+      get().showToast(`已重命名子画布为「${trimmed}」`);
+    },
+
+    deleteSubCanvas(layerIndex, subIndex) {
+      const { activeProjectId, projects } = get();
+      if (!activeProjectId) return;
+      const proj = projects.find((p) => p.id === activeProjectId);
+      const children = proj?.layers[layerIndex]?.children;
+      if (!children || children.length <= 1) {
+        get().showToast('至少保留 1 个子画布');
+        return;
+      }
+      const removedName = children[subIndex]?.name ?? '子画布';
+      let nextSubIdx = 0;
+      const next = projects.map((p) => {
+        if (p.id !== activeProjectId) return p;
+        const copy = clone(p);
+        const layer = copy.layers[layerIndex];
+        if (!layer?.children) return p;
+        layer.children.splice(subIndex, 1);
+        nextSubIdx = Math.min(layer.activeChildIndex ?? 0, layer.children.length - 1);
+        layer.activeChildIndex = Math.max(0, nextSubIdx);
+        copy.updatedAt = Date.now();
+        return copy;
+      });
+      set({ projects: next });
+      void persist(next);
+      if (get().activeLayerIndex === layerIndex) {
+        get().selectSubCanvas(Math.max(0, nextSubIdx));
+      }
+      get().showToast(`已删除子画布「${removedName}」`);
+    },
+
+    setCrossRefModalOpen(open) {
+      set({ crossRefModalOpen: open });
+    },
+
+    addCrossLayerRefNode(ref, x, y) {
+      const { activeProjectId, activeLayerIndex, projects } = get();
+      const proj = projects.find((p) => p.id === activeProjectId);
+      const active = getActiveSlotFromProject(proj, activeLayerIndex);
+      if (!proj || !active) return false;
+
+      // Prevent duplicate reference to the exact same source node in the current slot
+      const dup = active.slot.nodes.find(
+        (n) =>
+          n.ref?.layerId === ref.layerId &&
+          (n.ref?.subCanvasId ?? '') === (ref.subCanvasId ?? '') &&
+          n.ref?.nodeId === ref.nodeId
+      );
+      if (dup) {
+        set({ selectedNodeId: dup.id, selectedEdgeId: null });
+        get().showToast(`当前画布已引用「${dup.title}」，已为你选中`);
+        return false;
+      }
+
+      // Resolve source layer / sub-canvas / entity
+      const srcLayer = proj.layers.find((l) => l.id === ref.layerId);
+      if (!srcLayer) return false;
+      const srcSlot =
+        ref.subCanvasId && srcLayer.children
+          ? srcLayer.children.find((c) => c.id === ref.subCanvasId)
+          : srcLayer;
+      const srcNode = srcSlot?.nodes.find((n) => n.id === ref.nodeId);
+      if (!srcSlot || !srcNode) return false;
+
+      const refId = `ref-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 4)}`;
+      const existingRefs = active.slot.nodes.filter((n) => Boolean(n.ref)).length;
+      const posX = x ?? 60 + (existingRefs % 3) * 280;
+      const posY = y ?? 60 + Math.floor(existingRefs / 3) * 140;
+      const locationLabel = ref.subCanvasId ? `${srcLayer.name} / ${srcSlot.name}` : srcLayer.name;
+
+      const refNode: EntityNode = {
+        id: refId,
+        dslId: sanitizeDslId(`ref_${srcNode.dslId || srcNode.title}`, `ref_${existingRefs + 1}`),
+        kind: 'store_ref',
+        title: srcNode.title,
+        tag: `REF · ${srcSlot.name}`,
+        note: `跨层只读引用（双击跳转至「${locationLabel}」）`,
+        color: 'slate',
+        icon: srcNode.icon,
+        ref: { ...ref },
+        x: posX,
+        y: posY,
+        pinned: true,
+      };
+
+      const next = mutateActiveSlot(projects, activeProjectId, activeLayerIndex, (slot) => {
+        const baseDsl = slot.dslSource;
+        slot.nodes.push(refNode);
+        slot.dslSource = baseDsl
+          ? appendEntityToDsl(baseDsl, refNode, slot.nodes)
+          : serializeSlotToDsl(slot);
+      });
+      set({ projects: next, selectedNodeId: refId, selectedEdgeId: null });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast(`已引入跨层引用「${srcNode.title}」← ${locationLabel}`);
+      return true;
     },
 
     drillToNodeTarget(node) {
@@ -1036,7 +1332,18 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     },
 
     updateNode(nodeId, patch) {
-      const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
+      const { activeProjectId, activeLayerIndex, projects } = get();
+      const activeBefore = getActiveSlotFromProject(
+        projects.find((p) => p.id === activeProjectId),
+        activeLayerIndex
+      );
+      const srcLayerId = activeBefore?.layer.id;
+      const srcSubId =
+        activeBefore?.layer.children && activeBefore.layer.children.length > 0
+          ? activeBefore.slot.id
+          : undefined;
+
+      let next = mutateActiveSlot(projects, activeProjectId, activeLayerIndex, (slot) => {
         const target = slot.nodes.find((n) => n.id === nodeId);
         if (!target) return;
 
@@ -1049,6 +1356,39 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           slot.dslSource = serializeSlotToDsl(slot);
         }
       });
+
+      // Keep cross-layer read-only reference anchors synced when source entity title changes
+      if (typeof patch.title === 'string' && srcLayerId) {
+        const syncedTitle = patch.title;
+        next = next.map((p) => {
+          if (p.id !== activeProjectId) return p;
+          let changed = false;
+          const copy = clone(p);
+          for (const layer of copy.layers) {
+            const slots = layer.children && layer.children.length > 0 ? layer.children : [layer];
+            for (const slot of slots) {
+              for (const n of slot.nodes) {
+                if (
+                  n.ref &&
+                  n.ref.layerId === srcLayerId &&
+                  (n.ref.subCanvasId ?? '') === (srcSubId ?? '') &&
+                  n.ref.nodeId === nodeId &&
+                  n.title !== syncedTitle
+                ) {
+                  n.title = syncedTitle;
+                  if (slot.dslSource) {
+                    const patched = patchEntityInDsl(slot.dslSource, n, slot.nodes);
+                    slot.dslSource = patched ?? serializeSlotToDsl(slot);
+                  }
+                  changed = true;
+                }
+              }
+            }
+          }
+          return changed ? copy : p;
+        });
+      }
+
       set({ projects: next });
       pushHistoryForCurrent(next);
       void persist(next);
