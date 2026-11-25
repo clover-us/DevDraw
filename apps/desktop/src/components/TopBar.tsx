@@ -277,11 +277,15 @@ export const TopBar: React.FC = () => {
           title="运行 / 停止动态链路推演"
           className={`h-7 flex items-center gap-1.5 px-2.5 rounded-lg border text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
             simulating
-              ? 'bg-emerald-500/25 border-emerald-400/50 text-emerald-300'
-              : 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/30 text-emerald-400'
+              ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300'
+              : 'bg-white/[0.04] hover:bg-white/[0.09] border-[var(--dd-border-subtle)] text-[var(--dd-text-secondary)] hover:text-[var(--dd-text-primary)]'
           }`}
         >
-          {simulating ? <Square className="w-3 h-3 shrink-0" /> : <Play className="w-3.5 h-3.5 shrink-0" />}
+          {simulating ? (
+            <Square className="w-3 h-3 text-emerald-300 shrink-0" />
+          ) : (
+            <Play className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          )}
           <span className="hidden md:inline">{simulating ? '停止推演' : '推演'}</span>
         </button>
 
