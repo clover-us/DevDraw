@@ -1,6 +1,6 @@
 import { isTauriRuntime } from '../storage/adapter';
 
-export const APP_VERSION = '0.2.0';
+export const APP_VERSION = '0.3.0';
 export const GITHUB_REPO = 'clover-us/DevDraw';
 export const GITHUB_REPO_URL = `https://github.com/${GITHUB_REPO}`;
 export const GITHUB_RELEASES_URL = `${GITHUB_REPO_URL}/releases`;

@@ -1,6 +1,6 @@
 [package]
 name = "devdraw-desktop"
-version = "0.2.0"
+version = "0.3.0"
 description = "DevDraw · 研绘 - 面向开发者的推演画布桌面端"
 authors = ["DevDraw Contributors"]
 edition = "2021"
