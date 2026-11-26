@@ -13,7 +13,6 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Settings,
   Trash2,
   Unlink,
   X,
@@ -133,9 +132,9 @@ export const LauncherView: React.FC = () => {
       {/* Top Window Bar (Frameless Custom Titlebar) */}
       <header
         data-tauri-drag-region
-        className="relative z-30 h-11 px-3 sm:px-4 flex items-center justify-between border-b border-white/[0.05] bg-[#131019]/75 backdrop-blur-md select-none"
+        className="relative z-40 h-11 px-3 sm:px-4 grid grid-cols-[1fr_auto_1fr] items-center border-b border-white/[0.05] bg-[#131019]/80 backdrop-blur-md select-none"
       >
-        <div className="flex items-center gap-2.5">
+        <div data-tauri-drag-region className="flex items-center justify-start">
           {/* Top-left Hamburger Application Menu */}
           <div className="relative" onClick={(e) => e.stopPropagation()}>
             <button
@@ -147,7 +146,7 @@ export const LauncherView: React.FC = () => {
               title="应用菜单与设置"
               className={`relative w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
                 appMenuOpen
-                  ? 'bg-white/[0.1] text-white'
+                  ? 'bg-white/[0.09] text-zinc-100'
                   : 'text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.07]'
               }`}
             >
@@ -158,14 +157,14 @@ export const LauncherView: React.FC = () => {
             </button>
 
             {appMenuOpen && (
-              <div className="absolute left-0 top-full mt-2 w-60 rounded-2xl bg-[#1a1524]/98 border border-white/12 shadow-[0_20px_50px_rgba(0,0,0,0.65)] backdrop-blur-xl py-1.5 z-50 text-[13px]">
+              <div className="absolute left-0 top-full mt-2 w-56 rounded-xl bg-[#1b1726] border border-white/[0.1] shadow-[0_18px_48px_rgba(0,0,0,0.7)] p-1.5 z-50 text-[13px]">
                 <button
                   type="button"
                   onClick={() => {
                     setAppMenuOpen(false);
                     createProject('未命名项目', ['空白项目']);
                   }}
-                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/[0.07] text-zinc-100 transition-colors"
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/[0.07] text-zinc-200 hover:text-white transition-colors"
                 >
                   <span>新建空白项目</span>
                   <span className="text-[11px] font-mono text-zinc-500">Ctrl+N</span>
@@ -176,7 +175,7 @@ export const LauncherView: React.FC = () => {
                     setAppMenuOpen(false);
                     setCreateModalOpen(true);
                   }}
-                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/[0.07] text-zinc-100 transition-colors"
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/[0.07] text-zinc-200 hover:text-white transition-colors"
                 >
                   <span>从模板新建</span>
                   <span className="text-[11px] font-mono text-zinc-500">
@@ -189,12 +188,12 @@ export const LauncherView: React.FC = () => {
                     setAppMenuOpen(false);
                     setImportModalOpen(true);
                   }}
-                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/[0.07] text-zinc-100 transition-colors"
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/[0.07] text-zinc-200 hover:text-white transition-colors"
                 >
                   <span>导入本地项目...</span>
                 </button>
 
-                <div className="my-1.5 border-t border-white/[0.07]" />
+                <div className="my-1.5 mx-1.5 border-t border-white/[0.07]" />
 
                 <button
                   type="button"
@@ -202,7 +201,7 @@ export const LauncherView: React.FC = () => {
                     setAppMenuOpen(false);
                     void openWorkspaceFolder();
                   }}
-                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/[0.07] text-zinc-100 transition-colors"
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/[0.07] text-zinc-200 hover:text-white transition-colors"
                 >
                   <span>打开本地工作区目录</span>
                 </button>
@@ -212,13 +211,12 @@ export const LauncherView: React.FC = () => {
                     setAppMenuOpen(false);
                     openSettingsModal(updateCheckState === 'available' ? 'updates' : 'general');
                   }}
-                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/[0.07] text-zinc-100 transition-colors"
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/[0.07] text-zinc-200 hover:text-white transition-colors"
                 >
                   <span className="inline-flex items-center gap-2">
-                    <Settings className="w-3.5 h-3.5 text-violet-400" />
                     <span>设置</span>
                     {updateCheckState === 'available' && (
-                      <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-mono">
+                      <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-mono leading-none">
                         新版本
                       </span>
                     )}
@@ -231,39 +229,34 @@ export const LauncherView: React.FC = () => {
                     setAppMenuOpen(false);
                     resetDemoWorkspace();
                   }}
-                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-white/[0.07] text-zinc-200 transition-colors"
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/[0.07] text-zinc-200 hover:text-white transition-colors"
                 >
                   <span>重置演示工作区数据</span>
                 </button>
 
-                <div className="my-1.5 border-t border-white/[0.07]" />
+                <div className="my-1.5 mx-1.5 border-t border-white/[0.07]" />
 
                 <button
                   type="button"
                   onClick={() => void handleExitApp()}
-                  className="w-full flex items-center justify-between px-4 py-2 hover:bg-rose-500/15 text-rose-400 transition-colors"
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-rose-500/15 text-rose-400 hover:text-rose-300 transition-colors"
                 >
                   <span>退出桌面端</span>
                 </button>
               </div>
             )}
           </div>
-
-          <div data-tauri-drag-region className="flex items-center gap-2 text-xs text-zinc-400 font-mono">
-            <span className="w-2 h-2 rounded-full bg-violet-400 pointer-events-none" />
-            <span className="pointer-events-none">DevDraw Studio</span>
-          </div>
         </div>
 
         <div
           data-tauri-drag-region
-          className="px-3.5 py-1 rounded-full bg-[#221d2d]/90 border border-white/[0.08] text-xs font-medium text-zinc-200 flex items-center gap-2"
+          className="px-3.5 py-1 rounded-full bg-[#221d2d]/90 border border-white/[0.08] text-xs font-mono font-medium text-zinc-200 flex items-center gap-2 justify-self-center"
         >
           <span className="w-2 h-2 rounded-full bg-emerald-400 pointer-events-none" />
-          <span className="pointer-events-none">DevDraw · Tauri v2 本地工作台</span>
+          <span className="pointer-events-none">DevDraw Studio</span>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div data-tauri-drag-region className="flex items-center justify-end gap-2.5">
           {updateCheckState === 'available' && updateInfo && (
             <button
               type="button"
