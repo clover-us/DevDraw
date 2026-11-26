@@ -7,6 +7,7 @@ import type {
   SemanticColor,
 } from '../types';
 import { getAnnotationKind, isCollapsibleEntity, isGroupEntity } from '../primitives';
+import { resolveTechBadges } from '../techBadges';
 
 function sanitizeMermaidText(value: string): string {
   return String(value || '')
@@ -344,7 +345,7 @@ export function exportSlotToSvg(
       const strokeColor = e.dashed ? '#f59e0b' : '#8b5cf6';
       const markerId = e.dashed ? 'ddArrowAmber' : 'ddArrow';
       const dash = e.dashed ? ' stroke-dasharray="6 5"' : '';
-      const labelText = [e.protocol, e.label].filter(Boolean).join(' · ');
+      const labelText = [e.cardinality, e.protocol, e.label].filter(Boolean).join(' · ');
 
       let labelSvg = '';
       if (labelText) {
@@ -403,9 +404,30 @@ export function exportSlotToSvg(
             ? `    <rect x="0" y="10" width="3.5" height="${Math.max(16, b.h - 20)}" rx="2" fill="${tone.accent}"/>`
             : '';
 
-      const metaLine = [n.tech, n.spec, n.kv?.ttl ? `TTL ${n.kv.ttl}` : undefined]
-        .filter(Boolean)
-        .join(' · ');
+      const techParts = resolveTechBadges(n.tech).slice(0, 3);
+      const extraMeta = [n.spec, n.kv?.ttl ? `TTL ${n.kv.ttl}` : undefined].filter(Boolean).join(' · ');
+      const hasMetaRow = techParts.length > 0 || Boolean(extraMeta);
+
+      let techRowSvg = '';
+      if (techParts.length > 0) {
+        let cursorX = 14;
+        const pills: string[] = [];
+        for (const part of techParts) {
+          const text = part.badge ? part.badge.short : truncateText(part.raw, 12);
+          const pillW = Math.max(26, text.length * 6.5 + 12);
+          if (cursorX + pillW > b.w - 12) break;
+          const fill = part.badge ? part.badge.svgBg : tone.badgeBg;
+          const color = part.badge ? part.badge.hex : tone.accent;
+          pills.push(
+            `<rect x="${cursorX}" y="53" width="${Math.round(pillW)}" height="16" rx="4" fill="${fill}" stroke="${color}" stroke-opacity="0.45" stroke-width="0.8"/>` +
+              `<text x="${Math.round(cursorX + pillW / 2)}" y="64" text-anchor="middle" fill="${color}" font-size="9.5" font-weight="600" font-family="JetBrains Mono, monospace">${escapeXml(text)}</text>`
+          );
+          cursorX += Math.round(pillW) + 5;
+        }
+        techRowSvg = pills.join('\n    ');
+      } else if (extraMeta) {
+        techRowSvg = `<text x="14" y="64" fill="${tone.accent}" opacity="0.85" font-size="10" font-family="JetBrains Mono, monospace">${escapeXml(truncateText(extraMeta, 34))}</text>`;
+      }
 
       let bodySvg = '';
       if (b.fields.length > 0) {
@@ -426,7 +448,7 @@ export function exportSlotToSvg(
           .join('\n');
         bodySvg = rows;
       } else if (n.note) {
-        bodySvg = `    <text x="14" y="${metaLine ? 84 : 74}" fill="${subColor}" font-size="11" font-family="Inter, Noto Sans SC, sans-serif">${escapeXml(truncateText(n.note, 34))}</text>`;
+        bodySvg = `    <text x="14" y="${hasMetaRow ? 86 : 74}" fill="${subColor}" font-size="11" font-family="Inter, Noto Sans SC, sans-serif">${escapeXml(truncateText(n.note, 34))}</text>`;
       }
 
       return `  <g transform="translate(${Math.round(b.x)}, ${Math.round(b.y)})">
@@ -434,7 +456,7 @@ export function exportSlotToSvg(
 ${accentBarSvg}
     <text x="14" y="23" fill="${tone.accent}" font-size="10" font-weight="600" font-family="JetBrains Mono, monospace">${escapeXml(truncateText(n.tag, 28))}</text>
     <text x="14" y="45" fill="${titleColor}" font-size="13.5" font-weight="600" font-family="Inter, Noto Sans SC, sans-serif">${escapeXml(truncateText(n.title, 26))}</text>
-    ${metaLine ? `<text x="14" y="63" fill="${tone.accent}" opacity="0.85" font-size="10" font-family="JetBrains Mono, monospace">${escapeXml(truncateText(metaLine, 34))}</text>` : ''}
+    ${techRowSvg}
 ${bodySvg}
   </g>`;
     })

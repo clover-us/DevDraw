@@ -4,6 +4,7 @@ import {
   Box,
   ChevronRight,
   Copy,
+  CornerDownRight,
   Eraser,
   FileText,
   GitCommitHorizontal,
@@ -13,6 +14,7 @@ import {
   Moon,
   Palette,
   Pin,
+  Plus,
   Redo2,
   RotateCcw,
   ShieldCheck,
@@ -64,6 +66,8 @@ export interface CanvasContextMenuProps {
   // Node actions
   onInspectNode: (nodeId: string) => void;
   onCustomizeNodeStyle: (nodeId: string) => void;
+  onCreateChildNode?: (nodeId: string) => void;
+  onCreateSiblingNode?: (nodeId: string) => void;
   onStartConnectFromNode: (nodeId: string) => void;
   onDuplicateNode: (nodeId: string) => void;
   onToggleNodePinned: (nodeId: string) => void;
@@ -105,6 +109,8 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
   onClearFreehand,
   onInspectNode,
   onCustomizeNodeStyle,
+  onCreateChildNode,
+  onCreateSiblingNode,
   onStartConnectFromNode,
   onDuplicateNode,
   onToggleNodePinned,
@@ -448,6 +454,40 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
                 <span>自定义实体样式...</span>
               </span>
             </button>
+
+            {onCreateChildNode && (
+              <button
+                type="button"
+                onClick={() => {
+                  onCreateChildNode(target.node.id);
+                  onClose();
+                }}
+                className={rowClass}
+              >
+                <span className="flex items-center gap-2">
+                  <CornerDownRight className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>新建下游子节点</span>
+                </span>
+                <span className="text-[10px] font-mono text-zinc-500">Tab</span>
+              </button>
+            )}
+
+            {onCreateSiblingNode && (
+              <button
+                type="button"
+                onClick={() => {
+                  onCreateSiblingNode(target.node.id);
+                  onClose();
+                }}
+                className={rowClass}
+              >
+                <span className="flex items-center gap-2">
+                  <Plus className="w-3.5 h-3.5 text-sky-400" />
+                  <span>新建同级节点</span>
+                </span>
+                <span className="text-[10px] font-mono text-zinc-500">Enter</span>
+              </button>
+            )}
 
             <button
               type="button"

@@ -30,6 +30,7 @@ import {
   LayoutGrid,
   ListFilter,
   ListOrdered,
+  Map as MapIcon,
   Maximize,
   Minimize2,
   Minus,
@@ -138,6 +139,8 @@ export interface DevDrawCanvasProps {
     targetPort?: PortSide
   ) => void;
   onDropPrimitive: (kind: string, x: number, y: number) => void;
+  onCreateChildNode?: (nodeId: string) => void;
+  onCreateSiblingNode?: (nodeId: string) => void;
   onDuplicateNode: (nodeId: string) => void;
   onToggleNodePinned: (nodeId: string) => void;
   onDisconnectNode: (nodeId: string) => void;
@@ -152,6 +155,8 @@ export interface DevDrawCanvasProps {
   onCycleDensity: () => void;
   onToggleCompactMode: () => void;
   onToggleTheme: () => void;
+  showMiniMap?: boolean;
+  onToggleMiniMap?: () => void;
   onRunAutoLayout: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -208,6 +213,8 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
   onDeleteSelectedNodes,
   onConnectNodes,
   onDropPrimitive,
+  onCreateChildNode,
+  onCreateSiblingNode,
   onDuplicateNode,
   onToggleNodePinned,
   onDisconnectNode,
@@ -222,6 +229,8 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
   onCycleDensity,
   onToggleCompactMode,
   onToggleTheme,
+  showMiniMap = true,
+  onToggleMiniMap,
   onRunAutoLayout,
   onUndo,
   onRedo,
@@ -755,6 +764,7 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
               { id: 'dd-arrow-sky', fill: '#38bdf8' },
               { id: 'dd-arrow-sky-light', fill: '#0284c7' },
               { id: 'dd-arrow-emerald', fill: '#34d399' },
+              { id: 'dd-arrow-rose', fill: '#f43f5e' },
             ].map((m) => (
               <marker
                 key={m.id}
@@ -780,36 +790,38 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
           color={isLight ? '#cbd5e1' : 'rgba(167, 139, 250, 0.22)'}
         />
 
-        <MiniMap
-          pannable
-          zoomable
-          position="bottom-right"
-          nodeBorderRadius={6}
-          nodeStrokeWidth={3}
-          bgColor="transparent"
-          maskColor="transparent"
-          maskStrokeColor="transparent"
-          maskStrokeWidth={0}
-          style={{
-            width: 168,
-            height: 104,
-            borderRadius: 12,
-            overflow: 'hidden',
-            backgroundColor: isLight ? 'rgba(255,255,255,0.88)' : 'rgba(18,17,26,0.92)',
-            border: isLight ? '1px solid rgba(15,23,42,0.09)' : '1px solid rgba(255,255,255,0.08)',
-            backdropFilter: 'blur(12px)',
-          }}
-          nodeColor={(n) => {
-            const isSel = n.id === selectedNodeId;
-            if (isSel) return isLight ? '#0ea5e9' : '#38bdf8';
-            return isLight ? 'rgba(124, 58, 237, 0.55)' : 'rgba(139, 92, 246, 0.55)';
-          }}
-          nodeStrokeColor={(n) => {
-            const isSel = n.id === selectedNodeId;
-            if (!isSel) return 'transparent';
-            return isLight ? '#0369a1' : '#e0f2fe';
-          }}
-        />
+        {showMiniMap && (
+          <MiniMap
+            pannable
+            zoomable
+            position="bottom-right"
+            nodeBorderRadius={6}
+            nodeStrokeWidth={3}
+            bgColor="transparent"
+            maskColor="transparent"
+            maskStrokeColor="transparent"
+            maskStrokeWidth={0}
+            style={{
+              width: 168,
+              height: 104,
+              borderRadius: 12,
+              overflow: 'hidden',
+              backgroundColor: isLight ? 'rgba(255,255,255,0.88)' : 'rgba(18,17,26,0.92)',
+              border: isLight ? '1px solid rgba(15,23,42,0.09)' : '1px solid rgba(255,255,255,0.08)',
+              backdropFilter: 'blur(12px)',
+            }}
+            nodeColor={(n) => {
+              const isSel = n.id === selectedNodeId;
+              if (isSel) return isLight ? '#0ea5e9' : '#38bdf8';
+              return isLight ? 'rgba(124, 58, 237, 0.55)' : 'rgba(139, 92, 246, 0.55)';
+            }}
+            nodeStrokeColor={(n) => {
+              const isSel = n.id === selectedNodeId;
+              if (!isSel) return 'transparent';
+              return isLight ? '#0369a1' : '#e0f2fe';
+            }}
+          />
+        )}
       </ReactFlow>
 
       {/* World-space Freehand Sketch Layer */}
@@ -846,6 +858,8 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
         onClearFreehand={onClearFreehandStrokes}
         onInspectNode={onOpenNodeInspector}
         onCustomizeNodeStyle={onCustomizeNodeStyle}
+        onCreateChildNode={onCreateChildNode}
+        onCreateSiblingNode={onCreateSiblingNode}
         onStartConnectFromNode={(nodeId) => {
           setConnectSourceId(nodeId);
           onSetTool('connect');
@@ -1093,7 +1107,7 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
         <span className="hidden md:inline truncate">
           {activeTool === 'draw'
             ? '自由落绘中：按住左键直接勾勒草图 · Esc 返回选择'
-            : '单击选中 / 双击实体或连线看详情 / 右键更多操作'}
+            : 'Tab 下游建点 / Enter 同级建点 / 双击看详情 / 右键菜单'}
         </span>
         <div className="h-3 w-px bg-[var(--dd-border-strong)] mx-0.5" />
 
@@ -1127,6 +1141,17 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
           </button>
         )}
 
+        {onToggleMiniMap && (
+          <button
+            type="button"
+            onClick={onToggleMiniMap}
+            title={showMiniMap ? '隐藏右下角迷你地图' : '显示右下角迷你地图'}
+            className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+          >
+            <MapIcon className={`w-3.5 h-3.5 ${showMiniMap ? 'text-sky-400' : ''}`} />
+          </button>
+        )}
+
         <button
           type="button"
           onClick={onToggleTheme}
@@ -1142,7 +1167,11 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
       </div>
 
       {/* Bottom-right Vertical View Control Stack (next to MiniMap) */}
-      <div className="hidden sm:flex flex-col absolute bottom-4 right-[192px] z-30 w-7 h-[104px] rounded-xl border overflow-hidden divide-y bg-[var(--dd-bg-elevated)] border-[var(--dd-border-subtle)] divide-[var(--dd-border-subtle)] shadow-xl">
+      <div
+        className={`hidden sm:flex flex-col absolute bottom-4 ${
+          showMiniMap ? 'right-[192px]' : 'right-4'
+        } z-30 w-7 h-[104px] rounded-xl border overflow-hidden divide-y bg-[var(--dd-bg-elevated)] border-[var(--dd-border-subtle)] divide-[var(--dd-border-subtle)] shadow-xl transition-[right] duration-150`}
+      >
         <button
           type="button"
           onClick={() => zoomIn()}

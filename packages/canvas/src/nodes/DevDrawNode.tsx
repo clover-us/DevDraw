@@ -69,6 +69,7 @@ import {
   getAnnotationKind,
   isCollapsibleEntity,
   isGroupEntity,
+  resolveTechBadges,
   type CanvasExpandMode,
   type EntityNode,
   type EntityVisualStyle,
@@ -101,6 +102,8 @@ export interface DevDrawFlowNodeData extends Record<string, unknown> {
   compactMode?: boolean;
   relatedFields: string[];
   flowState?: 'idle' | 'active' | 'dimmed';
+  diffState?: 'added' | 'modified' | 'removed' | 'unchanged';
+  diffSummary?: string;
   onToggleCollapse?: (nodeId: string) => void;
   onDrillDown?: (node: EntityNode) => void;
   onResizeNode?: (nodeId: string, x: number, y: number, w: number, h: number) => void;
@@ -276,10 +279,14 @@ export const DevDrawNodeComponent = memo(function DevDrawNodeComponent({
     compactMode = false,
     relatedFields,
     flowState = 'idle',
+    diffState,
+    diffSummary,
     onToggleCollapse,
     onDrillDown,
     onResizeNode,
   } = data;
+
+  const techParts = resolveTechBadges(entity.tech);
 
   const isLight = theme === 'light';
   const annKind = getAnnotationKind(entity);
@@ -319,6 +326,26 @@ export const DevDrawNodeComponent = memo(function DevDrawNodeComponent({
       : flowState === 'active'
         ? 'ring-2 ring-emerald-400/80 shadow-[0_0_24px_rgba(52,211,153,0.3)]'
         : '';
+
+  const diffClass =
+    diffState === 'added'
+      ? 'ring-2 ring-emerald-400/85 !border-emerald-400/80 shadow-[0_0_24px_rgba(52,211,153,0.22)]'
+      : diffState === 'modified'
+        ? 'ring-2 ring-amber-400/85 !border-amber-400/80 shadow-[0_0_24px_rgba(251,191,36,0.2)]'
+        : diffState === 'removed'
+          ? 'ring-2 ring-rose-500/80 !border-rose-500/75 !border-dashed opacity-70 saturate-50'
+          : diffState === 'unchanged'
+            ? 'opacity-45'
+            : '';
+
+  const diffBadge =
+    diffState === 'added'
+      ? { label: '+ 新增', cls: 'bg-emerald-500 text-emerald-950' }
+      : diffState === 'modified'
+        ? { label: '~ 变更', cls: 'bg-amber-400 text-amber-950' }
+        : diffState === 'removed'
+          ? { label: '- 已移除', cls: 'bg-rose-500 text-white' }
+          : null;
 
   const selectedRing = selected
     ? isLight
@@ -460,11 +487,19 @@ export const DevDrawNodeComponent = memo(function DevDrawNodeComponent({
 
   return (
     <div
-      title={isCompactCard && entity.note ? entity.note : undefined}
+      title={diffSummary || (isCompactCard && entity.note ? entity.note : undefined)}
       className={`group relative ${
         isCompactCard ? 'min-w-[160px] max-w-[236px]' : 'min-w-[224px] max-w-[272px]'
-      } border ${radiusClass} ${borderStyleClass} ${surfaceClass} ${selectedRing} ${flowClass} transition-all duration-150 select-none before:content-[''] before:absolute before:-inset-3 before:-z-10 before:rounded-3xl`}
+      } border ${radiusClass} ${borderStyleClass} ${surfaceClass} ${selectedRing} ${flowClass} ${diffClass} transition-all duration-150 select-none before:content-[''] before:absolute before:-inset-3 before:-z-10 before:rounded-3xl`}
     >
+      {diffBadge && (
+        <span
+          title={diffSummary}
+          className={`absolute -top-2.5 right-2.5 z-20 px-1.5 py-0.5 rounded-full text-[9.5px] font-mono font-bold shadow-md ${diffBadge.cls}`}
+        >
+          {diffBadge.label}
+        </span>
+      )}
       {/* Optional Semantic Accent Bar */}
       {effectiveAccentBar === 'top' && (
         <div className={`h-[3px] w-full ${palette.bar} ${radiusClass === 'rounded-lg' ? 'rounded-t-lg' : radiusClass === 'rounded-2xl' ? 'rounded-t-2xl' : 'rounded-t-[10px]'} opacity-85`} />
@@ -525,18 +560,6 @@ export const DevDrawNodeComponent = memo(function DevDrawNodeComponent({
             >
               {entity.tag}
             </span>
-            {!isCompactCard && entity.tech && (
-              <>
-                <span className="text-[9px] text-zinc-600">·</span>
-                <span
-                  className={`text-[10px] font-mono leading-none truncate ${
-                    isLight ? 'text-slate-400' : 'text-zinc-500'
-                  }`}
-                >
-                  {entity.tech}
-                </span>
-              </>
-            )}
           </div>
 
           <div
@@ -546,6 +569,38 @@ export const DevDrawNodeComponent = memo(function DevDrawNodeComponent({
           >
             {entity.title}
           </div>
+
+          {!isCompactCard && techParts.length > 0 && (
+            <div className="mt-1.5 flex items-center flex-wrap gap-1">
+              {techParts.slice(0, 3).map((part, idx) =>
+                part.badge ? (
+                  <span
+                    key={`${part.badge.id}-${idx}`}
+                    title={part.raw}
+                    style={{
+                      color: part.badge.hex,
+                      backgroundColor: part.badge.svgBg,
+                      borderColor: `${part.badge.hex}55`,
+                    }}
+                    className="inline-flex items-center px-1.5 py-[1px] rounded border text-[9.5px] font-mono font-semibold leading-tight"
+                  >
+                    {part.badge.short}
+                  </span>
+                ) : (
+                  <span
+                    key={`${part.raw}-${idx}`}
+                    className={`inline-flex items-center px-1.5 py-[1px] rounded border text-[9.5px] font-mono leading-tight ${
+                      isLight
+                        ? 'bg-slate-100 border-slate-200 text-slate-600'
+                        : 'bg-white/[0.06] border-white/10 text-zinc-300'
+                    }`}
+                  >
+                    {part.raw}
+                  </span>
+                )
+              )}
+            </div>
+          )}
 
           {!isCompactCard && (entity.spec || entity.aggregate || entity.complexity) && (
             <div className="mt-1 text-[10px] font-mono text-violet-400/90 truncate">

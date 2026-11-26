@@ -13,6 +13,7 @@ import {
   deleteEntityFromDsl,
   distributeNodes,
   findPrimitiveByKind,
+  getAnnotationKind,
   importDevDrawJson,
   importMermaidToSlot,
   importSqlDdlToSlot,
@@ -189,6 +190,8 @@ interface WorkbenchState {
   openEdgeInspector: (edgeId: string) => void;
   closeInspector: () => void;
   addNodeFromPrimitive: (kind: string, x: number, y: number) => void;
+  createConnectedChildNode: (sourceNodeId: string) => void;
+  createSiblingNode: (nodeId: string) => void;
   moveNode: (nodeId: string, x: number, y: number) => void;
   moveNodes: (updates: Array<{ id: string; x: number; y: number }>) => void;
   resizeNode: (nodeId: string, x: number, y: number, w: number, h: number) => void;
@@ -1766,6 +1769,194 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
       void persist(next);
     },
 
+    createConnectedChildNode(sourceNodeId) {
+      const { projects, activeProjectId, activeLayerIndex, appSettings } = get();
+      const proj = projects.find((p) => p.id === activeProjectId);
+      const active = getActiveSlotFromProject(proj, activeLayerIndex);
+      if (!active) return;
+      const source = active.slot.nodes.find((n) => n.id === sourceNodeId);
+      if (!source) return;
+
+      const kind =
+        source.kind === 'group' || getAnnotationKind(source) || source.kind === 'store_ref'
+          ? 'svc'
+          : source.kind;
+      const prim = findPrimitiveByKind(kind);
+      const isEr = kind.startsWith('er_');
+      const isKv = kind.startsWith('kv_');
+
+      // Find non-overlapping position to the right of source
+      const baseX = Math.round(source.x + (source.w ?? 256) + 84);
+      let posY = Math.round(source.y);
+      const occupied = (tx: number, ty: number) =>
+        active.slot.nodes.some((n) => Math.abs(n.x - tx) < 180 && Math.abs(n.y - ty) < 96);
+      let guard = 0;
+      while (occupied(baseX, posY) && guard < 12) {
+        posY += 136;
+        guard++;
+      }
+
+      const stamp = Date.now().toString(36);
+      const rand = Math.random().toString(36).slice(2, 5);
+      const newId = `n-${stamp}-${rand}`;
+      const newNode: EntityNode = {
+        id: newId,
+        dslId: sanitizeDslId(`${kind}_${rand}`, `node_${rand}`),
+        kind,
+        title: prim?.label ? `${prim.label}` : '下游节点',
+        tag: prim?.badge || source.tag || kind.toUpperCase(),
+        note: '',
+        color: (prim?.defaultColor || source.color || 'sky') as SemanticColor,
+        icon: prim?.icon || source.icon,
+        engine: prim?.engine || source.engine,
+        fields: isEr
+          ? [
+              { key: 'PK', name: 'id', type: 'BIGINT', note: '主键' },
+              { key: '', name: 'created_at', type: 'TIMESTAMP', note: '创建时间' },
+            ]
+          : isKv
+            ? [{ name: 'payload', type: 'string', note: '缓存值' }]
+            : undefined,
+        kv: isKv ? { ttl: '3600s', policy: 'allkeys-lru' } : undefined,
+        x: baseX,
+        y: posY,
+        pinned: true,
+      };
+
+      const newEdge: RelationEdge = {
+        id: `e-${stamp}-${rand}`,
+        from: source.id,
+        to: newId,
+        sourcePort: 'right',
+        targetPort: 'left',
+        label: isEr ? '关联' : '调用',
+        cardinality: isEr ? '1:N' : undefined,
+        routing: appSettings.defaultEdgeRouting,
+      };
+
+      const next = mutateActiveSlot(projects, activeProjectId, activeLayerIndex, (slot) => {
+        const baseDsl = slot.dslSource;
+        const prevEdges = [...slot.edges];
+        slot.nodes.push(newNode);
+        slot.edges.push(newEdge);
+        if (baseDsl) {
+          const withNode = appendEntityToDsl(baseDsl, newNode, slot.nodes);
+          const withEdge = appendEdgeToDsl(withNode, newEdge, slot.nodes, prevEdges);
+          slot.dslSource = withEdge ?? serializeSlotToDsl(slot);
+        } else {
+          slot.dslSource = serializeSlotToDsl(slot);
+        }
+      });
+
+      set({
+        projects: next,
+        selectedNodeId: newId,
+        selectedNodeIds: [newId],
+        selectedEdgeId: null,
+        focusNodeRequest: { nodeId: newId, nonce: Date.now() },
+      });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast(`已从「${source.title}」新建下游节点 (Tab)`);
+    },
+
+    createSiblingNode(nodeId) {
+      const { projects, activeProjectId, activeLayerIndex, appSettings } = get();
+      const proj = projects.find((p) => p.id === activeProjectId);
+      const active = getActiveSlotFromProject(proj, activeLayerIndex);
+      if (!active) return;
+      const current = active.slot.nodes.find((n) => n.id === nodeId);
+      if (!current) return;
+
+      const kind =
+        current.kind === 'group' || current.kind === 'store_ref' ? 'svc' : current.kind;
+      const prim = findPrimitiveByKind(kind);
+      const isEr = kind.startsWith('er_');
+      const isKv = kind.startsWith('kv_');
+
+      // Place cleanly below current node without overlap
+      const baseX = Math.round(current.x);
+      let posY = Math.round(current.y + (current.h ?? 108) + 38);
+      const occupied = (tx: number, ty: number) =>
+        active.slot.nodes.some((n) => Math.abs(n.x - tx) < 180 && Math.abs(n.y - ty) < 96);
+      let guard = 0;
+      while (occupied(baseX, posY) && guard < 12) {
+        posY += 136;
+        guard++;
+      }
+
+      const stamp = Date.now().toString(36);
+      const rand = Math.random().toString(36).slice(2, 5);
+      const newId = `n-${stamp}-${rand}`;
+      const newNode: EntityNode = {
+        id: newId,
+        dslId: sanitizeDslId(`${kind}_${rand}`, `node_${rand}`),
+        kind,
+        title: prim?.label ? `${prim.label}` : '同级节点',
+        tag: prim?.badge || current.tag || kind.toUpperCase(),
+        note: '',
+        color: (prim?.defaultColor || current.color || 'sky') as SemanticColor,
+        icon: prim?.icon || current.icon,
+        engine: prim?.engine || current.engine,
+        fields: isEr
+          ? [
+              { key: 'PK', name: 'id', type: 'BIGINT', note: '主键' },
+              { key: '', name: 'created_at', type: 'TIMESTAMP', note: '创建时间' },
+            ]
+          : isKv
+            ? [{ name: 'payload', type: 'string', note: '缓存值' }]
+            : undefined,
+        kv: isKv ? { ttl: '3600s', policy: 'allkeys-lru' } : undefined,
+        x: baseX,
+        y: posY,
+        pinned: true,
+      };
+
+      // If current node has an upstream parent edge, also connect parent -> new sibling
+      const incomingEdge = active.slot.edges.find((e) => e.to === current.id && e.from !== current.id);
+      const siblingEdge: RelationEdge | null = incomingEdge
+        ? {
+            id: `e-${stamp}-${rand}`,
+            from: incomingEdge.from,
+            to: newId,
+            label: incomingEdge.label || (isEr ? '关联' : '调用'),
+            protocol: incomingEdge.protocol,
+            cardinality: incomingEdge.cardinality,
+            dashed: incomingEdge.dashed,
+            routing: incomingEdge.routing ?? appSettings.defaultEdgeRouting,
+          }
+        : null;
+
+      const next = mutateActiveSlot(projects, activeProjectId, activeLayerIndex, (slot) => {
+        const baseDsl = slot.dslSource;
+        const prevEdges = [...slot.edges];
+        slot.nodes.push(newNode);
+        if (siblingEdge) slot.edges.push(siblingEdge);
+        if (baseDsl) {
+          const withNode = appendEntityToDsl(baseDsl, newNode, slot.nodes);
+          const withEdge = siblingEdge
+            ? appendEdgeToDsl(withNode, siblingEdge, slot.nodes, prevEdges)
+            : withNode;
+          slot.dslSource = withEdge ?? serializeSlotToDsl(slot);
+        } else {
+          slot.dslSource = serializeSlotToDsl(slot);
+        }
+      });
+
+      set({
+        projects: next,
+        selectedNodeId: newId,
+        selectedNodeIds: [newId],
+        selectedEdgeId: null,
+        focusNodeRequest: { nodeId: newId, nonce: Date.now() },
+      });
+      pushHistoryForCurrent(next);
+      void persist(next);
+      get().showToast(
+        siblingEdge ? '已新建同级节点并复用上游连线 (Enter)' : '已新建同级节点 (Enter)'
+      );
+    },
+
     moveNode(nodeId, x, y) {
       // Geometry drag ONLY updates coordinates & pinned flag — preserves .arch DSL source untouched!
       const next = mutateActiveSlot(get().projects, get().activeProjectId, get().activeLayerIndex, (slot) => {
@@ -2088,7 +2279,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
           toField,
           sourcePort: isFieldLink ? undefined : sourcePort,
           targetPort: isFieldLink ? undefined : targetPort,
-          label: isFieldLink ? '1 : N' : 'calls',
+          label: isFieldLink ? '外键关联' : 'calls',
+          cardinality: isFieldLink ? '1:N' : undefined,
           routing: isFieldLink ? 'orthogonal' : get().appSettings.defaultEdgeRouting,
         };
         const prevDsl = slot.dslSource;

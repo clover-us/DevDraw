@@ -226,6 +226,7 @@ export function serializeEdgeToDsl(edge: RelationEdge, idToDsl: Map<string, stri
   const labelPart = edge.label ? ` "${escapeString(edge.label)}"` : '';
   const attrs: string[] = [];
   if (edge.protocol) attrs.push(edge.protocol);
+  if (edge.cardinality) attrs.push(edge.cardinality);
   if (edge.routing === 'orthogonal') attrs.push('orthogonal');
   if (edge.resilience?.timeout) attrs.push(`timeout: "${escapeString(edge.resilience.timeout)}"`);
   if (typeof edge.resilience?.retry === 'number') attrs.push(`retry: ${edge.resilience.retry}`);
@@ -499,6 +500,7 @@ export function parseArchDsl(
         .map((s) => s.trim())
         .filter(Boolean);
       let protocol: string | undefined;
+      let cardinality: RelationEdge['cardinality'];
       let routing: 'bezier' | 'orthogonal' | undefined;
       const resilience: EdgeResilience = {};
       let hasResilience = false;
@@ -507,7 +509,14 @@ export function parseArchDsl(
         if (part === 'async') dashed = true;
         else if (part === 'orthogonal') routing = 'orthogonal';
         else if (part === 'bezier') routing = 'bezier';
-        else if (part === 'circuitBreaker') {
+        else if (part === '1:1' || part === '1:N' || part === 'N:1' || part === 'N:M') {
+          cardinality = part;
+        } else if (part.startsWith('cardinality:')) {
+          const val = part.replace(/^cardinality:\s*"?([^"]*)"?$/, '$1');
+          if (val === '1:1' || val === '1:N' || val === 'N:1' || val === 'N:M') {
+            cardinality = val;
+          }
+        } else if (part === 'circuitBreaker') {
           resilience.circuitBreaker = true;
           hasResilience = true;
         } else if (part.startsWith('timeout:')) {
@@ -534,6 +543,7 @@ export function parseArchDsl(
         toField,
         label,
         protocol,
+        cardinality,
         dashed,
         routing,
         resilience: hasResilience ? resilience : undefined,

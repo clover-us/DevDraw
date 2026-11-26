@@ -1,5 +1,6 @@
 export * from './types';
 export * from './primitives';
+export * from './techBadges';
 export * from './presets';
 export * from './dsl/parser';
 export * from './layout/elkAdapter';

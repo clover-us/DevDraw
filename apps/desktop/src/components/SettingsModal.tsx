@@ -204,6 +204,28 @@ export const SettingsModal: React.FC = () => {
                   </button>
                 </div>
 
+                <div className="p-3.5 rounded-xl bg-white/[0.025] border border-white/[0.07] flex items-center justify-between gap-4">
+                  <div>
+                    <div className="font-medium text-zinc-100">显示画布右下角迷你地图 (MiniMap)</div>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">
+                      关闭后可释放更多画布可视区域（也可在画布左下角快速切换）
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => updateAppSettings({ showMiniMap: !appSettings.showMiniMap })}
+                    className={`w-10 h-5 rounded-full transition-colors p-0.5 shrink-0 ${
+                      appSettings.showMiniMap ? 'bg-sky-500' : 'bg-white/15'
+                    }`}
+                  >
+                    <span
+                      className={`block w-4 h-4 rounded-full bg-white transition-transform ${
+                        appSettings.showMiniMap ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
                 <div className="p-3.5 rounded-xl bg-white/[0.025] border border-white/[0.07] space-y-2.5">
                   <div>
                     <div className="font-medium text-zinc-100">默认连线路由样式</div>

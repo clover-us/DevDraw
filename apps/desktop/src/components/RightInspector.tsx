@@ -3,6 +3,8 @@ import { ExternalLink, Link2, PanelRightClose, Plus, Trash2 } from 'lucide-react
 import {
   getAnnotationKind,
   isCollapsibleEntity,
+  TECH_BADGES,
+  type EdgeCardinality,
   type EntityStatus,
   type ErField,
   type NodeLinks,
@@ -60,6 +62,26 @@ export const RightInspector: React.FC = () => {
     if (!node) return;
     const fields = (node.fields ?? []).filter((_, i) => i !== idx);
     updateNode(node.id, { fields });
+  };
+
+  const toggleTechBadge = (label: string) => {
+    if (!node) return;
+    const parts = (node.tech ?? '')
+      .split('/')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const existsIdx = parts.findIndex((p) => p.toLowerCase() === label.toLowerCase());
+    const next =
+      existsIdx >= 0 ? parts.filter((_, i) => i !== existsIdx) : [...parts, label];
+    updateNode(node.id, { tech: next.length > 0 ? next.join(' / ') : undefined });
+  };
+
+  const cycleFieldKey = (idx: number) => {
+    if (!node) return;
+    const cur = node.fields?.[idx]?.key ?? '';
+    const order: Array<ErField['key']> = ['', 'PK', 'FK', 'UK'];
+    const next = order[(order.indexOf(cur) + 1) % order.length];
+    updateField(idx, { key: next });
   };
 
   return (
@@ -123,6 +145,56 @@ export const RightInspector: React.FC = () => {
                 />
               </div>
             </div>
+
+            {!isAnnotation && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[10.5px] text-[var(--dd-text-muted)]">
+                  <span>快捷技术栈徽章（支持多选组合）</span>
+                  {node.tech && (
+                    <button
+                      type="button"
+                      onClick={() => updateNode(node.id, { tech: undefined })}
+                      className="text-[10px] text-zinc-500 hover:text-zinc-300"
+                    >
+                      清空
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto pr-0.5">
+                  {TECH_BADGES.map((badge) => {
+                    const activeBadge = (node.tech ?? '')
+                      .toLowerCase()
+                      .split(/[\/,+·|]+/)
+                      .map((s) => s.trim())
+                      .includes(badge.label.toLowerCase());
+                    return (
+                      <button
+                        key={badge.id}
+                        type="button"
+                        onClick={() => toggleTechBadge(badge.label)}
+                        title={`点击切换 ${badge.label}`}
+                        style={
+                          activeBadge
+                            ? {
+                                color: badge.hex,
+                                backgroundColor: badge.svgBg,
+                                borderColor: `${badge.hex}88`,
+                              }
+                            : undefined
+                        }
+                        className={`px-1.5 py-0.5 rounded border text-[10px] font-mono transition-colors ${
+                          activeBadge
+                            ? 'font-semibold'
+                            : 'bg-white/[0.03] border-[var(--dd-border-subtle)] text-zinc-400 hover:text-zinc-200 hover:border-white/20'
+                        }`}
+                      >
+                        {badge.short}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {!isAnnotation && (
               <>
@@ -303,6 +375,24 @@ export const RightInspector: React.FC = () => {
                 <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
                   {(node.fields ?? []).map((f, idx) => (
                     <div key={idx} className="flex items-center gap-1">
+                      {!isKv && (
+                        <button
+                          type="button"
+                          onClick={() => cycleFieldKey(idx)}
+                          title="点击切换键约束：无 / PK / FK / UK"
+                          className={`w-7 h-7 rounded border font-mono text-[9.5px] font-bold shrink-0 transition-colors ${
+                            f.key === 'PK'
+                              ? 'bg-amber-500/20 border-amber-400/40 text-amber-300'
+                              : f.key === 'FK'
+                                ? 'bg-sky-500/20 border-sky-400/40 text-sky-300'
+                                : f.key === 'UK'
+                                  ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-300'
+                                  : 'bg-black/20 border-[var(--dd-border-subtle)] text-zinc-500 hover:text-zinc-300'
+                          }`}
+                        >
+                          {f.key || '—'}
+                        </button>
+                      )}
                       <input
                         value={f.name}
                         onChange={(e) => updateField(idx, { name: e.target.value })}
@@ -311,7 +401,7 @@ export const RightInspector: React.FC = () => {
                       <input
                         value={f.type}
                         onChange={(e) => updateField(idx, { type: e.target.value })}
-                        className="w-24 h-7 px-1.5 rounded bg-black/20 border border-[var(--dd-border-subtle)] font-mono text-[10.5px]"
+                        className="w-20 h-7 px-1.5 rounded bg-black/20 border border-[var(--dd-border-subtle)] font-mono text-[10.5px]"
                       />
                       <button
                         type="button"
@@ -439,6 +529,31 @@ export const RightInspector: React.FC = () => {
                 placeholder="HTTPS / gRPC / Kafka / SQL"
                 className="w-full h-8 px-2.5 rounded-lg bg-black/20 border border-[var(--dd-border-subtle)] focus:border-sky-400 focus:outline-none font-mono"
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[11px] text-[var(--dd-text-secondary)]">
+                ER 关系基数 (Cardinality · 同步到 .arch)
+              </label>
+              <div className="grid grid-cols-5 gap-1">
+                {(['', '1:1', '1:N', 'N:1', 'N:M'] as Array<'' | EdgeCardinality>).map((card) => {
+                  const activeCard = (edge.cardinality ?? '') === card;
+                  return (
+                    <button
+                      key={card || 'none'}
+                      type="button"
+                      onClick={() => updateEdge(edge.id, { cardinality: card || undefined })}
+                      className={`py-1.5 rounded-lg border font-mono text-[10.5px] transition-colors ${
+                        activeCard
+                          ? 'bg-sky-500/20 border-sky-400/50 text-sky-300 font-semibold'
+                          : 'bg-white/[0.04] border-[var(--dd-border-subtle)] text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      {card || '无'}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="space-y-1.5">

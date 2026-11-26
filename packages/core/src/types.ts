@@ -124,6 +124,8 @@ export interface EdgeResilience {
   circuitBreaker?: boolean;
 }
 
+export type EdgeCardinality = '1:1' | '1:N' | 'N:1' | 'N:M';
+
 export interface RelationEdge {
   id: string;
   from: string;
@@ -134,6 +136,7 @@ export interface RelationEdge {
   targetPort?: PortSide;
   label: string;
   protocol?: string;
+  cardinality?: EdgeCardinality;
   dashed?: boolean;
   routing?: EdgeRoutingMode;
   curveOffsetX?: number;
@@ -256,6 +259,7 @@ export interface AppSettings {
   workspaceSyncDelayMs: 240 | 600 | 1200;
   dslCursorSync: boolean;
   flowAutoPlayIntervalMs: 1000 | 1600 | 2500 | 3500;
+  showMiniMap: boolean;
   lastUpdateCheckAt?: number;
 }
 
@@ -268,6 +272,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   workspaceSyncDelayMs: 240,
   dslCursorSync: true,
   flowAutoPlayIntervalMs: 1600,
+  showMiniMap: true,
 };
 
 export interface ProjectDocument {

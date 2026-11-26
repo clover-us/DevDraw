@@ -16,6 +16,7 @@ export interface DevDrawFlowEdgeData extends Record<string, unknown> {
   isSelected?: boolean;
   simulating?: boolean;
   flowState?: 'idle' | 'active' | 'dimmed';
+  diffState?: 'added' | 'modified' | 'removed' | 'unchanged';
   isEditingLabel?: boolean;
   onSelectEdge?: (edgeId: string) => void;
   onOpenInspector?: (edgeId: string) => void;
@@ -213,33 +214,49 @@ export const DevDrawEdgeComponent = memo(function DevDrawEdgeComponent({
   const isDimmed = flowState === 'dimmed';
   const isActive = flowState === 'active';
   const isSelected = Boolean(selected || data?.isSelected);
+  const diffState = data?.diffState;
 
-  const strokeColor = isActive
-    ? '#34d399'
-    : isSelected
-      ? isLight
-        ? '#0284c7'
-        : '#38bdf8'
-      : relation?.dashed
-        ? '#f59e0b'
-        : isLight
-          ? '#7c3aed'
-          : '#8b5cf6';
+  const strokeColor =
+    diffState === 'added'
+      ? '#34d399'
+      : diffState === 'modified'
+        ? '#fbbf24'
+        : diffState === 'removed'
+          ? '#f43f5e'
+          : isActive
+            ? '#34d399'
+            : isSelected
+              ? isLight
+                ? '#0284c7'
+                : '#38bdf8'
+              : relation?.dashed
+                ? '#f59e0b'
+                : isLight
+                  ? '#7c3aed'
+                  : '#8b5cf6';
 
-  const markerId = isActive
-    ? 'dd-arrow-emerald'
-    : isSelected
-      ? isLight
-        ? 'dd-arrow-sky-light'
-        : 'dd-arrow-sky'
-      : relation?.dashed
+  const markerId =
+    diffState === 'added'
+      ? 'dd-arrow-emerald'
+      : diffState === 'modified'
         ? 'dd-arrow-amber'
-        : isLight
-          ? 'dd-arrow-violet-light'
-          : 'dd-arrow-violet';
+        : diffState === 'removed'
+          ? 'dd-arrow-rose'
+          : isActive
+            ? 'dd-arrow-emerald'
+            : isSelected
+              ? isLight
+                ? 'dd-arrow-sky-light'
+                : 'dd-arrow-sky'
+              : relation?.dashed
+                ? 'dd-arrow-amber'
+                : isLight
+                  ? 'dd-arrow-violet-light'
+                  : 'dd-arrow-violet';
 
   const labelText = [relation?.protocol, relation?.label].filter(Boolean).join(' · ');
-  const showLabel = Boolean(labelText) || isEditingLabel;
+  const cardinality = relation?.cardinality;
+  const showLabel = Boolean(labelText) || Boolean(cardinality) || isEditingLabel;
 
   // When an orthogonal edge is selected and has no custom waypoints yet, offer a
   // single midpoint handle so the user can pull out a custom bend immediately.
@@ -259,9 +276,9 @@ export const DevDrawEdgeComponent = memo(function DevDrawEdgeComponent({
         interactionWidth={24}
         style={{
           stroke: strokeColor,
-          strokeWidth: isActive ? 2.4 : isSelected ? 2.1 : 1.5,
-          strokeDasharray: relation?.dashed ? '5 4' : undefined,
-          opacity: isDimmed ? 0.16 : isSelected ? 1 : 0.85,
+          strokeWidth: diffState && diffState !== 'unchanged' ? 2.3 : isActive ? 2.4 : isSelected ? 2.1 : 1.5,
+          strokeDasharray: diffState === 'removed' || relation?.dashed ? '5 4' : undefined,
+          opacity: isDimmed ? 0.16 : diffState === 'unchanged' ? 0.28 : isSelected ? 1 : 0.88,
           filter:
             isSelected && !isDimmed
               ? isLight
@@ -355,7 +372,7 @@ export const DevDrawEdgeComponent = memo(function DevDrawEdgeComponent({
                     ? '0 0 4px #f3f5f9, 0 0 8px #f3f5f9, 0 0 12px #f3f5f9'
                     : '0 0 4px #110e17, 0 0 8px #110e17, 0 0 12px #110e17',
                 }}
-                className={`inline-block text-[10.5px] font-sans tracking-[0.01em] leading-none whitespace-nowrap select-none cursor-pointer transition-colors ${
+                className={`inline-flex items-center gap-1.5 text-[10.5px] font-sans tracking-[0.01em] leading-none whitespace-nowrap select-none cursor-pointer transition-colors ${
                   isActive
                     ? isLight
                       ? 'text-emerald-600 font-semibold'
@@ -369,7 +386,18 @@ export const DevDrawEdgeComponent = memo(function DevDrawEdgeComponent({
                         : 'text-zinc-400 hover:text-zinc-200'
                 }`}
               >
-                {labelText}
+                {cardinality && (
+                  <span
+                    className={`px-1.5 py-0.5 rounded-md font-mono text-[9.5px] font-bold border ${
+                      isLight
+                        ? 'bg-sky-50 border-sky-300/80 text-sky-700'
+                        : 'bg-[#1a1526] border-sky-400/45 text-sky-300'
+                    }`}
+                  >
+                    {cardinality}
+                  </span>
+                )}
+                {labelText && <span>{labelText}</span>}
               </span>
             )}
           </div>

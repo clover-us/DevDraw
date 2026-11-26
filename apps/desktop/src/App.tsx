@@ -69,6 +69,7 @@ export const App: React.FC = () => {
     setCommandPaletteOpen,
     openSettingsModal,
     closeSettingsModal,
+    updateAppSettings,
     connectNodes,
     updateEdge,
     updateEdgeWaypoints,
@@ -77,6 +78,8 @@ export const App: React.FC = () => {
     reverseEdge,
     deleteEdge,
     addNodeFromPrimitive,
+    createConnectedChildNode,
+    createSiblingNode,
     addFreehandStroke,
     clearFreehandStrokes,
     toggleNodeCollapse,
@@ -219,6 +222,16 @@ export const App: React.FC = () => {
         addNodeFromPrimitive('decision', 260, 260);
       } else if (!e.ctrlKey && !e.metaKey && !e.altKey && lower === 't') {
         addNodeFromPrimitive('note', 300, 260);
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key === 'Tab') {
+        if (selectedNodeId && selectedNodeIds.length <= 1) {
+          e.preventDefault();
+          createConnectedChildNode(selectedNodeId);
+        }
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key === 'Enter') {
+        if (selectedNodeId && selectedNodeIds.length <= 1 && !inspectorOpen) {
+          e.preventDefault();
+          createSiblingNode(selectedNodeId);
+        }
       } else if (e.key === 'Escape') {
         if (flowPickEdgeMode) {
           setFlowPickEdgeMode(false);
@@ -271,6 +284,8 @@ export const App: React.FC = () => {
     selectEdge,
     closeInspector,
     addNodeFromPrimitive,
+    createConnectedChildNode,
+    createSiblingNode,
     deleteNode,
     deleteNodes,
     deleteEdge,
@@ -351,6 +366,8 @@ export const App: React.FC = () => {
               onDeleteSelectedNodes={() => deleteNodes(selectedNodeIds)}
               onConnectNodes={connectNodes}
               onDropPrimitive={addNodeFromPrimitive}
+              onCreateChildNode={createConnectedChildNode}
+              onCreateSiblingNode={createSiblingNode}
               onDuplicateNode={duplicateNode}
               onToggleNodePinned={toggleNodePinned}
               onDisconnectNode={disconnectNode}
@@ -365,6 +382,10 @@ export const App: React.FC = () => {
               onCycleDensity={cycleDensity}
               onToggleCompactMode={toggleCompactMode}
               onToggleTheme={toggleTheme}
+              showMiniMap={appSettings.showMiniMap}
+              onToggleMiniMap={() =>
+                updateAppSettings({ showMiniMap: !appSettings.showMiniMap })
+              }
               onRunAutoLayout={() => void runAutoLayout(false)}
               onUndo={undo}
               onRedo={redo}
