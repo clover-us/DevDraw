@@ -7,4 +7,5 @@ export * from './layout/elkAdapter';
 export * from './layout/align';
 export * from './export/exporters';
 export * from './import/importers';
+export * from './diff/slotDiff';
 export * from './workspace/workspaceCodec';

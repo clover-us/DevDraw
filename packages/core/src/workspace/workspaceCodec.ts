@@ -236,6 +236,48 @@ export function serializeProjectToWorkspaceFiles(project: ProjectDocument): Reco
   return files;
 }
 
+/**
+ * Resolve the canonical `layers/*.arch` relative path for a given layer / active sub-canvas
+ * in a three-layer local workspace directory.
+ */
+export function resolveSlotArchFilePath(
+  project: ProjectDocument,
+  layerIndex: number,
+  subCanvasIndex?: number
+): string | null {
+  const usedFilePaths = new Set<string>();
+  const allocateLayerFile = (rawId: string, fallback: string): string => {
+    const base = sanitizeFileSegment(rawId, fallback);
+    let candidate = `layers/${base}.arch`;
+    let suffix = 2;
+    while (usedFilePaths.has(candidate)) {
+      candidate = `layers/${base}-${suffix++}.arch`;
+    }
+    usedFilePaths.add(candidate);
+    return candidate;
+  };
+
+  for (let i = 0; i < project.layers.length; i++) {
+    const layer = project.layers[i];
+    if (layer.children && layer.children.length > 0) {
+      const targetSubIdx = subCanvasIndex ?? layer.activeChildIndex ?? 0;
+      for (let j = 0; j < layer.children.length; j++) {
+        const sub = layer.children[j];
+        const file = allocateLayerFile(`${layer.id}-${sub.id}`, `layer-${i + 1}-sub-${j + 1}`);
+        if (i === layerIndex && j === targetSubIdx) {
+          return file;
+        }
+      }
+    } else {
+      const file = allocateLayerFile(layer.id, `layer-${i + 1}`);
+      if (i === layerIndex) {
+        return file;
+      }
+    }
+  }
+  return null;
+}
+
 function applyLayoutToSlot(
   slot: CanvasSlot,
   viewLayout: ViewLayoutOverride | undefined

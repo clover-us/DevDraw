@@ -6,6 +6,7 @@ import {
   FolderGit2,
   FolderSync,
   GitCommitHorizontal,
+  GitCompareArrows,
   MousePointer2,
   PenTool,
   Play,
@@ -34,6 +35,8 @@ export const TopBar: React.FC = () => {
     saveState,
     dslSplitOpen,
     simulating,
+    leftTab,
+    diffBaseline,
     historyIndex,
     history,
     returnToLauncher,
@@ -44,7 +47,9 @@ export const TopBar: React.FC = () => {
     undo,
     redo,
     toggleDslSplit,
+    toggleLeftTab,
     toggleSimulation,
+    clearDiffBaseline,
     setExportModalOpen,
     setImportModalOpen,
     setCommandPaletteOpen,
@@ -287,6 +292,23 @@ export const TopBar: React.FC = () => {
             <Play className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
           )}
           <span className="hidden md:inline">{simulating ? '停止推演' : '推演'}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (diffBaseline) clearDiffBaseline();
+            else toggleLeftTab('versions');
+          }}
+          title={diffBaseline ? '退出当前可视化对比模式' : '打开版本快照与可视化架构对比 (Diff)'}
+          className={`h-7 flex items-center gap-1.5 px-2.5 rounded-lg border text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
+            diffBaseline || leftTab === 'versions'
+              ? 'bg-amber-500/20 border-amber-400/50 text-amber-300'
+              : 'bg-white/[0.04] hover:bg-white/[0.09] border-[var(--dd-border-subtle)] text-[var(--dd-text-secondary)] hover:text-[var(--dd-text-primary)]'
+          }`}
+        >
+          <GitCompareArrows className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <span className="hidden xl:inline">{diffBaseline ? '退出对比' : '对比'}</span>
         </button>
 
         <button

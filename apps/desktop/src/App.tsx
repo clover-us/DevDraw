@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
+import { computeSlotDiff } from '@devdraw/core';
 import { DevDrawCanvas } from '@devdraw/canvas';
 import { getActiveSlotFromProject, useWorkbenchStore } from './store/useWorkbenchStore';
 import { storageAdapter } from './storage/adapter';
@@ -38,6 +39,7 @@ export const App: React.FC = () => {
     flowStepIndex,
     isFlowPlaying,
     flowPickEdgeMode,
+    diffBaseline,
     history,
     historyIndex,
     recentKinds,
@@ -96,6 +98,7 @@ export const App: React.FC = () => {
     openFlowEditor,
     setFlowPickEdgeMode,
     addFlowStepFromEdge,
+    clearDiffBaseline,
     toggleDslSplit,
     runAutoLayout,
     undo,
@@ -233,7 +236,9 @@ export const App: React.FC = () => {
           createSiblingNode(selectedNodeId);
         }
       } else if (e.key === 'Escape') {
-        if (flowPickEdgeMode) {
+        if (diffBaseline) {
+          clearDiffBaseline();
+        } else if (flowPickEdgeMode) {
           setFlowPickEdgeMode(false);
         } else if (activeTool !== 'select') {
           setTool('select');
@@ -274,8 +279,10 @@ export const App: React.FC = () => {
     inspectorOpen,
     simulating,
     flowPickEdgeMode,
+    diffBaseline,
     setTool,
     setFlowPickEdgeMode,
+    clearDiffBaseline,
     setCommandPaletteOpen,
     selectNode,
     selectAllNodes,
@@ -298,6 +305,11 @@ export const App: React.FC = () => {
 
   const project = projects.find((p) => p.id === activeProjectId);
   const active = getActiveSlotFromProject(project, activeLayerIndex);
+
+  const activeDiffResult = useMemo(() => {
+    if (!diffBaseline || !active) return null;
+    return computeSlotDiff(diffBaseline.slot, active.slot);
+  }, [diffBaseline, active]);
 
   if (!project || !active) {
     return (
@@ -403,6 +415,9 @@ export const App: React.FC = () => {
               flowPickEdgeMode={flowPickEdgeMode}
               onFlowPickEdge={addFlowStepFromEdge}
               onCancelFlowPickEdge={() => setFlowPickEdgeMode(false)}
+              diffResult={activeDiffResult}
+              diffBaselineLabel={diffBaseline?.label ?? null}
+              onExitDiff={clearDiffBaseline}
             />
           </ReactFlowProvider>
         </main>

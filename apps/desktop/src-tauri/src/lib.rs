@@ -14,6 +14,15 @@ pub struct WorkspaceFiles {
     pub files: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GitCommitInfo {
+    pub hash: String,
+    pub short_hash: String,
+    pub message: String,
+    pub author: String,
+    pub date: String,
+}
+
 struct WatcherInner {
     generation: u64,
     last_self_write: Option<Instant>,
@@ -328,6 +337,104 @@ fn download_and_launch_installer(url: String, file_name: String) -> Result<Strin
     Ok(target_str)
 }
 
+fn is_safe_git_ref(commit: &str) -> bool {
+    !commit.is_empty()
+        && !commit.starts_with('-')
+        && commit.len() <= 80
+        && commit
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '~' | '^'))
+}
+
+#[tauri::command]
+fn git_list_commits(root: String, limit: Option<usize>) -> Result<Vec<GitCommitInfo>, String> {
+    let root_path = Path::new(&root);
+    if !root_path.exists() {
+        return Ok(Vec::new());
+    }
+    let count = limit.unwrap_or(15).clamp(1, 50);
+    let output = Command::new("git")
+        .args([
+            "-C",
+            &root,
+            "log",
+            "-n",
+            &count.to_string(),
+            "--format=%H\x1f%h\x1f%s\x1f%an\x1f%cr",
+            "--",
+            ".",
+        ])
+        .output();
+
+    let Ok(output) = output else {
+        return Ok(Vec::new());
+    };
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut commits = Vec::new();
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.split('\x1f').collect();
+        if parts.len() >= 5 {
+            commits.push(GitCommitInfo {
+                hash: parts[0].to_string(),
+                short_hash: parts[1].to_string(),
+                message: parts[2].to_string(),
+                author: parts[3].to_string(),
+                date: parts[4].to_string(),
+            });
+        }
+    }
+    Ok(commits)
+}
+
+#[tauri::command]
+fn git_read_file_at_commit(
+    root: String,
+    commit: String,
+    relative_path: String,
+) -> Result<String, String> {
+    if !is_safe_git_ref(&commit) {
+        return Err("非法的 Git 提交引用".to_string());
+    }
+    let _ = resolve_safe_path(&root, &relative_path)?;
+    let rel_unix = relative_path.replace('\\', "/");
+
+    // Resolve subdirectory prefix if workspace sits inside a larger Git repository
+    let prefix_out = Command::new("git")
+        .args(["-C", &root, "rev-parse", "--show-prefix"])
+        .output()
+        .map_err(|e| format!("无法调用 Git: {e}"))?;
+    let prefix = if prefix_out.status.success() {
+        String::from_utf8_lossy(&prefix_out.stdout)
+            .trim()
+            .replace('\\', "/")
+    } else {
+        String::new()
+    };
+
+    let git_path = if prefix.is_empty() {
+        rel_unix
+    } else {
+        format!("{}{}", prefix.trim_end_matches('/'), format!("/{rel_unix}"))
+    };
+    let spec = format!("{commit}:{git_path}");
+
+    let output = Command::new("git")
+        .args(["-C", &root, "show", &spec])
+        .output()
+        .map_err(|e| format!("读取 Git 历史文件失败: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("该提交中不存在对应 .arch 文件: {}", stderr.trim()));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -342,7 +449,9 @@ pub fn run() {
             unwatch_workspace_dir,
             save_export_file,
             open_external_url,
-            download_and_launch_installer
+            download_and_launch_installer,
+            git_list_commits,
+            git_read_file_at_commit
         ])
         .run(tauri::generate_context!())
         .expect("error while running DevDraw desktop application");

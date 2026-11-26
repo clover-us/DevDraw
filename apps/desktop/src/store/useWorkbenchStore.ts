@@ -21,6 +21,7 @@ import {
   parseArchDsl,
   patchEdgeInDsl,
   patchEntityInDsl,
+  resolveSlotArchFilePath,
   sanitizeDslId,
   serializeSlotToDsl,
   syncFlowsInDsl,
@@ -47,7 +48,7 @@ import {
   type SemanticColor,
   type SubCanvasEngine,
 } from '@devdraw/core';
-import { storageAdapter } from '../storage/adapter';
+import { isTauriRuntime, storageAdapter } from '../storage/adapter';
 import {
   checkForAppUpdate,
   downloadAndInstallUpdate,
@@ -57,6 +58,21 @@ import {
 export type LeftActivityTab = 'palette' | 'layers' | 'flows' | 'dsl' | 'tools' | 'versions';
 export type SettingsTab = 'general' | 'workspace' | 'flow' | 'updates';
 export type UpdateCheckState = 'idle' | 'checking' | 'available' | 'up-to-date' | 'error';
+
+export interface DiffBaseline {
+  label: string;
+  source: 'snapshot' | 'layer' | 'git';
+  sourceId: string;
+  slot: Pick<CanvasSlot, 'id' | 'name' | 'nodes' | 'edges'>;
+}
+
+export interface GitCommitSummary {
+  hash: string;
+  short_hash: string;
+  message: string;
+  author: string;
+  date: string;
+}
 export type SaveState = 'saved' | 'saving' | 'error';
 
 interface HistoryEntry {
@@ -109,6 +125,9 @@ interface WorkbenchState {
   updateInfo: UpdateCheckResult | null;
   updateError: string | null;
   updateInstalling: boolean;
+
+  // Visual Architecture Diff state
+  diffBaseline: DiffBaseline | null;
 
   // Undo/Redo per active slot
   history: HistoryEntry[];
@@ -230,9 +249,14 @@ interface WorkbenchState {
   // DSL bidirectional sync
   applyDslSource: (source: string) => void;
 
-  // Versions
+  // Versions & Visual Diff
   createLayerVersion: (label?: string) => void;
   restoreLayerVersion: (versionId: string) => void;
+  deleteLayerVersion: (versionId: string) => void;
+  startDiffWithSnapshot: (versionId: string) => void;
+  startDiffWithLayer: (layerIndex: number) => void;
+  startDiffWithGitCommit: (commitHash: string, shortLabel: string) => Promise<void>;
+  clearDiffBaseline: () => void;
 
   // Undo/Redo
   undo: () => void;
@@ -382,6 +406,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
     updateInfo: null,
     updateError: null,
     updateInstalling: false,
+    diffBaseline: null,
 
     history: [],
     historyIndex: -1,
@@ -439,6 +464,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         flowStepIndex: -1,
         isFlowPlaying: false,
         flowPickEdgeMode: false,
+        diffBaseline: null,
         dslDiagnostics: [],
         history: initialHistory,
         historyIndex: initialHistory.length - 1,
@@ -454,6 +480,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         leftTab: null,
         simulating: false,
         isFlowPlaying: false,
+        diffBaseline: null,
       });
     },
 
@@ -691,6 +718,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         flowStepIndex: -1,
         isFlowPlaying: false,
         flowPickEdgeMode: false,
+        diffBaseline: null,
         dslDiagnostics: [],
         history,
         historyIndex: history.length - 1,
@@ -725,6 +753,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         selectedNodeId: null,
         selectedEdgeId: null,
         flowPickEdgeMode: false,
+        diffBaseline: null,
         dslDiagnostics: [],
         history,
         historyIndex: history.length - 1,
@@ -2560,10 +2589,121 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => {
         active.slot.dslSource = serializeSlotToDsl(active.slot);
         return copy;
       });
-      set({ projects: next, selectedNodeId: null, selectedEdgeId: null });
+      set({ projects: next, selectedNodeId: null, selectedEdgeId: null, diffBaseline: null });
       pushHistoryForCurrent(next);
       void persist(next);
       get().showToast('已恢复选定快照（支持 Ctrl+Z 撤销）');
+    },
+
+    deleteLayerVersion(versionId) {
+      const currentDiff = get().diffBaseline;
+      const next = get().projects.map((p) => {
+        if (p.id !== get().activeProjectId) return p;
+        const copy = clone(p);
+        const active = getActiveSlotFromProject(copy, get().activeLayerIndex);
+        if (!active) return p;
+        active.layer.versions = (active.layer.versions ?? []).filter((v) => v.id !== versionId);
+        return copy;
+      });
+      set({
+        projects: next,
+        diffBaseline:
+          currentDiff?.source === 'snapshot' && currentDiff.sourceId === versionId
+            ? null
+            : currentDiff,
+      });
+      void persist(next);
+      get().showToast('已删除版本快照');
+    },
+
+    startDiffWithSnapshot(versionId) {
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
+      if (!active) return;
+      const ver = active.layer.versions?.find((v) => v.id === versionId);
+      if (!ver) return;
+      set({
+        simulating: false,
+        isFlowPlaying: false,
+        diffBaseline: {
+          label: `快照 · ${ver.name}`,
+          source: 'snapshot',
+          sourceId: ver.id,
+          slot: clone(ver.snapshot),
+        },
+      });
+      get().showToast(`已开启可视化对比：当前画布 vs ${ver.name}`);
+    },
+
+    startDiffWithLayer(layerIndex) {
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      const target = getActiveSlotFromProject(proj, layerIndex);
+      if (!target) return;
+      set({
+        simulating: false,
+        isFlowPlaying: false,
+        diffBaseline: {
+          label: `推演层 · ${target.layer.name}`,
+          source: 'layer',
+          sourceId: target.layer.id,
+          slot: {
+            id: target.slot.id,
+            name: target.slot.name,
+            nodes: clone(target.slot.nodes),
+            edges: clone(target.slot.edges),
+          },
+        },
+      });
+      get().showToast(`已开启跨层对比：当前画布 vs 「${target.layer.name}」`);
+    },
+
+    async startDiffWithGitCommit(commitHash, shortLabel) {
+      const proj = get().projects.find((p) => p.id === get().activeProjectId);
+      const active = getActiveSlotFromProject(proj, get().activeLayerIndex);
+      if (!proj || !active || !proj.workspacePath) {
+        get().showToast('请先将项目绑定到本地 Git 工作区目录');
+        return;
+      }
+      if (!isTauriRuntime()) {
+        get().showToast('Git 历史提交对比需要在 Tauri 桌面端运行');
+        return;
+      }
+      const relPath = resolveSlotArchFilePath(proj, get().activeLayerIndex);
+      if (!relPath) {
+        get().showToast('无法定位当前层的 .arch 文件路径');
+        return;
+      }
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const content = await invoke<string>('git_read_file_at_commit', {
+          root: proj.workspacePath,
+          commit: commitHash,
+          relativePath: relPath,
+        });
+        const parsed = parseArchDsl(content, active.slot.nodes, active.slot.edges);
+        set({
+          simulating: false,
+          isFlowPlaying: false,
+          diffBaseline: {
+            label: `Git · ${shortLabel}`,
+            source: 'git',
+            sourceId: commitHash,
+            slot: {
+              id: `git-${commitHash}`,
+              name: shortLabel,
+              nodes: parsed.nodes,
+              edges: parsed.edges,
+            },
+          },
+        });
+        get().showToast(`已加载 Git 提交 ${shortLabel} 进行可视化对比`);
+      } catch (err) {
+        get().showToast(err instanceof Error ? err.message : String(err));
+      }
+    },
+
+    clearDiffBaseline() {
+      set({ diffBaseline: null });
     },
 
     undo() {

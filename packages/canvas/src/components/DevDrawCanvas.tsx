@@ -26,6 +26,7 @@ import {
   Database,
   Expand,
   GitCommitHorizontal,
+  GitCompareArrows,
   Group,
   LayoutGrid,
   ListFilter,
@@ -59,6 +60,7 @@ import {
   type LayerTemplateName,
   type PortSide,
   type RelationEdge,
+  type SlotDiffResult,
 } from '@devdraw/core';
 import {
   DevDrawNodeComponent,
@@ -174,6 +176,9 @@ export interface DevDrawCanvasProps {
   flowPickEdgeMode?: boolean;
   onFlowPickEdge?: (edgeId: string) => void;
   onCancelFlowPickEdge?: () => void;
+  diffResult?: SlotDiffResult | null;
+  diffBaselineLabel?: string | null;
+  onExitDiff?: () => void;
 }
 
 export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
@@ -248,6 +253,9 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
   flowPickEdgeMode = false,
   onFlowPickEdge,
   onCancelFlowPickEdge,
+  diffResult = null,
+  diffBaselineLabel = null,
+  onExitDiff,
 }) => {
   const { zoomIn, zoomOut, fitView, setCenter, screenToFlowPosition } = useReactFlow();
   const isLight = theme === 'light';
@@ -345,51 +353,94 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
     return s;
   }, [selectedNodeId, selectedNodeIds]);
 
-  const computedNodes: DevDrawFlowNode[] = useMemo(
-    () =>
-      slot.nodes.map((entity) => {
-        let flowState: 'idle' | 'active' | 'dimmed' = 'idle';
-        if (activeStep) {
-          flowState =
-            activeStep.from === entity.id || activeStep.to === entity.id ? 'active' : 'dimmed';
+  const computedNodes: DevDrawFlowNode[] = useMemo(() => {
+    const addedNodeSet = diffResult ? new Set(diffResult.addedNodeIds) : null;
+    const baseNodes: DevDrawFlowNode[] = slot.nodes.map((entity) => {
+      let flowState: 'idle' | 'active' | 'dimmed' = 'idle';
+      if (activeStep) {
+        flowState =
+          activeStep.from === entity.id || activeStep.to === entity.id ? 'active' : 'dimmed';
+      }
+      let diffState: 'added' | 'modified' | 'removed' | 'unchanged' | undefined;
+      let diffSummary: string | undefined;
+      if (diffResult) {
+        if (addedNodeSet?.has(entity.id)) {
+          diffState = 'added';
+          diffSummary = '相对基准新增的实体';
+        } else if (diffResult.modifiedNodes[entity.id]) {
+          diffState = 'modified';
+          diffSummary = diffResult.modifiedNodes[entity.id].summary;
+        } else {
+          diffState = 'unchanged';
         }
-        const isGroup = isGroupEntity(entity);
-        return {
-          id: entity.id,
-          type: 'devdraw',
-          position: { x: entity.x, y: entity.y },
-          zIndex: isGroup ? -1 : 1,
-          style: isGroup ? { width: entity.w ?? 420, height: entity.h ?? 280 } : undefined,
-          selected: selectedIdSet.has(entity.id) || entity.id === connectSourceId,
-          data: {
-            entity,
-            kindStyle: kindStyles?.[entity.kind],
-            theme,
-            expandMode,
-            compactMode,
-            relatedFields: Array.from(relatedFieldsByNode.get(entity.id) ?? []),
-            flowState,
-            onToggleCollapse: onToggleNodeCollapse,
-            onDrillDown,
-            onResizeNode,
-          },
-        };
-      }),
-    [
-      slot.nodes,
-      kindStyles,
-      selectedIdSet,
-      connectSourceId,
-      theme,
-      expandMode,
-      compactMode,
-      relatedFieldsByNode,
-      activeStep,
-      onToggleNodeCollapse,
-      onDrillDown,
-      onResizeNode,
-    ]
-  );
+      }
+      const isGroup = isGroupEntity(entity);
+      return {
+        id: entity.id,
+        type: 'devdraw',
+        position: { x: entity.x, y: entity.y },
+        zIndex: isGroup ? -1 : 1,
+        style: isGroup ? { width: entity.w ?? 420, height: entity.h ?? 280 } : undefined,
+        selected: selectedIdSet.has(entity.id) || entity.id === connectSourceId,
+        data: {
+          entity,
+          kindStyle: kindStyles?.[entity.kind],
+          theme,
+          expandMode,
+          compactMode,
+          relatedFields: Array.from(relatedFieldsByNode.get(entity.id) ?? []),
+          flowState,
+          diffState,
+          diffSummary,
+          onToggleCollapse: onToggleNodeCollapse,
+          onDrillDown,
+          onResizeNode,
+        },
+      };
+    });
+
+    if (!diffResult || diffResult.removedNodes.length === 0) {
+      return baseNodes;
+    }
+
+    const ghostNodes: DevDrawFlowNode[] = diffResult.removedNodes.map((ghost) => ({
+      id: ghost.id,
+      type: 'devdraw',
+      position: { x: ghost.x, y: ghost.y },
+      zIndex: 0,
+      draggable: false,
+      selectable: false,
+      connectable: false,
+      selected: false,
+      data: {
+        entity: ghost,
+        kindStyle: kindStyles?.[ghost.kind],
+        theme,
+        expandMode,
+        compactMode,
+        relatedFields: [],
+        flowState: 'idle',
+        diffState: 'removed',
+        diffSummary: '相对基准已移除的实体（幽灵对照视图）',
+      },
+    }));
+
+    return [...baseNodes, ...ghostNodes];
+  }, [
+    slot.nodes,
+    kindStyles,
+    selectedIdSet,
+    connectSourceId,
+    theme,
+    expandMode,
+    compactMode,
+    relatedFieldsByNode,
+    activeStep,
+    diffResult,
+    onToggleNodeCollapse,
+    onDrillDown,
+    onResizeNode,
+  ]);
 
   const [localNodes, setLocalNodes] = useState<DevDrawFlowNode[]>(computedNodes);
 
@@ -429,72 +480,111 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
     return map;
   }, [localNodes]);
 
-  const rfEdges: DevDrawFlowEdge[] = useMemo(
-    () =>
-      slot.edges.map((relation: RelationEdge) => {
-        let flowState: 'idle' | 'active' | 'dimmed' = 'idle';
-        if (activeStep) {
-          const hit =
-            activeStep.edgeId === relation.id ||
-            (activeStep.from === relation.from && activeStep.to === relation.to);
-          flowState = hit ? 'active' : 'dimmed';
-        }
+  const rfEdges: DevDrawFlowEdge[] = useMemo(() => {
+    const addedEdgeSet = diffResult ? new Set(diffResult.addedEdgeIds) : null;
+    const modifiedEdgeSet = diffResult ? new Set(diffResult.modifiedEdgeIds) : null;
 
-        const sourceMounted =
-          relation.fromField && mountedFieldsByNode.get(relation.from)?.has(relation.fromField);
-        const targetMounted =
-          relation.toField && mountedFieldsByNode.get(relation.to)?.has(relation.toField);
+    const currentEdges: DevDrawFlowEdge[] = slot.edges.map((relation: RelationEdge) => {
+      let flowState: 'idle' | 'active' | 'dimmed' = 'idle';
+      if (activeStep) {
+        const hit =
+          activeStep.edgeId === relation.id ||
+          (activeStep.from === relation.from && activeStep.to === relation.to);
+        flowState = hit ? 'active' : 'dimmed';
+      }
+      let diffState: 'added' | 'modified' | 'removed' | 'unchanged' | undefined;
+      if (diffResult) {
+        if (addedEdgeSet?.has(relation.id)) diffState = 'added';
+        else if (modifiedEdgeSet?.has(relation.id)) diffState = 'modified';
+        else diffState = 'unchanged';
+      }
 
-        const autoPorts = pickClosestPorts(
-          localNodePosMap.get(relation.from),
-          localNodePosMap.get(relation.to)
-        );
-        const resolvedSourceHandle = sourceMounted
-          ? toFieldSourceHandle(relation.fromField!)
-          : relation.sourcePort ?? autoPorts.source;
-        const resolvedTargetHandle = targetMounted
-          ? toFieldTargetHandle(relation.toField!)
-          : relation.targetPort ?? autoPorts.target;
+      const sourceMounted =
+        relation.fromField && mountedFieldsByNode.get(relation.from)?.has(relation.fromField);
+      const targetMounted =
+        relation.toField && mountedFieldsByNode.get(relation.to)?.has(relation.toField);
 
-        return {
-          id: relation.id,
-          source: relation.from,
-          target: relation.to,
-          sourceHandle: resolvedSourceHandle,
-          targetHandle: resolvedTargetHandle,
-          type: 'devdraw',
-          selected: relation.id === selectedEdgeId,
-          data: {
-            relation,
-            theme,
-            isSelected: relation.id === selectedEdgeId,
-            simulating,
-            flowState,
-            isEditingLabel: editingEdgeId === relation.id,
-            onSelectEdge,
-            onOpenInspector: onOpenEdgeInspector,
-            onCommitLabel: handleCommitEdgeLabel,
-            onCancelEditLabel: handleCancelEditEdgeLabel,
-            onUpdateWaypoints: (edgeId, pts) => onUpdateEdgeWaypoints(edgeId, pts),
-          },
-        };
-      }),
-    [
-      slot.edges,
-      localNodePosMap,
-      selectedEdgeId,
-      theme,
-      simulating,
-      activeStep,
-      mountedFieldsByNode,
-      editingEdgeId,
-      onSelectEdge,
-      onOpenEdgeInspector,
-      handleCommitEdgeLabel,
-      handleCancelEditEdgeLabel,
-      onUpdateEdgeWaypoints,
-    ]
-  );
+      const autoPorts = pickClosestPorts(
+        localNodePosMap.get(relation.from),
+        localNodePosMap.get(relation.to)
+      );
+      const resolvedSourceHandle = sourceMounted
+        ? toFieldSourceHandle(relation.fromField!)
+        : relation.sourcePort ?? autoPorts.source;
+      const resolvedTargetHandle = targetMounted
+        ? toFieldTargetHandle(relation.toField!)
+        : relation.targetPort ?? autoPorts.target;
+
+      return {
+        id: relation.id,
+        source: relation.from,
+        target: relation.to,
+        sourceHandle: resolvedSourceHandle,
+        targetHandle: resolvedTargetHandle,
+        type: 'devdraw',
+        selected: relation.id === selectedEdgeId,
+        data: {
+          relation,
+          theme,
+          isSelected: relation.id === selectedEdgeId,
+          simulating,
+          flowState,
+          diffState,
+          isEditingLabel: editingEdgeId === relation.id,
+          onSelectEdge,
+          onOpenInspector: onOpenEdgeInspector,
+          onCommitLabel: handleCommitEdgeLabel,
+          onCancelEditLabel: handleCancelEditEdgeLabel,
+          onUpdateWaypoints: (edgeId, pts) => onUpdateEdgeWaypoints(edgeId, pts),
+        },
+      };
+    });
+
+    if (!diffResult || diffResult.removedEdges.length === 0) {
+      return currentEdges;
+    }
+
+    const ghostEdges: DevDrawFlowEdge[] = diffResult.removedEdges.map((ghostEdge) => {
+      const autoPorts = pickClosestPorts(
+        localNodePosMap.get(ghostEdge.from),
+        localNodePosMap.get(ghostEdge.to)
+      );
+      return {
+        id: ghostEdge.id,
+        source: ghostEdge.from,
+        target: ghostEdge.to,
+        sourceHandle: ghostEdge.sourcePort ?? autoPorts.source,
+        targetHandle: ghostEdge.targetPort ?? autoPorts.target,
+        type: 'devdraw',
+        selectable: false,
+        data: {
+          relation: ghostEdge,
+          theme,
+          isSelected: false,
+          simulating: false,
+          flowState: 'idle',
+          diffState: 'removed',
+        },
+      };
+    });
+
+    return [...currentEdges, ...ghostEdges];
+  }, [
+    slot.edges,
+    localNodePosMap,
+    selectedEdgeId,
+    theme,
+    simulating,
+    activeStep,
+    diffResult,
+    mountedFieldsByNode,
+    editingEdgeId,
+    onSelectEdge,
+    onOpenEdgeInspector,
+    handleCommitEdgeLabel,
+    handleCancelEditEdgeLabel,
+    onUpdateEdgeWaypoints,
+  ]);
 
   const handleConnect = useCallback(
     (conn: Connection) => {
@@ -877,8 +967,51 @@ export const DevDrawCanvas: React.FC<DevDrawCanvasProps> = ({
         onDeleteEdge={onDeleteEdge}
       />
 
+      {/* Visual Architecture Diff Floating Summary Banner */}
+      {diffResult && (
+        <div
+          className={`absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 px-3.5 py-1.5 rounded-full border backdrop-blur-xl shadow-2xl text-xs select-none ${
+            isLight
+              ? 'bg-white/95 border-amber-300 text-slate-800'
+              : 'bg-[#1a1524]/95 border-amber-400/45 text-zinc-100'
+          }`}
+        >
+          <GitCompareArrows className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <span className="font-medium truncate max-w-[180px]">
+            对比：{diffBaselineLabel || '基准版本'}
+          </span>
+          <div className="h-3.5 w-px bg-white/15" />
+          {diffResult.stats.hasChanges ? (
+            <div className="flex items-center gap-2 font-mono text-[11px]">
+              <span className="text-emerald-400">
+                +{diffResult.stats.addedNodes + diffResult.stats.addedEdges} 新增
+              </span>
+              <span className="text-amber-300">
+                ~{diffResult.stats.modifiedNodes + diffResult.stats.modifiedEdges} 变更
+              </span>
+              <span className="text-rose-400">
+                -{diffResult.stats.removedNodes + diffResult.stats.removedEdges} 移除
+              </span>
+            </div>
+          ) : (
+            <span className="text-emerald-400 font-mono text-[11px]">语义完全一致</span>
+          )}
+          {onExitDiff && (
+            <button
+              type="button"
+              onClick={onExitDiff}
+              title="退出对比模式 (Esc)"
+              className="ml-0.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/[0.08] hover:bg-white/[0.15] text-[11px] text-zinc-200 transition-colors"
+            >
+              <X className="w-3 h-3" />
+              <span>退出</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Multi-selection Alignment, Distribution & Group Floating Toolbar */}
-      {!flowPickEdgeMode && activeTool === 'select' && selectedNodeIds.length >= 2 && (
+      {!diffResult && !flowPickEdgeMode && activeTool === 'select' && selectedNodeIds.length >= 2 && (
         <div
           className={`absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 px-2.5 py-1.5 rounded-2xl border backdrop-blur-xl shadow-2xl text-xs select-none ${
             isLight

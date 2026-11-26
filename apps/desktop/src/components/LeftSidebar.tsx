@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Blocks,
   Box,
@@ -6,6 +6,8 @@ import {
   Code2,
   Database,
   Eraser,
+  GitBranch,
+  GitCompareArrows,
   GripVertical,
   History,
   Layers,
@@ -16,11 +18,13 @@ import {
   PanelLeftOpen,
   Pencil,
   Plus,
+  RefreshCw,
   RotateCcw,
   Route,
   Search,
   Trash2,
   Wand2,
+  X,
   Zap,
 } from 'lucide-react';
 import {
@@ -32,7 +36,13 @@ import {
   type SemanticColor,
 } from '@devdraw/core';
 import { ENTITY_ICON_MAP } from '@devdraw/canvas';
-import { getActiveSlotFromProject, useWorkbenchStore, type LeftActivityTab } from '../store/useWorkbenchStore';
+import { isTauriRuntime } from '../storage/adapter';
+import {
+  getActiveSlotFromProject,
+  useWorkbenchStore,
+  type GitCommitSummary,
+  type LeftActivityTab,
+} from '../store/useWorkbenchStore';
 import { FlowEditorPanel } from './FlowEditorPanel';
 
 const PALETTE_COLOR_MAP: Record<SemanticColor, { box: string; badge: string }> = {
@@ -68,15 +78,50 @@ export const LeftSidebar: React.FC = () => {
     clearFreehandStrokes,
     createLayerVersion,
     restoreLayerVersion,
+    deleteLayerVersion,
+    diffBaseline,
+    startDiffWithSnapshot,
+    startDiffWithLayer,
+    startDiffWithGitCommit,
+    clearDiffBaseline,
   } = useWorkbenchStore();
 
   const [paletteQuery, setPaletteQuery] = useState('');
   const [hoveredItem, setHoveredItem] = useState<PrimitiveItem | null>(null);
   const [renamingSubKey, setRenamingSubKey] = useState<string | null>(null);
   const [subDraftName, setSubDraftName] = useState('');
+  const [snapshotName, setSnapshotName] = useState('');
+  const [gitCommits, setGitCommits] = useState<GitCommitSummary[]>([]);
+  const [gitLoading, setGitLoading] = useState(false);
 
   const project = projects.find((p) => p.id === activeProjectId);
   const active = getActiveSlotFromProject(project, activeLayerIndex);
+
+  const refreshGitCommits = useCallback(async () => {
+    if (!project?.workspacePath || !isTauriRuntime()) {
+      setGitCommits([]);
+      return;
+    }
+    setGitLoading(true);
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const list = await invoke<GitCommitSummary[]>('git_list_commits', {
+        root: project.workspacePath,
+        limit: 12,
+      });
+      setGitCommits(list);
+    } catch {
+      setGitCommits([]);
+    } finally {
+      setGitLoading(false);
+    }
+  }, [project?.workspacePath]);
+
+  useEffect(() => {
+    if (leftTab === 'versions' && project?.workspacePath) {
+      void refreshGitCommits();
+    }
+  }, [leftTab, project?.workspacePath, refreshGitCommits]);
 
   const paletteConfig = useMemo(() => {
     if (!active) return null;
@@ -539,12 +584,14 @@ export const LeftSidebar: React.FC = () => {
               <div className="p-3 rounded-xl bg-white/[0.02] border border-[var(--dd-border-subtle)] text-[11px] text-[var(--dd-text-secondary)] space-y-1.5">
                 <div className="font-medium text-[var(--dd-text-primary)]">常用快捷键</div>
                 <div className="flex justify-between"><span>全局命令面板</span><span className="font-mono">Ctrl+K</span></div>
+                <div className="flex justify-between"><span>新建下游 / 同级节点</span><span className="font-mono">Tab / Enter</span></div>
                 <div className="flex justify-between"><span>全选 / 复制 / 粘贴</span><span className="font-mono">Ctrl+A / C / V</span></div>
                 <div className="flex justify-between"><span>框选多选实体</span><span className="font-mono">Shift+拖拽</span></div>
                 <div className="flex justify-between"><span>仅移动分组边框</span><span className="font-mono">Alt+拖拽分组</span></div>
                 <div className="flex justify-between"><span>选择 / 连线 / 落绘</span><span className="font-mono">V / L / P</span></div>
                 <div className="flex justify-between"><span>图码双向分屏</span><span className="font-mono">Ctrl+\</span></div>
                 <div className="flex justify-between"><span>ELK 自动布局</span><span className="font-mono">Ctrl+L</span></div>
+                <div className="flex justify-between"><span>应用设置</span><span className="font-mono">Ctrl+,</span></div>
                 <div className="flex justify-between"><span>撤销 / 重做</span><span className="font-mono">Ctrl+Z / Y</span></div>
                 <div className="flex justify-between"><span>删除选中元素</span><span className="font-mono">Del</span></div>
                 <div className="flex justify-between"><span>链路演播推进</span><span className="font-mono">← / →</span></div>
@@ -553,49 +600,220 @@ export const LeftSidebar: React.FC = () => {
           )}
 
           {leftTab === 'versions' && (
-            <div className="flex-1 flex flex-col min-h-0 p-3">
-              <div className="flex items-center justify-between mb-2.5">
-                <span className="text-[11px] font-mono font-semibold uppercase tracking-wider">版本快照</span>
-                <button
-                  type="button"
-                  onClick={() => createLayerVersion()}
-                  className="inline-flex items-center gap-1 px-2 h-6 rounded-md bg-violet-500/20 border border-violet-400/35 text-[10px] text-violet-300 hover:bg-violet-500/30"
-                >
-                  <Plus className="w-3 h-3" />
-                  <span>新建快照</span>
-                </button>
+            <div className="flex-1 flex flex-col min-h-0 p-3 space-y-3 overflow-y-auto">
+              {/* Active Diff Status Banner */}
+              {diffBaseline && (
+                <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-400/35 space-y-1.5 shrink-0">
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="inline-flex items-center gap-1.5 text-amber-300 font-medium truncate">
+                      <GitCompareArrows className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{diffBaseline.label}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={clearDiffBaseline}
+                      title="退出对比模式"
+                      className="p-0.5 rounded hover:bg-white/10 text-amber-200 shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="text-[10px] text-zinc-400 leading-relaxed">
+                    绿框 = 新增 · 琥珀 = 变更 · 红色虚线 = 已移除
+                  </div>
+                </div>
+              )}
+
+              {/* Create Named Snapshot */}
+              <div className="space-y-1.5 shrink-0">
+                <span className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[var(--dd-text-secondary)]">
+                  命名版本快照
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={snapshotName}
+                    onChange={(e) => setSnapshotName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        createLayerVersion(snapshotName.trim() || undefined);
+                        setSnapshotName('');
+                      }
+                    }}
+                    placeholder="如：v1 单体方案 / v2 拆库"
+                    className="flex-1 min-w-0 h-7 px-2 rounded-lg bg-black/20 border border-[var(--dd-border-subtle)] focus:border-violet-400 focus:outline-none text-[11px]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      createLayerVersion(snapshotName.trim() || undefined);
+                      setSnapshotName('');
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 h-7 rounded-lg bg-violet-600/85 hover:bg-violet-500 text-white text-[11px] font-medium shrink-0 transition-colors"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>保存</span>
+                  </button>
+                </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto space-y-2">
+              {/* Saved Snapshots List */}
+              <div className="space-y-1.5">
                 {(active.layer.versions ?? []).length === 0 ? (
-                  <div className="py-10 text-center text-[11px] text-[var(--dd-text-muted)]">
-                    暂无快照，点击右上角保存当前推演层状态
+                  <div className="py-5 px-3 rounded-xl border border-dashed border-[var(--dd-border-subtle)] text-center text-[11px] text-[var(--dd-text-muted)]">
+                    暂无快照，保存一个基准快照后即可在画布上开启可视化 Diff 对比
                   </div>
                 ) : (
-                  (active.layer.versions ?? []).map((ver) => (
-                    <div
-                      key={ver.id}
-                      className="p-2.5 rounded-xl bg-white/[0.03] border border-[var(--dd-border-subtle)] space-y-1.5"
-                    >
-                      <div className="flex items-center justify-between text-xs font-medium">
-                        <span>{ver.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => restoreLayerVersion(ver.id)}
-                          title="恢复到此快照"
-                          className="p-1 rounded hover:bg-violet-500/20 text-violet-300"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                        </button>
+                  (active.layer.versions ?? []).map((ver) => {
+                    const isDiffing =
+                      diffBaseline?.source === 'snapshot' && diffBaseline.sourceId === ver.id;
+                    return (
+                      <div
+                        key={ver.id}
+                        className={`p-2.5 rounded-xl border space-y-1.5 transition-colors ${
+                          isDiffing
+                            ? 'bg-amber-500/10 border-amber-400/45'
+                            : 'bg-white/[0.03] border-[var(--dd-border-subtle)]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1.5 text-xs font-medium">
+                          <span className="truncate">{ver.name}</span>
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                isDiffing ? clearDiffBaseline() : startDiffWithSnapshot(ver.id)
+                              }
+                              title={isDiffing ? '退出对比' : '与当前画布可视化 Diff 对比'}
+                              className={`p-1 rounded transition-colors ${
+                                isDiffing
+                                  ? 'bg-amber-500/25 text-amber-300'
+                                  : 'hover:bg-amber-500/20 text-amber-400'
+                              }`}
+                            >
+                              <GitCompareArrows className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => restoreLayerVersion(ver.id)}
+                              title="恢复到此快照"
+                              className="p-1 rounded hover:bg-violet-500/20 text-violet-300"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteLayerVersion(ver.id)}
+                              title="删除此快照"
+                              className="p-1 rounded hover:bg-rose-500/20 text-zinc-500 hover:text-rose-400"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="text-[10px] font-mono text-[var(--dd-text-muted)]">
+                          {ver.nodeCount} 实体 · {ver.edgeCount} 连线 ·{' '}
+                          {new Date(ver.createdAt).toLocaleTimeString().slice(0, 5)}
+                        </div>
                       </div>
-                      <div className="text-[10px] font-mono text-[var(--dd-text-muted)]">
-                        {ver.nodeCount} 实体 · {ver.edgeCount} 连线 ·{' '}
-                        {new Date(ver.createdAt).toLocaleTimeString().slice(0, 5)}
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
+
+              {/* Cross-Layer Scheme Diff */}
+              {project.layers.length > 1 && (
+                <div className="pt-2 border-t border-[var(--dd-border-subtle)] space-y-1.5">
+                  <span className="text-[10.5px] font-mono font-semibold uppercase tracking-wider text-[var(--dd-text-muted)]">
+                    跨层方案对比
+                  </span>
+                  <div className="space-y-1">
+                    {project.layers.map((layer, idx) => {
+                      if (idx === activeLayerIndex) return null;
+                      const isDiffing =
+                        diffBaseline?.source === 'layer' && diffBaseline.sourceId === layer.id;
+                      return (
+                        <button
+                          key={layer.id}
+                          type="button"
+                          onClick={() =>
+                            isDiffing ? clearDiffBaseline() : startDiffWithLayer(idx)
+                          }
+                          className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] transition-colors ${
+                            isDiffing
+                              ? 'bg-amber-500/15 border-amber-400/45 text-amber-200'
+                              : 'bg-white/[0.02] hover:bg-white/[0.06] border-[var(--dd-border-subtle)] text-[var(--dd-text-secondary)]'
+                          }`}
+                        >
+                          <span className="truncate">{layer.name}</span>
+                          <span className="text-[10px] font-mono text-amber-400 shrink-0">
+                            {isDiffing ? '对比中' : 'Diff'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Local Git Commit History Diff (Tauri Workspace) */}
+              {project.workspacePath && isTauriRuntime() && (
+                <div className="pt-2 border-t border-[var(--dd-border-subtle)] space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1 text-[10.5px] font-mono font-semibold uppercase tracking-wider text-[var(--dd-text-muted)]">
+                      <GitBranch className="w-3 h-3 text-emerald-400" />
+                      Git 提交历史对比
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void refreshGitCommits()}
+                      disabled={gitLoading}
+                      title="刷新 Git 提交历史"
+                      className="p-1 rounded hover:bg-white/[0.08] text-zinc-400 hover:text-emerald-300"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${gitLoading ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+
+                  {gitCommits.length === 0 ? (
+                    <div className="py-3 px-2.5 rounded-lg bg-white/[0.02] border border-[var(--dd-border-subtle)] text-[10.5px] text-[var(--dd-text-muted)]">
+                      {gitLoading ? '正在读取 Git 历史...' : '当前本地工作区目录尚未初始化 Git 提交'}
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {gitCommits.map((commit) => {
+                        const isDiffing =
+                          diffBaseline?.source === 'git' && diffBaseline.sourceId === commit.hash;
+                        return (
+                          <button
+                            key={commit.hash}
+                            type="button"
+                            onClick={() =>
+                              isDiffing
+                                ? clearDiffBaseline()
+                                : void startDiffWithGitCommit(
+                                    commit.hash,
+                                    `${commit.short_hash} ${commit.message.slice(0, 18)}`
+                                  )
+                            }
+                            className={`w-full text-left p-2 rounded-lg border transition-colors space-y-0.5 ${
+                              isDiffing
+                                ? 'bg-amber-500/15 border-amber-400/45'
+                                : 'bg-white/[0.02] hover:bg-white/[0.06] border-[var(--dd-border-subtle)]'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1.5 text-[11px]">
+                              <span className="font-mono text-emerald-300">{commit.short_hash}</span>
+                              <span className="text-[9.5px] text-zinc-500 truncate">{commit.date}</span>
+                            </div>
+                            <div className="text-[11px] text-zinc-200 truncate">{commit.message}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </aside>
